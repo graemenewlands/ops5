@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"ops5/pkg/conflict"
@@ -62,6 +63,23 @@ func (r *Runner) LoadTestCaseFromJSON(filePath string) (*TestCase, error) {
 	if err := json.Unmarshal(data, &tc); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal JSON test case %s: %w", filePath, err)
 	}
+
+	// Resolve SourceFile path relative to the test JSON file if needed
+	if tc.SourceFile != "" {
+		if _, err := os.Stat(tc.SourceFile); err != nil {
+			baseDir := filepath.Dir(filePath)
+			candidate1 := filepath.Join(baseDir, tc.SourceFile)
+			if _, err1 := os.Stat(candidate1); err1 == nil {
+				tc.SourceFile = candidate1
+			} else {
+				candidate2 := filepath.Join(baseDir, filepath.Base(tc.SourceFile))
+				if _, err2 := os.Stat(candidate2); err2 == nil {
+					tc.SourceFile = candidate2
+				}
+			}
+		}
+	}
+
 	return &tc, nil
 }
 

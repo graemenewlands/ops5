@@ -1,0 +1,425 @@
+package cli
+
+import (
+	"bufio"
+	"fmt"
+	"io"
+	"os"
+	"strconv"
+	"strings"
+
+	"ops5/pkg/conflict"
+	"ops5/pkg/engine"
+	"ops5/pkg/harness"
+	"ops5/pkg/model"
+	"ops5/pkg/parser"
+)
+
+// REPL provides an interactive command line interface for the OPS5 runtime.
+type REPL struct {
+	engine *engine.Engine
+	runner *harness.Runner
+	in     *bufio.Reader
+	out    io.Writer
+}
+
+// NewREPL creates a new REPL instance.
+func NewREPL(in io.Reader, out io.Writer) *REPL {
+	eng := engine.New()
+	eng.SetOutputWriter(out)
+	return &REPL{
+		engine: eng,
+		runner: harness.NewRunner(),
+		in:     bufio.NewReader(in),
+		out:    out,
+	}
+}
+
+// Engine returns the underlying engine.
+func (r *REPL) Engine() *engine.Engine {
+	return r.engine
+}
+
+// Start launches the interactive REPL loop.
+func (r *REPL) Start() {
+	fmt.Fprintln(r.out, "OPS5 Interactive Runtime (type 'help' for commands, 'exit' to quit)")
+
+	var multilineBuf strings.Builder
+	openParens := 0
+
+	for {
+		if openParens == 0 {
+			fmt.Fprint(r.out, "ops5> ")
+		} else {
+			fmt.Fprint(r.out, "...   ")
+		}
+
+		line, err := r.in.ReadString('\n')
+		if err != nil {
+			if err == io.EOF {
+				fmt.Fprintln(r.out, "\nGoodbye!")
+				return
+			}
+			fmt.Fprintf(r.out, "Input error: %v\n", err)
+			continue
+		}
+
+		line = strings.TrimRight(line, "\r\n")
+
+		// Count parentheses for multi-line inputs (e.g. multi-line rule definitions)
+		for _, ch := range line {
+			if ch == '(' {
+				openParens++
+			} else if ch == ')' {
+				openParens--
+			}
+		}
+
+		if multilineBuf.Len() > 0 {
+			multilineBuf.WriteString("\n")
+		}
+		multilineBuf.WriteString(line)
+
+		if openParens > 0 {
+			continue
+		}
+
+		input := strings.TrimSpace(multilineBuf.String())
+		multilineBuf.Reset()
+		openParens = 0
+
+		if input == "" {
+			continue
+		}
+
+		// Handle command
+		if r.handleCommand(input) {
+			break
+		}
+	}
+}
+
+// handleCommand returns true if the REPL should exit.
+func (r *REPL) handleCommand(input string) bool {
+	lower := strings.ToLower(input)
+	if lower == "exit" || lower == "quit" || lower == "(exit)" || lower == "(quit)" {
+		fmt.Fprintln(r.out, "Goodbye!")
+		return true
+	}
+
+	// 1. S-expression rule definition: (p ...)
+	if strings.HasPrefix(input, "(p ") || strings.HasPrefix(input, "(P ") {
+		r.handleDefineRule(input)
+		return false
+	}
+
+	// 2. S-expression make: (make ...)
+	if strings.HasPrefix(input, "(make ") || strings.HasPrefix(input, "(MAKE ") {
+		r.handleMake(input)
+		return false
+	}
+
+	// Strip outer parentheses for command convenience if present: e.g. (wm) -> wm
+	cmd := input
+	if strings.HasPrefix(cmd, "(") && strings.HasSuffix(cmd, ")") && !strings.Contains(cmd, "^") {
+		cmd = strings.TrimSpace(cmd[1 : len(cmd)-1])
+	}
+
+	parts := strings.Fields(cmd)
+	if len(parts) == 0 {
+		return false
+	}
+
+	switch strings.ToLower(parts[0]) {
+	case "help":
+		r.printHelp()
+
+	case "wm":
+		classFilter := ""
+		if len(parts) > 1 {
+			classFilter = parts[1]
+		}
+		r.printWorkingMemory(classFilter)
+
+	case "cs":
+		r.printConflictSet()
+
+	case "run":
+		maxCycles := 0
+		if len(parts) > 1 {
+			if n, err := strconv.Atoi(parts[1]); err == nil {
+				maxCycles = n
+			} else {
+				fmt.Fprintf(r.out, "Invalid cycle limit: %s\n", parts[1])
+				return false
+			}
+		}
+		r.runCycles(maxCycles)
+
+	case "step":
+		r.stepCycle()
+
+	case "make":
+		// Handle make without parentheses: make class ^attr val
+		r.handleMake("(" + input + ")")
+
+	case "remove":
+		if len(parts) < 2 {
+			fmt.Fprintln(r.out, "Usage: remove <timetag>")
+			return false
+		}
+		timetag, err := strconv.ParseInt(parts[1], 10, 64)
+		if err != nil {
+			fmt.Fprintf(r.out, "Invalid timetag: %s\n", parts[1])
+			return false
+		}
+		removed, err := r.engine.Remove(timetag)
+		if err != nil {
+			fmt.Fprintf(r.out, "Error: %v\n", err)
+		} else {
+			fmt.Fprintf(r.out, "Removed: %s\n", removed.String())
+		}
+
+	case "strategy":
+		if len(parts) == 1 {
+			fmt.Fprintf(r.out, "Current conflict resolution strategy: %s\n", r.engine.ConflictSet().Strategy().String())
+		} else {
+			strat := strings.ToUpper(parts[1])
+			if strat == "MEA" {
+				r.engine.SetStrategy(conflict.StrategyMEA)
+				fmt.Fprintln(r.out, "Strategy set to MEA (Means-Ends Analysis)")
+			} else if strat == "LEX" {
+				r.engine.SetStrategy(conflict.StrategyLEX)
+				fmt.Fprintln(r.out, "Strategy set to LEX (Lexicographic)")
+			} else {
+				fmt.Fprintln(r.out, "Unknown strategy. Valid options: LEX, MEA")
+			}
+		}
+
+	case "trace":
+		if len(parts) == 1 {
+			fmt.Fprintln(r.out, "Usage: trace on|off")
+		} else {
+			val := strings.ToLower(parts[1])
+			if val == "on" || val == "true" || val == "1" {
+				r.engine.SetTrace(true)
+				fmt.Fprintln(r.out, "Tracing enabled")
+			} else {
+				r.engine.SetTrace(false)
+				fmt.Fprintln(r.out, "Tracing disabled")
+			}
+		}
+
+	case "load":
+		if len(parts) < 2 {
+			fmt.Fprintln(r.out, "Usage: load <filepath.ops>")
+			return false
+		}
+		r.loadFile(parts[1])
+
+	case "test":
+		if len(parts) < 2 {
+			fmt.Fprintln(r.out, "Usage: test <testcase.json>")
+			return false
+		}
+		r.runTestCase(parts[1])
+
+	case "reset":
+		r.engine.WorkingMemory().Reset()
+		r.engine.ConflictSet().Reset()
+		fmt.Fprintln(r.out, "Working memory and conflict set reset.")
+
+	default:
+		fmt.Fprintf(r.out, "Unknown command: %s (type 'help' for command list)\n", parts[0])
+	}
+
+	return false
+}
+
+func (r *REPL) handleDefineRule(src string) {
+	p, err := parser.NewParser(src)
+	if err != nil {
+		fmt.Fprintf(r.out, "Parse error: %v\n", err)
+		return
+	}
+	rule, err := p.ParseRule()
+	if err != nil {
+		fmt.Fprintf(r.out, "Rule syntax error: %v\n", err)
+		return
+	}
+	r.engine.AddRule(rule)
+	fmt.Fprintf(r.out, "Defined rule '%s' (conditions=%d, specificity=%d)\n", rule.Name, len(rule.Conditions), rule.Specificity())
+}
+
+func (r *REPL) handleMake(src string) {
+	p, err := parser.NewParser(src)
+	if err != nil {
+		fmt.Fprintf(r.out, "Parse error: %v\n", err)
+		return
+	}
+	class, attrs, err := p.ParseMake()
+	if err != nil {
+		fmt.Fprintf(r.out, "Make syntax error: %v\n", err)
+		return
+	}
+	wme := r.engine.Make(class, attrs)
+	fmt.Fprintf(r.out, "Asserted: %s\n", wme.String())
+}
+
+func (r *REPL) printWorkingMemory(classFilter string) {
+	var wmes []*model.WME
+	if classFilter != "" {
+		wmes = r.engine.WorkingMemory().FindByClass(classFilter)
+	} else {
+		wmes = r.engine.WorkingMemory().All()
+	}
+
+	if len(wmes) == 0 {
+		fmt.Fprintln(r.out, "Working memory is empty.")
+		return
+	}
+
+	fmt.Fprintf(r.out, "Working Memory (%d elements):\n", len(wmes))
+	for _, w := range wmes {
+		fmt.Fprintf(r.out, "  %s\n", w.String())
+	}
+}
+
+func (r *REPL) printConflictSet() {
+	acts := r.engine.ConflictSet().All()
+	if len(acts) == 0 {
+		fmt.Fprintln(r.out, "Conflict set is empty.")
+		return
+	}
+
+	dom, _ := r.engine.ConflictSet().SelectDominant()
+
+	fmt.Fprintf(r.out, "Conflict Set (%d activations, strategy: %s):\n", len(acts), r.engine.ConflictSet().Strategy().String())
+	for i, act := range acts {
+		marker := "  "
+		if dom != nil && act.Key() == dom.Key() {
+			marker = "* " // Dominant activation
+		}
+		fmt.Fprintf(r.out, "%s%d. %s  WMEs: %v  (specificity: %d)\n", marker, i+1, act.Rule.Name, act.Timetags, act.Specificity())
+	}
+}
+
+func (r *REPL) stepCycle() {
+	dom, ok := r.engine.ConflictSet().SelectDominant()
+	if !ok {
+		fmt.Fprintln(r.out, "No activations in conflict set (quiescence).")
+		return
+	}
+
+	ruleName := dom.Rule.Name
+	timetags := dom.Timetags
+
+	fired, err := r.engine.Step()
+	if err != nil {
+		fmt.Fprintf(r.out, "Error during firing: %v\n", err)
+		return
+	}
+	if fired {
+		fmt.Fprintf(r.out, "Fired: %s with WMEs %v (Cycle %d)\n", ruleName, timetags, r.engine.CycleCount())
+	}
+}
+
+func (r *REPL) runCycles(maxCycles int) {
+	fmt.Fprintf(r.out, "Running (max cycles: %d)...\n", maxCycles)
+	cycles, err := r.engine.Run(maxCycles)
+	if err != nil {
+		fmt.Fprintf(r.out, "Execution error: %v\n", err)
+	}
+	if r.engine.IsHalted() {
+		fmt.Fprintf(r.out, "Execution halted by rule action after %d cycles.\n", cycles)
+	} else {
+		fmt.Fprintf(r.out, "Reached quiescence after %d cycles.\n", cycles)
+	}
+}
+
+// LoadFile reads and registers rules and make statements from an OPS5 source file.
+func (r *REPL) LoadFile(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("cannot read file %s: %w", path, err)
+	}
+
+	p, err := parser.NewParser(string(data))
+	if err != nil {
+		return err
+	}
+
+	rulesCount := 0
+	makesCount := 0
+
+	for {
+		rule, err := p.ParseRule()
+		if err == nil && rule != nil {
+			r.engine.AddRule(rule)
+			rulesCount++
+			continue
+		}
+
+		class, attrs, makeErr := p.ParseMake()
+		if makeErr == nil && class != "" {
+			r.engine.Make(class, attrs)
+			makesCount++
+			continue
+		}
+
+		break
+	}
+
+	fmt.Fprintf(r.out, "Loaded %s: added %d rules, asserted %d WMEs.\n", path, rulesCount, makesCount)
+	return nil
+}
+
+func (r *REPL) loadFile(path string) {
+	if err := r.LoadFile(path); err != nil {
+		fmt.Fprintf(r.out, "Load error: %v\n", err)
+	}
+}
+
+func (r *REPL) runTestCase(path string) {
+	tc, err := r.runner.LoadTestCaseFromJSON(path)
+	if err != nil {
+		fmt.Fprintf(r.out, "Error loading test case: %v\n", err)
+		return
+	}
+
+	fmt.Fprintf(r.out, "Running test case: %s\n", tc.Name)
+	res := r.runner.Run(tc)
+	if res.Passed {
+		fmt.Fprintf(r.out, "PASS: %s (ran %d cycles)\n", tc.Name, res.CyclesRan)
+		if res.Output != "" {
+			fmt.Fprintf(r.out, "Output:\n%s\n", res.Output)
+		}
+	} else {
+		fmt.Fprintf(r.out, "FAIL: %s (error: %v)\n", tc.Name, res.Error)
+		if res.Output != "" {
+			fmt.Fprintf(r.out, "Output:\n%s\n", res.Output)
+		}
+	}
+}
+
+func (r *REPL) printHelp() {
+	helpText := `
+Commands:
+  (p <name> ...)        Define a production rule (multiline supported)
+  make <cls> [^a v]     Assert a new Working Memory Element (e.g. make goal ^status active)
+  modify <tag> [^a v]   Modify attributes of an existing WME by timetag
+  remove <tag>          Retract a WME by its timetag
+  wm [class]            Display current working memory elements
+  cs                    Display conflict set (pending instantiations in salience order)
+  step                  Execute one Match-Resolve-Act cycle
+  run [N]               Run until quiescence, halt, or N cycles
+  strategy [lex|mea]    View or switch conflict resolution strategy
+  trace on|off          Toggle cycle execution tracing
+  load <file.ops>       Load and compile rules and makes from an OPS5 source file
+  test <file.json>      Execute an external test case file
+  reset                 Reset working memory and conflict set
+  help                  Show this help text
+  exit / quit           Exit the REPL
+`
+	fmt.Fprint(r.out, helpText)
+}

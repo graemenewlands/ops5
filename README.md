@@ -25,7 +25,57 @@ A minimal, robust, and idiomatic Go implementation of the classic **OPS5** produ
   - Automated test runner capable of executing test cases defined in Go, JSON, or standard OPS5 `.ops` files.
   - Ready to accept external test suites.
 
-## Directory Structure
+## CLI Usage
+
+### Build the Executable
+
+```bash
+go build -o ops5 ./cmd/ops5
+```
+
+### Interactive REPL
+
+Start the interactive REPL:
+
+```bash
+./ops5
+```
+
+Drop into the REPL with a file pre-loaded:
+
+```bash
+./ops5 -i tests/fixtures/simple_workflow.ops
+```
+
+Inside the REPL:
+- `(p rule-name ...)` — Define production rules interactively (multiline input supported).
+- `make <class> ^<attr> <val> ...` — Assert a new WME.
+- `modify <timetag> ^<attr> <val> ...` — Update an existing WME.
+- `remove <timetag>` — Retract a WME.
+- `wm [class]` — View working memory elements.
+- `cs` — View conflict set with active activations and dominance markers (`*`).
+- `step` — Fire one cycle.
+- `run [N]` — Run until quiescence, halt, or N cycles.
+- `strategy [lex|mea]` — View or switch conflict resolution strategy.
+- `trace on|off` — Toggle cycle-by-cycle rule execution tracing.
+- `load <file.ops>` — Load rules and makes from an OPS5 source file.
+- `test <file.json>` — Run an external test suite file.
+- `reset` — Clear working memory and conflict set.
+- `exit` or `quit` — Exit the REPL.
+
+### Non-Interactive & Batch Execution
+
+Execute a rule file to completion:
+
+```bash
+./ops5 -trace tests/fixtures/simple_workflow.ops
+```
+
+Run test suite files:
+
+```bash
+./ops5 test tests/fixtures/simple_workflow.json tests/fixtures/mea_lex.json
+```
 
 ```
 .
