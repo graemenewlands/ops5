@@ -1,0 +1,53 @@
+{
+  "name": "simple_workflow_test",
+  "description": "Validates full workflow using external .ops source file",
+  "strategy": "LEX",
+  "source_file": "fixtures/simple_workflow.ops",
+  "initial_wm": [
+    {
+      "class": "goal",
+      "attributes": {
+        "type": "batch",
+        "status": "start"
+      }
+    }
+  ],
+  "max_cycles": 10,
+  "expected_cycles": 4,
+  "expected_wm": [
+    {
+      "class": "goal",
+      "attributes": {
+        "type": "batch",
+        "status": "all-done"
+      }
+    },
+    {
+      "class": "item",
+      "attributes": {
+        "id": "101",
+        "status": "done"
+      }
+    },
+    {
+      "class": "item",
+      "attributes": {
+        "id": "102",
+        "status": "done"
+      }
+    }
+  ],
+  "forbidden_wm": [
+    {
+      "class": "item",
+      "attributes": {
+        "status": "pending"
+      }
+    }
+  ],
+  "expected_outputs": [
+    "Processed item 101",
+    "Processed item 102",
+    "Batch completed successfully"
+  ]
+}

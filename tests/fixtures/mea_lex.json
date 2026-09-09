@@ -1,0 +1,32 @@
+{
+  "name": "mea_strategy_verification",
+  "description": "Verifies that under MEA, the recency of the first condition element (goal) takes precedence over other elements",
+  "strategy": "MEA",
+  "source": "(p fire-goal-2 (goal ^id 2) (fact ^tag x) --> (make result ^selected goal-2) (halt)) (p fire-goal-1 (goal ^id 1) (fact ^tag y) --> (make result ^selected goal-1) (halt))",
+  "initial_wm": [
+    {
+      "class": "goal",
+      "attributes": { "id": "1" }
+    },
+    {
+      "class": "fact",
+      "attributes": { "tag": "x" }
+    },
+    {
+      "class": "goal",
+      "attributes": { "id": "2" }
+    },
+    {
+      "class": "fact",
+      "attributes": { "tag": "y" }
+    }
+  ],
+  "max_cycles": 1,
+  "expected_cycles": 1,
+  "expected_wm": [
+    {
+      "class": "result",
+      "attributes": { "selected": "goal-2" }
+    }
+  ]
+}

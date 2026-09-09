@@ -1,0 +1,151 @@
+package engine
+
+import (
+	"bytes"
+	"strings"
+	"testing"
+
+	"ops5/pkg/model"
+)
+
+func TestEngineGoalProgression(t *testing.T) {
+	eng := New()
+	var logBuf bytes.Buffer
+	eng.SetOutputWriter(&logBuf)
+
+	// Rule 1: Step 1 -> Step 2
+	rule1 := model.NewRule("step-1-to-2")
+	ce1 := model.NewPositiveCE("goal").
+		WithElementVariable("g").
+		AddEqualTest("status", model.NewSymbol("active")).
+		AddEqualTest("step", model.NewInt(1))
+	rule1.AddCondition(ce1)
+	rule1.AddAction(model.ModifyAction{
+		TargetElementVar: "g",
+		Attributes: map[string]model.Value{
+			"step": model.NewInt(2),
+		},
+	})
+	rule1.AddAction(model.WriteAction{
+		Items: []model.Value{model.NewSymbol("TRANSITIONED"), model.NewSymbol("TO"), model.NewInt(2)},
+	})
+	eng.AddRule(rule1)
+
+	// Rule 2: Step 2 -> Step 3
+	rule2 := model.NewRule("step-2-to-3")
+	ce2 := model.NewPositiveCE("goal").
+		WithElementVariable("g").
+		AddEqualTest("status", model.NewSymbol("active")).
+		AddEqualTest("step", model.NewInt(2))
+	rule2.AddCondition(ce2)
+	rule2.AddAction(model.ModifyAction{
+		TargetElementVar: "g",
+		Attributes: map[string]model.Value{
+			"step": model.NewInt(3),
+		},
+	})
+	eng.AddRule(rule2)
+
+	// Rule 3: Step 3 -> Finish & Halt
+	rule3 := model.NewRule("finish")
+	ce3 := model.NewPositiveCE("goal").
+		WithElementVariable("g").
+		AddEqualTest("status", model.NewSymbol("active")).
+		AddEqualTest("step", model.NewInt(3))
+	rule3.AddCondition(ce3)
+	rule3.AddAction(model.ModifyAction{
+		TargetElementVar: "g",
+		Attributes: map[string]model.Value{
+			"status": model.NewSymbol("completed"),
+		},
+	})
+	rule3.AddAction(model.HaltAction{})
+	eng.AddRule(rule3)
+
+	// Initial WME
+	eng.Make("goal", map[string]model.Value{
+		"status": model.NewSymbol("active"),
+		"step":   model.NewInt(1),
+	})
+
+	cycles, err := eng.Run(10)
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+
+	if cycles != 3 {
+		t.Fatalf("expected exactly 3 cycles, ran %d", cycles)
+	}
+
+	if !eng.IsHalted() {
+		t.Fatalf("expected engine to be halted")
+	}
+
+	// Working memory should now contain completed goal
+	goals := eng.WorkingMemory().FindByClass("goal")
+	if len(goals) != 1 {
+		t.Fatalf("expected 1 goal in WM, got %d", len(goals))
+	}
+	status, _ := goals[0].Get("status")
+	if !status.Equal(model.NewSymbol("completed")) {
+		t.Fatalf("expected status 'completed', got %v", status)
+	}
+
+	if !strings.Contains(logBuf.String(), "TRANSITIONED TO 2") {
+		t.Fatalf("expected write action output in log buffer, got %q", logBuf.String())
+	}
+}
+
+func TestEngineNegatedConditionControl(t *testing.T) {
+	eng := New()
+
+	// Rule: Process pending task if not blocked
+	rule := model.NewRule("process-unblocked-task")
+	ce1 := model.NewPositiveCE("task").
+		WithElementVariable("t").
+		AddEqualTest("status", model.NewSymbol("pending")).
+		AddEqualTest("id", model.NewVariable("<id>"))
+	ce2 := model.NewNegativeCE("lock").
+		AddEqualTest("task-id", model.NewVariable("<id>"))
+
+	rule.AddCondition(ce1).AddCondition(ce2)
+	rule.AddAction(model.ModifyAction{
+		TargetElementVar: "t",
+		Attributes: map[string]model.Value{
+			"status": model.NewSymbol("running"),
+		},
+	})
+	rule.AddAction(model.HaltAction{})
+	eng.AddRule(rule)
+
+	// 1. Assert task and lock -> Should not fire!
+	eng.Make("task", map[string]model.Value{
+		"id":     model.NewInt(99),
+		"status": model.NewSymbol("pending"),
+	})
+	lock := eng.Make("lock", map[string]model.Value{
+		"task-id": model.NewInt(99),
+	})
+
+	cycles, _ := eng.Run(10)
+	if cycles != 0 {
+		t.Fatalf("expected 0 cycles when locked, got %d", cycles)
+	}
+
+	// 2. Remove lock -> Negative condition becomes satisfied -> Rule fires!
+	eng.Remove(lock.Timetag)
+
+	cycles, err := eng.Run(10)
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	if cycles != 1 {
+		t.Fatalf("expected 1 cycle after unlocking, got %d", cycles)
+	}
+
+	tasks := eng.WorkingMemory().FindByClass("task")
+	status, _ := tasks[0].Get("status")
+	if !status.Equal(model.NewSymbol("running")) {
+		t.Fatalf("expected task status to be 'running', got %v", status)
+	}
+}

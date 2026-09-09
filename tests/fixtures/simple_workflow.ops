@@ -1,0 +1,28 @@
+; OPS5 Simple Workflow Example
+; Tests rule parsing, variable matching across 3 CEs, negation, modify, and make actions.
+
+(p initialize-processing
+   <g> (goal ^type batch ^status start)
+   -->
+   (modify <g> ^status in-progress)
+   (make item ^id 101 ^status pending)
+   (make item ^id 102 ^status pending)
+)
+
+(p process-item
+   (goal ^type batch ^status in-progress)
+   <it> (item ^id <id> ^status pending)
+   -(hold ^item-id <id>)
+   -->
+   (modify <it> ^status done)
+   (write "Processed item" <id>)
+)
+
+(p complete-batch
+   <g> (goal ^type batch ^status in-progress)
+   -(item ^status pending)
+   -->
+   (modify <g> ^status all-done)
+   (write "Batch completed successfully")
+   (halt)
+)
