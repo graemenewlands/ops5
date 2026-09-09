@@ -1,1 +1,16 @@
+# Executables and binaries
 /ops5
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.bin
+
+# Test binaries and coverage artifacts
+*.test
+*.out
+cover.out
+coverage.html
+profile.pprof
+
