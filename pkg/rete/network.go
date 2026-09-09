@@ -50,8 +50,25 @@ func getAlphaKey(ce *model.ConditionElement) string {
 	return key
 }
 
+func matchesCEConstants(ce *model.ConditionElement, wme *model.WME) bool {
+	if ce.Class != "*" && ce.Class != wme.Class {
+		return false
+	}
+	for _, at := range ce.Tests {
+		for _, c := range at.Constraints {
+			if !c.Value.IsVariable() {
+				ct := NewConstantTestNode(at.Attribute, c.Op, c.Value)
+				if !ct.Test(wme) {
+					return false
+				}
+			}
+		}
+	}
+	return true
+}
+
 // buildAlphaMemory creates or retrieves a shared AlphaMemory for the given condition element.
-func (net *Network) buildAlphaMemory(ce *model.ConditionElement) *AlphaMemory {
+func (net *Network) buildAlphaMemory(ce *model.ConditionElement, existingWMEs []*model.WME) *AlphaMemory {
 	key := getAlphaKey(ce)
 	if am, exists := net.alphaMemPool[key]; exists {
 		return am
@@ -76,6 +93,13 @@ func (net *Network) buildAlphaMemory(ce *model.ConditionElement) *AlphaMemory {
 	}
 
 	am := NewAlphaMemory()
+	// Pre-populate with matching existing WMEs
+	for _, wme := range existingWMEs {
+		if matchesCEConstants(ce, wme) {
+			am.items[wme.Timetag] = wme
+		}
+	}
+
 	switch p := currNode.(type) {
 	case *TypeNode:
 		p.AddSuccessor(am)
@@ -89,6 +113,11 @@ func (net *Network) buildAlphaMemory(ce *model.ConditionElement) *AlphaMemory {
 
 // AddRule compiles a rule into the Rete network and connects its terminal node to the listener.
 func (net *Network) AddRule(rule *model.Rule, listener ConflictSetListener) {
+	net.AddRuleWithWMEs(rule, listener, nil)
+}
+
+// AddRuleWithWMEs compiles a rule and evaluates it against existing working memory elements.
+func (net *Network) AddRuleWithWMEs(rule *model.Rule, listener ConflictSetListener, existingWMEs []*model.WME) {
 	net.mu.Lock()
 	defer net.mu.Unlock()
 
@@ -101,7 +130,7 @@ func (net *Network) AddRule(rule *model.Rule, listener ConflictSetListener) {
 
 	for i, ce := range rule.Conditions {
 		isLast := (i == len(rule.Conditions)-1)
-		alphaMem := net.buildAlphaMemory(ce)
+		alphaMem := net.buildAlphaMemory(ce, existingWMEs)
 
 		// Determine join tests: compare right WME attributes against variables already bound in previous CEs
 		var joinTests []JoinTest
@@ -133,9 +162,11 @@ func (net *Network) AddRule(rule *model.Rule, listener ConflictSetListener) {
 		if ce.IsNegative {
 			negNode := NewNegativeJoinNode(currBetaMem, alphaMem, ce, joinTests)
 			negNode.AddSuccessor(nextBetaNode)
+			negNode.Attach()
 		} else {
 			joinNode := NewJoinNode(currBetaMem, alphaMem, ce, joinTests)
 			joinNode.AddSuccessor(nextBetaNode)
+			joinNode.Attach()
 		}
 
 		// Update bound variables for subsequent condition elements

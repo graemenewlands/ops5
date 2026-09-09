@@ -97,20 +97,23 @@ type JoinNode struct {
 
 // NewJoinNode creates a new two-input join node.
 func NewJoinNode(betaMem *BetaMemory, alphaMem *AlphaMemory, ce *model.ConditionElement, tests []JoinTest) *JoinNode {
-	jn := &JoinNode{
+	return &JoinNode{
 		betaMemory:  betaMem,
 		alphaMemory: alphaMem,
 		joinTests:   tests,
 		ce:          ce,
 		successors:  make([]LeftActivatable, 0),
 	}
-	if betaMem != nil {
-		betaMem.AddSuccessor(jn)
+}
+
+// Attach connects the join node to its parent memories and triggers catch-up.
+func (jn *JoinNode) Attach() {
+	if jn.alphaMemory != nil {
+		jn.alphaMemory.AddSuccessor(jn)
 	}
-	if alphaMem != nil {
-		alphaMem.AddSuccessor(jn)
+	if jn.betaMemory != nil {
+		jn.betaMemory.AddSuccessor(jn)
 	}
-	return jn
 }
 
 // AddSuccessor registers a downstream beta node.
@@ -268,7 +271,7 @@ type NegativeJoinNode struct {
 
 // NewNegativeJoinNode creates a new NegativeJoinNode.
 func NewNegativeJoinNode(betaMem *BetaMemory, alphaMem *AlphaMemory, ce *model.ConditionElement, tests []JoinTest) *NegativeJoinNode {
-	njn := &NegativeJoinNode{
+	return &NegativeJoinNode{
 		betaMemory:  betaMem,
 		alphaMemory: alphaMem,
 		joinTests:   tests,
@@ -277,13 +280,16 @@ func NewNegativeJoinNode(betaMem *BetaMemory, alphaMem *AlphaMemory, ce *model.C
 		tokens:      make(map[string]*Token),
 		successors:  make([]LeftActivatable, 0),
 	}
-	if betaMem != nil {
-		betaMem.AddSuccessor(njn)
+}
+
+// Attach connects the negative join node to its parent memories and triggers catch-up.
+func (njn *NegativeJoinNode) Attach() {
+	if njn.alphaMemory != nil {
+		njn.alphaMemory.AddSuccessor(njn)
 	}
-	if alphaMem != nil {
-		alphaMem.AddSuccessor(njn)
+	if njn.betaMemory != nil {
+		njn.betaMemory.AddSuccessor(njn)
 	}
-	return njn
 }
 
 // AddSuccessor registers a downstream beta node.

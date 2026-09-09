@@ -164,3 +164,43 @@ func TestNegatedConditionElement(t *testing.T) {
 		t.Fatalf("expected 2 total add activations (re-activated), got %d", len(listener.adds))
 	}
 }
+
+func TestRetroactiveRuleAdditionWithExistingWMEs(t *testing.T) {
+	net := NewNetwork()
+	mem := wm.New()
+	mem.AddListener(net)
+
+	// Pre-assert WMEs before rule is created
+	wmeGoal := mem.Make("goal", map[string]model.Value{
+		"id":     model.NewInt(10),
+		"status": model.NewSymbol("active"),
+	})
+	mem.Make("task", map[string]model.Value{
+		"goal-id": model.NewInt(10),
+		"name":    model.NewSymbol("build"),
+	})
+
+	listener := &recordListener{}
+
+	// Define 2-condition join rule AFTER WMEs are already in memory
+	rule := model.NewRule("retro-join")
+	rule.AddCondition(model.NewPositiveCE("goal").
+		AddEqualTest("id", model.NewVariable("<gid>")).
+		AddEqualTest("status", model.NewSymbol("active")))
+	rule.AddCondition(model.NewPositiveCE("task").
+		AddEqualTest("goal-id", model.NewVariable("<gid>")).
+		AddEqualTest("name", model.NewVariable("<name>")))
+
+	net.AddRuleWithWMEs(rule, listener, mem.All())
+
+	if len(listener.adds) != 1 {
+		t.Fatalf("expected 1 activation when rule added after WMEs, got %d", len(listener.adds))
+	}
+
+	// Retracting one of the matching WMEs should still propagate retraction
+	mem.Remove(wmeGoal.Timetag)
+	if len(listener.removes) != 1 {
+		t.Fatalf("expected 1 remove activation, got %d", len(listener.removes))
+	}
+}
+

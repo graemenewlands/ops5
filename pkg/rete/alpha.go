@@ -36,11 +36,6 @@ func (am *AlphaMemory) AddSuccessor(node RightActivatable) {
 	am.mu.Lock()
 	defer am.mu.Unlock()
 	am.successors = append(am.successors, node)
-
-	// Catch-up: pass all existing WMEs to newly added successor
-	for _, wme := range am.items {
-		node.RightActivation(wme, TagAdd)
-	}
 }
 
 // Items returns a snapshot of all WMEs currently stored.

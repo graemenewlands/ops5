@@ -86,7 +86,8 @@ func (e *Engine) AddRule(rule *model.Rule) {
 	e.ruleCount++
 	rule.Index = e.ruleCount
 	e.rules = append(e.rules, rule)
-	e.network.AddRule(rule, e.conflictSet)
+	existingWMEs := e.wm.All()
+	e.network.AddRuleWithWMEs(rule, e.conflictSet, existingWMEs)
 }
 
 // Make asserts a new WME.
