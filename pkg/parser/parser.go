@@ -13,12 +13,16 @@ type Parser struct {
 	lexer   *Lexer
 	current Token
 	peek    Token
+	schemas map[string]*model.ClassSchema
 }
 
 // NewParser creates a new Parser for the input string.
 func NewParser(input string) (*Parser, error) {
 	l := NewLexer(input)
-	p := &Parser{lexer: l}
+	p := &Parser{
+		lexer:   l,
+		schemas: make(map[string]*model.ClassSchema),
+	}
 
 	tok1, err := l.NextToken()
 	if err != nil {
@@ -31,6 +35,17 @@ func NewParser(input string) (*Parser, error) {
 	p.current = tok1
 	p.peek = tok2
 	return p, nil
+}
+
+// RegisterSchema registers a class schema with the parser for positional attribute resolution.
+func (p *Parser) RegisterSchema(schema *model.ClassSchema) {
+	if schema != nil {
+		p.schemas[schema.Class] = schema
+	}
+}
+
+func (p *Parser) getSchema(class string) *model.ClassSchema {
+	return p.schemas[strings.ToLower(class)]
 }
 
 func (p *Parser) advance() error {
@@ -161,15 +176,36 @@ func (p *Parser) parseConditionElement() (*model.ConditionElement, error) {
 		ce.WithElementVariable(elemVar)
 	}
 
-	// Parse attribute tests
-	for p.current.Type == TokenAttribute {
-		attrName := p.current.Value
-		if err := p.advance(); err != nil {
-			return nil, err
-		}
+	schema := p.getSchema(classTok.Value)
+	posIndex := 0
 
-		// One or more constraints on this attribute
-		for p.current.Type != TokenAttribute && p.current.Type != TokenRParen && p.current.Type != TokenEOF {
+	// Parse attribute tests (both named ^attr and positional)
+	for p.current.Type != TokenRParen && p.current.Type != TokenEOF {
+		if p.current.Type == TokenAttribute {
+			attrName := model.NormalizeAttribute(p.current.Value)
+			if err := p.advance(); err != nil {
+				return nil, err
+			}
+
+			// One or more constraints on this attribute
+			for p.current.Type != TokenAttribute && p.current.Type != TokenRParen && p.current.Type != TokenEOF {
+				op := model.OpEqual
+				if p.current.Type == TokenOperator {
+					op = model.ParseOperator(p.current.Value)
+					if err := p.advance(); err != nil {
+						return nil, err
+					}
+				}
+
+				val := TokenToValue(p.current)
+				if err := p.advance(); err != nil {
+					return nil, err
+				}
+
+				ce.AddTest(attrName, op, val)
+			}
+		} else {
+			// Positional test in condition element
 			op := model.OpEqual
 			if p.current.Type == TokenOperator {
 				op = model.ParseOperator(p.current.Value)
@@ -182,6 +218,12 @@ func (p *Parser) parseConditionElement() (*model.ConditionElement, error) {
 			if err := p.advance(); err != nil {
 				return nil, err
 			}
+
+			attrName := fmt.Sprintf("attr%d", posIndex+1)
+			if schema != nil && posIndex < len(schema.Attributes) {
+				attrName = schema.Attributes[posIndex]
+			}
+			posIndex++
 
 			ce.AddTest(attrName, op, val)
 		}
@@ -211,17 +253,32 @@ func (p *Parser) parseAction() (model.Action, error) {
 		if err != nil {
 			return nil, fmt.Errorf("expected class in make action: %v", err)
 		}
+		schema := p.getSchema(classTok.Value)
 		attrs := make(map[string]model.Value)
-		for p.current.Type == TokenAttribute {
-			attrName := p.current.Value
-			if err := p.advance(); err != nil {
-				return nil, err
+		posIndex := 0
+		for p.current.Type != TokenRParen && p.current.Type != TokenEOF {
+			if p.current.Type == TokenAttribute {
+				attrName := model.NormalizeAttribute(p.current.Value)
+				if err := p.advance(); err != nil {
+					return nil, err
+				}
+				val := TokenToValue(p.current)
+				if err := p.advance(); err != nil {
+					return nil, err
+				}
+				attrs[attrName] = val
+			} else {
+				val := TokenToValue(p.current)
+				if err := p.advance(); err != nil {
+					return nil, err
+				}
+				attrName := fmt.Sprintf("attr%d", posIndex+1)
+				if schema != nil && posIndex < len(schema.Attributes) {
+					attrName = schema.Attributes[posIndex]
+				}
+				posIndex++
+				attrs[attrName] = val
 			}
-			val := TokenToValue(p.current)
-			if err := p.advance(); err != nil {
-				return nil, err
-			}
-			attrs[attrName] = val
 		}
 		if _, err := p.expect(TokenRParen); err != nil {
 			return nil, err
@@ -313,7 +370,40 @@ func (p *Parser) parseAction() (model.Action, error) {
 	}
 }
 
-// ParseMake parses a standalone (make class ^attr val ...) statement.
+// StatementType represents the kind of top-level statement in an OPS5 source.
+type StatementType int
+
+const (
+	StmtRule StatementType = iota
+	StmtMake
+	StmtLiteralize
+)
+
+func (st StatementType) String() string {
+	switch st {
+	case StmtRule:
+		return "rule"
+	case StmtMake:
+		return "make"
+	case StmtLiteralize:
+		return "literalize"
+	default:
+		return "unknown"
+	}
+}
+
+// Statement represents a parsed top-level OPS5 statement.
+type Statement struct {
+	Type            StatementType
+	Rule            *model.Rule
+	MakeClass       string
+	MakeAttributes  map[string]model.Value
+	LiteralizeClass string
+	LiteralizeAttrs []string
+	Schema          *model.ClassSchema
+}
+
+// ParseMake parses a standalone (make class [^attr val ...] [val1 val2 ...]) statement.
 func (p *Parser) ParseMake() (string, map[string]model.Value, error) {
 	if _, err := p.expect(TokenLParen); err != nil {
 		return "", nil, err
@@ -328,17 +418,33 @@ func (p *Parser) ParseMake() (string, map[string]model.Value, error) {
 		return "", nil, err
 	}
 
+	schema := p.getSchema(classTok.Value)
 	attrs := make(map[string]model.Value)
-	for p.current.Type == TokenAttribute {
-		attrName := p.current.Value
-		if err := p.advance(); err != nil {
-			return "", nil, err
+	posIndex := 0
+
+	for p.current.Type != TokenRParen && p.current.Type != TokenEOF {
+		if p.current.Type == TokenAttribute {
+			attrName := model.NormalizeAttribute(p.current.Value)
+			if err := p.advance(); err != nil {
+				return "", nil, err
+			}
+			val := TokenToValue(p.current)
+			if err := p.advance(); err != nil {
+				return "", nil, err
+			}
+			attrs[attrName] = val
+		} else {
+			val := TokenToValue(p.current)
+			if err := p.advance(); err != nil {
+				return "", nil, err
+			}
+			attrName := fmt.Sprintf("attr%d", posIndex+1)
+			if schema != nil && posIndex < len(schema.Attributes) {
+				attrName = schema.Attributes[posIndex]
+			}
+			posIndex++
+			attrs[attrName] = val
 		}
-		val := TokenToValue(p.current)
-		if err := p.advance(); err != nil {
-			return "", nil, err
-		}
-		attrs[attrName] = val
 	}
 
 	if _, err := p.expect(TokenRParen); err != nil {
@@ -348,7 +454,91 @@ func (p *Parser) ParseMake() (string, map[string]model.Value, error) {
 	return classTok.Value, attrs, nil
 }
 
-// ParseRules parses all rules from an OPS5 source string.
+// ParseLiteralize parses a (literalize class attr1 attr2 ...) directive.
+func (p *Parser) ParseLiteralize() (string, []string, error) {
+	if _, err := p.expect(TokenLParen); err != nil {
+		return "", nil, err
+	}
+	verbTok, err := p.expect(TokenSymbol)
+	if err != nil || strings.ToLower(verbTok.Value) != "literalize" {
+		return "", nil, fmt.Errorf("expected 'literalize', got %v", verbTok.Value)
+	}
+
+	classTok, err := p.expect(TokenSymbol)
+	if err != nil {
+		return "", nil, fmt.Errorf("expected class name in literalize directive: %v", err)
+	}
+
+	var attrs []string
+	for p.current.Type != TokenRParen && p.current.Type != TokenEOF {
+		if p.current.Type == TokenSymbol || p.current.Type == TokenAttribute {
+			attrs = append(attrs, model.NormalizeAttribute(p.current.Value))
+			if err := p.advance(); err != nil {
+				return "", nil, err
+			}
+		} else {
+			return "", nil, fmt.Errorf("expected attribute name at line %d, got %s", p.current.Line, p.current.Value)
+		}
+	}
+
+	if _, err := p.expect(TokenRParen); err != nil {
+		return "", nil, err
+	}
+
+	schema := model.NewClassSchema(classTok.Value, attrs)
+	p.RegisterSchema(schema)
+
+	return classTok.Value, attrs, nil
+}
+
+// NextStatement parses the next top-level statement (Rule, Make, or Literalize).
+// Returns (nil, nil) when TokenEOF is reached.
+func (p *Parser) NextStatement() (*Statement, error) {
+	if p.current.Type == TokenEOF {
+		return nil, nil
+	}
+
+	if p.current.Type != TokenLParen {
+		return nil, fmt.Errorf("expected '(' starting statement at line %d, got %s (%q)",
+			p.current.Line, p.current.Type, p.current.Value)
+	}
+
+	verb := strings.ToLower(p.peek.Value)
+	switch verb {
+	case "p":
+		rule, err := p.ParseRule()
+		if err != nil {
+			return nil, err
+		}
+		return &Statement{Type: StmtRule, Rule: rule}, nil
+
+	case "make":
+		class, attrs, err := p.ParseMake()
+		if err != nil {
+			return nil, err
+		}
+		return &Statement{Type: StmtMake, MakeClass: class, MakeAttributes: attrs}, nil
+
+	case "literalize":
+		class, attrs, err := p.ParseLiteralize()
+		if err != nil {
+			return nil, err
+		}
+		schema := p.getSchema(class)
+		return &Statement{
+			Type:            StmtLiteralize,
+			LiteralizeClass: class,
+			LiteralizeAttrs: attrs,
+			Schema:          schema,
+		}, nil
+
+	default:
+		return nil, fmt.Errorf("unknown statement verb %q at line %d, col %d",
+			p.peek.Value, p.peek.Line, p.peek.Col)
+	}
+}
+
+// ParseRules parses all rules from an OPS5 source string, processing any literalize schemas encountered.
 func ParseRules(source string) ([]*model.Rule, error) {
 	p, err := NewParser(source)
 	if err != nil {
@@ -356,13 +546,40 @@ func ParseRules(source string) ([]*model.Rule, error) {
 	}
 
 	var rules []*model.Rule
-	for p.current.Type != TokenEOF {
-		rule, err := p.ParseRule()
+	for {
+		stmt, err := p.NextStatement()
 		if err != nil {
 			return nil, err
 		}
-		rules = append(rules, rule)
+		if stmt == nil {
+			break
+		}
+		if stmt.Type == StmtRule {
+			rules = append(rules, stmt.Rule)
+		}
 	}
 
 	return rules, nil
+}
+
+// ParseProgram parses an entire OPS5 source string into rules, makes, and literalize statements.
+func ParseProgram(source string) ([]*Statement, error) {
+	p, err := NewParser(source)
+	if err != nil {
+		return nil, err
+	}
+
+	var stmts []*Statement
+	for {
+		stmt, err := p.NextStatement()
+		if err != nil {
+			return nil, err
+		}
+		if stmt == nil {
+			break
+		}
+		stmts = append(stmts, stmt)
+	}
+
+	return stmts, nil
 }

@@ -1,0 +1,44 @@
+{
+  "name": "literalize_workflow_test",
+  "description": "Validates literalize directive with both named and positional attributes",
+  "strategy": "LEX",
+  "source_file": "fixtures/literalize_workflow.ops",
+  "initial_wm": [
+    {
+      "class": "task",
+      "attributes": {
+        "id": "1001",
+        "status": "pending",
+        "priority": "high"
+      }
+    },
+    {
+      "class": "worker",
+      "attributes": {
+        "id": "W-1",
+        "available": "yes"
+      }
+    }
+  ],
+  "max_cycles": 5,
+  "expected_cycles": 1,
+  "expected_wm": [
+    {
+      "class": "task",
+      "attributes": {
+        "id": "1001",
+        "status": "assigned"
+      }
+    },
+    {
+      "class": "worker",
+      "attributes": {
+        "id": "W-1",
+        "available": "no"
+      }
+    }
+  ],
+  "expected_outputs": [
+    "Assigned task 1001 to worker W-1"
+  ]
+}

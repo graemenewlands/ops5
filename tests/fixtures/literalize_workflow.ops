@@ -1,0 +1,20 @@
+; OPS5 Workflow with Literalize Directive
+
+(literalize task
+   id
+   status
+   priority)
+
+(literalize worker
+   id
+   available)
+
+(p assign-task
+   <t> (task ^id <tid> ^status pending ^priority <pri>)
+   <w> (worker ^id <wid> ^available yes)
+   -->
+   (modify <t> ^status assigned)
+   (modify <w> ^available no)
+   (write "Assigned task" <tid> "to worker" <wid>)
+   (halt)
+)

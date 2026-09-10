@@ -119,6 +119,12 @@ func (r *REPL) handleCommand(input string) bool {
 		return false
 	}
 
+	// 3. S-expression literalize: (literalize ...)
+	if strings.HasPrefix(input, "(literalize ") || strings.HasPrefix(input, "(LITERALIZE ") {
+		r.handleLiteralize(input)
+		return false
+	}
+
 	// Strip outer parentheses for command convenience if present: e.g. (wm) -> wm
 	cmd := input
 	if strings.HasPrefix(cmd, "(") && strings.HasSuffix(cmd, ")") && !strings.Contains(cmd, "^") {
@@ -133,6 +139,16 @@ func (r *REPL) handleCommand(input string) bool {
 	switch strings.ToLower(parts[0]) {
 	case "help":
 		r.printHelp()
+
+	case "literalize":
+		r.handleLiteralize("(" + input + ")")
+
+	case "schemas", "schema":
+		classFilter := ""
+		if len(parts) > 1 {
+			classFilter = parts[1]
+		}
+		r.printSchemas(classFilter)
 
 	case "wm":
 		classFilter := ""
@@ -242,6 +258,9 @@ func (r *REPL) handleDefineRule(src string) {
 		fmt.Fprintf(r.out, "Parse error: %v\n", err)
 		return
 	}
+	for _, s := range r.engine.Schemas() {
+		p.RegisterSchema(s)
+	}
 	rule, err := p.ParseRule()
 	if err != nil {
 		fmt.Fprintf(r.out, "Rule syntax error: %v\n", err)
@@ -257,6 +276,9 @@ func (r *REPL) handleMake(src string) {
 		fmt.Fprintf(r.out, "Parse error: %v\n", err)
 		return
 	}
+	for _, s := range r.engine.Schemas() {
+		p.RegisterSchema(s)
+	}
 	class, attrs, err := p.ParseMake()
 	if err != nil {
 		fmt.Fprintf(r.out, "Make syntax error: %v\n", err)
@@ -264,6 +286,49 @@ func (r *REPL) handleMake(src string) {
 	}
 	wme := r.engine.Make(class, attrs)
 	fmt.Fprintf(r.out, "Asserted: %s\n", wme.String())
+}
+
+func (r *REPL) handleLiteralize(src string) {
+	trimmed := strings.TrimSpace(src)
+	if !strings.HasPrefix(trimmed, "(") {
+		trimmed = "(" + trimmed + ")"
+	}
+	p, err := parser.NewParser(trimmed)
+	if err != nil {
+		fmt.Fprintf(r.out, "Parse error: %v\n", err)
+		return
+	}
+	class, attrs, err := p.ParseLiteralize()
+	if err != nil {
+		fmt.Fprintf(r.out, "Literalize syntax error: %v\n", err)
+		return
+	}
+	schema := r.engine.DeclareClass(class, attrs)
+	fmt.Fprintf(r.out, "Declared class schema '%s' with %d attributes: %v\n",
+		schema.Class, len(schema.Attributes), schema.Attributes)
+}
+
+func (r *REPL) printSchemas(classFilter string) {
+	schemas := r.engine.Schemas()
+	if len(schemas) == 0 {
+		fmt.Fprintln(r.out, "No class schemas declared.")
+		return
+	}
+
+	filter := strings.ToLower(classFilter)
+	count := 0
+	for _, s := range schemas {
+		if filter == "" || s.Class == filter {
+			if count == 0 {
+				fmt.Fprintln(r.out, "Class Schemas:")
+			}
+			fmt.Fprintf(r.out, "  %s: %v\n", s.Class, s.Attributes)
+			count++
+		}
+	}
+	if count == 0 {
+		fmt.Fprintf(r.out, "No schema found for class '%s'.\n", classFilter)
+	}
 }
 
 func (r *REPL) printWorkingMemory(classFilter string) {
@@ -337,7 +402,7 @@ func (r *REPL) runCycles(maxCycles int) {
 	}
 }
 
-// LoadFile reads and registers rules and make statements from an OPS5 source file.
+// LoadFile reads and registers rules, makes, and literalize schemas from an OPS5 source file.
 func (r *REPL) LoadFile(path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -349,28 +414,44 @@ func (r *REPL) LoadFile(path string) error {
 		return err
 	}
 
-	rulesCount := 0
-	makesCount := 0
-
-	for {
-		rule, err := p.ParseRule()
-		if err == nil && rule != nil {
-			r.engine.AddRule(rule)
-			rulesCount++
-			continue
-		}
-
-		class, attrs, makeErr := p.ParseMake()
-		if makeErr == nil && class != "" {
-			r.engine.Make(class, attrs)
-			makesCount++
-			continue
-		}
-
-		break
+	// Register any existing schemas from the engine into the parser
+	for _, s := range r.engine.Schemas() {
+		p.RegisterSchema(s)
 	}
 
-	fmt.Fprintf(r.out, "Loaded %s: added %d rules, asserted %d WMEs.\n", path, rulesCount, makesCount)
+	rulesCount := 0
+	makesCount := 0
+	litCount := 0
+
+	for {
+		stmt, err := p.NextStatement()
+		if err != nil {
+			return err
+		}
+		if stmt == nil {
+			break
+		}
+
+		switch stmt.Type {
+		case parser.StmtRule:
+			r.engine.AddRule(stmt.Rule)
+			rulesCount++
+		case parser.StmtMake:
+			r.engine.Make(stmt.MakeClass, stmt.MakeAttributes)
+			makesCount++
+		case parser.StmtLiteralize:
+			r.engine.DeclareClass(stmt.LiteralizeClass, stmt.LiteralizeAttrs)
+			litCount++
+		}
+	}
+
+	if litCount > 0 {
+		fmt.Fprintf(r.out, "Loaded %s: added %d rules, asserted %d WMEs, declared %d schemas.\n",
+			path, rulesCount, makesCount, litCount)
+	} else {
+		fmt.Fprintf(r.out, "Loaded %s: added %d rules, asserted %d WMEs.\n",
+			path, rulesCount, makesCount)
+	}
 	return nil
 }
 
@@ -406,10 +487,12 @@ func (r *REPL) printHelp() {
 	helpText := `
 Commands:
   (p <name> ...)        Define a production rule (multiline supported)
+  (literalize <c> ...)  Declare an element class schema with attributes
   make <cls> [^a v]     Assert a new Working Memory Element (e.g. make goal ^status active)
   modify <tag> [^a v]   Modify attributes of an existing WME by timetag
   remove <tag>          Retract a WME by its timetag
   wm [class]            Display current working memory elements
+  schemas [class]       Display declared class schemas
   cs                    Display conflict set (pending instantiations in salience order)
   step                  Execute one Match-Resolve-Act cycle
   run [N]               Run until quiescence, halt, or N cycles

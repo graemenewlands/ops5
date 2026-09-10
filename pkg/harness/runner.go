@@ -121,23 +121,28 @@ func (r *Runner) Run(tc *TestCase) *Result {
 			}
 		}
 
-		// Parse rules and top-level makes
+		// Parse rules, top-level makes, and literalize directives
 		for {
-			rule, err := p.ParseRule()
-			if err == nil && rule != nil {
-				eng.AddRule(rule)
-				continue
+			stmt, err := p.NextStatement()
+			if err != nil {
+				return &Result{
+					TestCaseName: tc.Name,
+					Passed:       false,
+					Error:        fmt.Errorf("syntax error in source: %w", err),
+				}
+			}
+			if stmt == nil {
+				break
 			}
 
-			// If not a rule, attempt make statement
-			class, attrs, makeErr := p.ParseMake()
-			if makeErr == nil && class != "" {
-				eng.Make(class, attrs)
-				continue
+			switch stmt.Type {
+			case parser.StmtRule:
+				eng.AddRule(stmt.Rule)
+			case parser.StmtMake:
+				eng.Make(stmt.MakeClass, stmt.MakeAttributes)
+			case parser.StmtLiteralize:
+				eng.DeclareClass(stmt.LiteralizeClass, stmt.LiteralizeAttrs)
 			}
-
-			// Reached end or cannot parse further
-			break
 		}
 	}
 

@@ -20,6 +20,7 @@ type Engine struct {
 	network      *rete.Network
 	conflictSet  *conflict.Set
 	rules        []*model.Rule
+	schemas      map[string]*model.ClassSchema
 	ruleCount    int
 	cycleCount   int
 	halted       bool
@@ -41,6 +42,7 @@ func New() *Engine {
 		network:      net,
 		conflictSet:  cs,
 		rules:        make([]*model.Rule, 0),
+		schemas:      make(map[string]*model.ClassSchema),
 		ruleCount:    0,
 		cycleCount:   0,
 		halted:       false,
@@ -88,6 +90,37 @@ func (e *Engine) AddRule(rule *model.Rule) {
 	e.rules = append(e.rules, rule)
 	existingWMEs := e.wm.All()
 	e.network.AddRuleWithWMEs(rule, e.conflictSet, existingWMEs)
+}
+
+// DeclareClass registers a schema for a class name from a literalize directive.
+func (e *Engine) DeclareClass(class string, attributes []string) *model.ClassSchema {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	schema := model.NewClassSchema(class, attributes)
+	e.schemas[schema.Class] = schema
+	return schema
+}
+
+// GetSchema retrieves a class schema by class name.
+func (e *Engine) GetSchema(class string) (*model.ClassSchema, bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	schema, ok := e.schemas[strings.ToLower(class)]
+	return schema, ok
+}
+
+// Schemas returns a slice of all registered class schemas.
+func (e *Engine) Schemas() []*model.ClassSchema {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	res := make([]*model.ClassSchema, 0, len(e.schemas))
+	for _, s := range e.schemas {
+		res = append(res, s)
+	}
+	return res
 }
 
 // Make asserts a new WME.

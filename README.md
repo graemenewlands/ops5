@@ -11,6 +11,7 @@ This engine provides a complete, modern execution environment for rule-based sys
 1. [Architectural Overview](#architectural-overview)
 2. [Language & Syntax Specification](#language--syntax-specification)
    - [Lexical Elements & Data Types](#lexical-elements--data-types)
+   - [Schema Declarations (`literalize`)](#schema-declarations-literalize)
    - [Working Memory Elements (WMEs)](#working-memory-elements-wmes)
    - [Production Rules (`(p ... )`)](#production-rules-p--)
    - [Left-Hand Side (LHS) Condition Elements](#left-hand-side-lhs-condition-elements)
@@ -122,6 +123,42 @@ The engine supports five first-class data types:
 | **Float** | Floating-point decimal | `model.TypeFloat` (`float64`) | `3.14`, `0.001`, `-12.5` |
 | **String** | Double-quoted text | `model.TypeString` (`string`) | `"Hello World"`, `"Batch complete"` |
 | **Variable** | Delimited by angle brackets `<...>` | `model.TypeVariable` (`string`) | `<x>`, `<id>`, `<goal-ptr>`, `<val>` |
+
+### Schema Declarations (`(literalize ...)`)
+
+OPS5 programs can declare class schemas using the top-level `(literalize ...)` directive:
+
+```ops5
+(literalize <class-name> <attr-1> <attr-2> ... <attr-n>)
+```
+
+Attribute names can be declared as bare symbols or prefixed with a caret `^`:
+```ops5
+(literalize vector x y z)
+(literalize point ^x ^y)
+```
+
+#### Positional Attribute Mapping
+Declaring a schema activates classic OPS5 positional attribute mapping. In classic OPS5, WMEs were represented internally as fixed-width vectors based on their `literalize` declaration. With a registered schema:
+- **Positional `make` actions**: Values provided without an explicit attribute name are mapped sequentially to the declared attribute slots:
+  ```ops5
+  (make point 10 20)
+  ; Automatically maps to: (make point ^x 10 ^y 20)
+  ```
+- **Positional LHS condition elements**: Condition patterns without explicit `^` attributes test positional values against the corresponding schema attributes:
+  ```ops5
+  (p match-origin
+     (point 0 0)
+     -->
+     (write "Found origin point")
+  )
+  ```
+- **Mixed named & positional attributes**: Explicit named attributes (`^attr val`) can be combined with positional attributes; positional values populate unassigned schema positions in declared order:
+  ```ops5
+  (make vector 1.0 ^z 3.0 2.0)
+  ; Positional 1.0 -> ^x, ^z -> 3.0, positional 2.0 -> ^y
+  ```
+- If no schema is declared for a class, attributes default to purely dynamic key-value pairs (`^<attr> <val>`).
 
 ### Working Memory Elements (WMEs)
 
@@ -437,6 +474,8 @@ Defined rule 'classify-alert' (conditions=1, specificity=3)
 
 | Command | Arguments | Description | Example |
 | :--- | :--- | :--- | :--- |
+| `(literalize ...)` / `literalize` | `<class> <attrs...>` | Declare attribute schema for positional mapping | `literalize point x y` |
+| `schemas` | `[class]` | Display registered schemas (all or specific class) | `schemas point` |
 | `(p ...)` | `<rule-definition>` | Compile a production rule into the active Rete network | `(p r1 (goal ^status active) --> (halt))` |
 | `make` | `<class> [^<attr> <val> ...]` | Assert a new WME | `make goal ^type batch ^status start` |
 | `modify` | `<timetag> [^<attr> <val> ...]` | Modify an existing WME by timetag | `modify 1 ^status in-progress` |
@@ -651,7 +690,7 @@ func main() {
 
 ```
 pkg/
-├── model/        # Domain types: WME, Value (Symbol, Int, Float, String, Variable), Rule, Action
+├── model/        # Domain types: WME, ClassSchema, Value (Symbol, Int, Float, String, Variable), Rule, Action
 ├── wm/           # Thread-safe WorkingMemory, timetag generation, listener notifications
 ├── rete/         # Alpha & Beta nodes, Tokens, Alpha/Beta memories, joins, negations, terminal nodes
 ├── conflict/     # Conflict Set agenda, Instantiations, Refraction, LEX & MEA comparator functions

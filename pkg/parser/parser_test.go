@@ -114,3 +114,85 @@ func TestParseMake(t *testing.T) {
 		t.Fatalf("expected label 'urgent', got %v", attrs["label"])
 	}
 }
+
+func TestParseLiteralize(t *testing.T) {
+	src := `(literalize person name age job ^salary)`
+	p, err := NewParser(src)
+	if err != nil {
+		t.Fatalf("failed to create parser: %v", err)
+	}
+
+	class, attrs, err := p.ParseLiteralize()
+	if err != nil {
+		t.Fatalf("failed to parse literalize: %v", err)
+	}
+
+	if class != "person" {
+		t.Fatalf("expected class 'person', got %s", class)
+	}
+	expected := []string{"name", "age", "job", "salary"}
+	if len(attrs) != len(expected) {
+		t.Fatalf("expected %d attributes, got %d", len(expected), len(attrs))
+	}
+	for i, exp := range expected {
+		if attrs[i] != exp {
+			t.Fatalf("at index %d expected %s, got %s", i, exp, attrs[i])
+		}
+	}
+}
+
+func TestLiteralizePositionalMapping(t *testing.T) {
+	src := `
+	(literalize vector x y z)
+	(make vector 10 20 30)
+	(p move-vector
+	   (vector <x> <y> 30)
+	   -->
+	   (make result 100)
+	)
+	`
+	stmts, err := ParseProgram(src)
+	if err != nil {
+		t.Fatalf("failed to parse program: %v", err)
+	}
+
+	if len(stmts) != 3 {
+		t.Fatalf("expected 3 statements, got %d", len(stmts))
+	}
+
+	// 1. Literalize
+	if stmts[0].Type != StmtLiteralize || stmts[0].LiteralizeClass != "vector" {
+		t.Fatalf("stmt 0 unexpected: %v", stmts[0])
+	}
+
+	// 2. Make vector with positional values 10, 20, 30 -> mapped to x, y, z!
+	if stmts[1].Type != StmtMake || stmts[1].MakeClass != "vector" {
+		t.Fatalf("stmt 1 unexpected: %v", stmts[1])
+	}
+	mAttrs := stmts[1].MakeAttributes
+	if !mAttrs["x"].Equal(model.NewInt(10)) || !mAttrs["y"].Equal(model.NewInt(20)) || !mAttrs["z"].Equal(model.NewInt(30)) {
+		t.Fatalf("expected x=10, y=20, z=30, got %v", mAttrs)
+	}
+
+	// 3. Rule with positional condition
+	rule := stmts[2].Rule
+	if rule.Name != "move-vector" {
+		t.Fatalf("expected rule move-vector, got %s", rule.Name)
+	}
+	cond := rule.Conditions[0]
+	// Check condition tests on x, y, z
+	tests := make(map[string]model.Value)
+	for _, at := range cond.Tests {
+		tests[at.Attribute] = at.Constraints[0].Value
+	}
+	if !tests["x"].Equal(model.NewVariable("<x>")) {
+		t.Fatalf("expected x to match <x>, got %v", tests["x"])
+	}
+	if !tests["y"].Equal(model.NewVariable("<y>")) {
+		t.Fatalf("expected y to match <y>, got %v", tests["y"])
+	}
+	if !tests["z"].Equal(model.NewInt(30)) {
+		t.Fatalf("expected z to match 30, got %v", tests["z"])
+	}
+}
+
