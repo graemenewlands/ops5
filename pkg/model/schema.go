@@ -41,6 +41,18 @@ func (s *ClassSchema) HasAttribute(attr string) bool {
 	return ok
 }
 
+// AddAttribute appends a new attribute to the schema if not already present.
+func (s *ClassSchema) AddAttribute(attr string) {
+	norm := NormalizeAttribute(attr)
+	if norm == "" {
+		return
+	}
+	if _, exists := s.attrMap[norm]; !exists {
+		s.Attributes = append(s.Attributes, norm)
+		s.attrMap[norm] = len(s.Attributes) - 1
+	}
+}
+
 // AttributeAt returns the attribute name at 0-based position.
 func (s *ClassSchema) AttributeAt(index int) (string, bool) {
 	if index < 0 || index >= len(s.Attributes) {

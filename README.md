@@ -13,6 +13,7 @@ This engine provides a complete, modern execution environment for rule-based sys
    - [Keywords & Syntax Quick Reference](docs/keywords.md)
    - [File I/O, Stream Redirection & Input](docs/file_io.md)
    - [Unique Atom Generation (`genatom`)](docs/genatom.md)
+   - [Attribute Index Resolution (`litval`)](docs/litval.md)
    - [Lexical Elements & Data Types](#lexical-elements--data-types)
    - [Schema & Vector Declarations (`literalize`, `vector-attribute`)](#schema--vector-declarations-literalize-vector-attribute)
    - [Working Memory Elements (WMEs)](#working-memory-elements-wmes)
@@ -392,6 +393,18 @@ Generates a unique sequential symbolic atom (`atom1`, `atom2`, `atom3`, ...):
 ```
 Can also be used directly as an attribute value in `make` and `modify`, in `write` output, and in top-level `make` declarations.
 
+#### `(litval [<class>] <attr>)`
+> [!NOTE]
+> For complete documentation and examples, see the [OPS5 `litval` Reference](docs/litval.md).
+
+Returns the 1-based numeric index assigned to an attribute within its element class or WME vector layout (where position 1 is the class name, position 2 is the 1st attribute, etc.):
+```ops5
+(make City ^name Albuquerque ^state NM)
+(bind <name-idx> (litval name))   ; evaluates to 2
+(bind <state-idx> (litval state)) ; evaluates to 3
+```
+Can also be evaluated inside `make`, `modify`, `write`, `compute`, and in the REPL.
+
 ---
 
 ## Rete Pattern Matching Engine
@@ -609,6 +622,7 @@ Defined rule 'classify-alert' (conditions=1, specificity=3)
 | `closefile` | `<log-name>` | Close an open file stream | `(closefile ruletrace)` |
 | `default` | `[<log-name> <subsystem>]` | View or set default stream for `accept`, `write`, `trace` | `(default ruletrace accept)` |
 | `genatom` / `(genatom)` | *none* | Generate and display a unique symbolic atom | `(genatom)` |
+| `litval` / `(litval ...)` | `[<class>] <attr>` | Display numeric index assigned to an attribute | `(litval name)` |
 | `wm` | `[class]` | Display active WMEs (optionally filtered by class) | `wm item` |
 | `cs` | *none* | Display conflict set in current salience order (`*` indicates dominant) | `cs` |
 | `step` | *none* | Execute exactly one Match-Resolve-Act cycle | `step` |

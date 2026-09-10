@@ -20,6 +20,7 @@ const (
 	TypeCompute
 	TypeAccept
 	TypeGenatom
+	TypeLitval
 )
 
 func (t ValueType) String() string {
@@ -44,6 +45,8 @@ func (t ValueType) String() string {
 		return "accept"
 	case TypeGenatom:
 		return "genatom"
+	case TypeLitval:
+		return "litval"
 	default:
 		return "unknown"
 	}
@@ -182,6 +185,36 @@ func (v Value) IsGenatom() bool {
 	return v.typ == TypeGenatom
 }
 
+// LitvalExpr represents a (litval [class] attr) function invocation.
+type LitvalExpr struct {
+	Class     string // optional class name, or empty string
+	Attribute Value  // attribute name (symbol, string, or variable)
+}
+
+// NewLitval creates a new litval expression value.
+func NewLitval(class string, attribute Value) Value {
+	return Value{
+		typ: TypeLitval,
+		val: &LitvalExpr{
+			Class:     class,
+			Attribute: attribute,
+		},
+	}
+}
+
+// IsLitval returns true if this value is a litval function call.
+func (v Value) IsLitval() bool {
+	return v.typ == TypeLitval
+}
+
+// LitvalExpr returns the underlying LitvalExpr.
+func (v Value) LitvalExpr() *LitvalExpr {
+	if v.typ == TypeLitval {
+		return v.val.(*LitvalExpr)
+	}
+	return nil
+}
+
 // Type returns the ValueType.
 func (v Value) Type() ValueType {
 	return v.typ
@@ -292,6 +325,12 @@ func (v Value) String() string {
 		return "(" + name + ")"
 	case TypeGenatom:
 		return "(genatom)"
+	case TypeLitval:
+		le := v.val.(*LitvalExpr)
+		if le.Class != "" {
+			return "(litval " + le.Class + " " + le.Attribute.String() + ")"
+		}
+		return "(litval " + le.Attribute.String() + ")"
 	default:
 		return fmt.Sprintf("%v", v.val)
 	}
@@ -303,6 +342,11 @@ func (v Value) Equal(o Value) bool {
 	if v.typ == o.typ {
 		if v.typ == TypeGenatom {
 			return true
+		}
+		if v.typ == TypeLitval {
+			l1 := v.val.(*LitvalExpr)
+			l2 := o.val.(*LitvalExpr)
+			return strings.EqualFold(l1.Class, l2.Class) && l1.Attribute.Equal(l2.Attribute)
 		}
 		if v.typ == TypeVector {
 			v1 := v.val.([]Value)

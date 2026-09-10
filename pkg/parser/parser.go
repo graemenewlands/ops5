@@ -83,6 +83,15 @@ func (p *Parser) getSchema(class string) *model.ClassSchema {
 	return p.schemas[strings.ToLower(class)]
 }
 
+// Schemas returns all registered class schemas in the parser.
+func (p *Parser) Schemas() []*model.ClassSchema {
+	res := make([]*model.ClassSchema, 0, len(p.schemas))
+	for _, s := range p.schemas {
+		res = append(res, s)
+	}
+	return res
+}
+
 func (p *Parser) advance() error {
 	p.current = p.peek
 	tok, err := p.lexer.NextToken()
@@ -374,7 +383,7 @@ func (p *Parser) isRHSFunction() bool {
 		return false
 	}
 	sub := strings.ToLower(p.peek.Value)
-	return sub == "compute" || sub == "accept" || sub == "acceptline" || sub == "genatom"
+	return sub == "compute" || sub == "accept" || sub == "acceptline" || sub == "genatom" || sub == "litval"
 }
 
 func (p *Parser) parseRHSFunction() (model.Value, error) {
@@ -388,9 +397,54 @@ func (p *Parser) parseRHSFunction() (model.Value, error) {
 		return p.parseAccept(true)
 	case "genatom":
 		return p.parseGenatom()
+	case "litval":
+		return p.parseLitval()
 	default:
 		return model.NewSymbol("nil"), fmt.Errorf("unknown RHS function: %s", sub)
 	}
+}
+
+func (p *Parser) parseLitval() (model.Value, error) {
+	if _, err := p.expect(TokenLParen); err != nil {
+		return model.NewSymbol("nil"), err
+	}
+	verbTok, err := p.expect(TokenSymbol)
+	if err != nil || strings.ToLower(verbTok.Value) != "litval" {
+		return model.NewSymbol("nil"), fmt.Errorf("expected 'litval', got %v", verbTok.Value)
+	}
+
+	var args []model.Value
+	for p.current.Type != TokenRParen && p.current.Type != TokenEOF {
+		if p.current.Type == TokenAttribute {
+			args = append(args, model.NewSymbol(model.NormalizeAttribute(p.current.Value)))
+			if err := p.advance(); err != nil {
+				return model.NewSymbol("nil"), err
+			}
+		} else if p.current.Type == TokenSymbol || p.current.Type == TokenVariable || p.current.Type == TokenString {
+			args = append(args, TokenToValue(p.current))
+			if err := p.advance(); err != nil {
+				return model.NewSymbol("nil"), err
+			}
+		} else {
+			return model.NewSymbol("nil"), fmt.Errorf("unexpected token in litval at line %d: %s", p.current.Line, p.current.Value)
+		}
+	}
+
+	if _, err := p.expect(TokenRParen); err != nil {
+		return model.NewSymbol("nil"), fmt.Errorf("expected ')' closing litval at line %d: %w", verbTok.Line, err)
+	}
+
+	if len(args) == 0 {
+		return model.NewSymbol("nil"), fmt.Errorf("litval requires at least 1 argument (attribute name)")
+	}
+	if len(args) == 1 {
+		return model.NewLitval("", args[0]), nil
+	}
+	class := args[0].String()
+	if args[0].Type() == model.TypeSymbol || args[0].Type() == model.TypeString {
+		class = args[0].Raw().(string)
+	}
+	return model.NewLitval(class, args[1]), nil
 }
 
 func (p *Parser) parseGenatom() (model.Value, error) {
@@ -447,10 +501,12 @@ func (p *Parser) parseAction() (model.Action, error) {
 		}
 		schema := p.getSchema(classTok.Value)
 		attrs := make(map[string]model.Value)
+		var orderedAttrs []string
 		posIndex := 0
 		for p.current.Type != TokenRParen && p.current.Type != TokenEOF {
 			if p.current.Type == TokenAttribute {
 				attrName := model.NormalizeAttribute(p.current.Value)
+				orderedAttrs = append(orderedAttrs, attrName)
 				if err := p.advance(); err != nil {
 					return nil, err
 				}
@@ -495,6 +551,7 @@ func (p *Parser) parseAction() (model.Action, error) {
 				if schema != nil && posIndex < len(schema.Attributes) {
 					attrName = schema.Attributes[posIndex]
 				}
+				orderedAttrs = append(orderedAttrs, attrName)
 				isVec := p.IsVectorAttribute(attrName) || (schema != nil && schema.IsVectorAttribute(attrName))
 				if isVec {
 					if existing, ok := attrs[attrName]; ok && existing.IsVector() {
@@ -513,6 +570,10 @@ func (p *Parser) parseAction() (model.Action, error) {
 		}
 		if _, err := p.expect(TokenRParen); err != nil {
 			return nil, err
+		}
+		if schema == nil && len(orderedAttrs) > 0 {
+			schema = model.NewClassSchema(classTok.Value, orderedAttrs)
+			p.RegisterSchema(schema)
 		}
 		return model.MakeAction{Class: classTok.Value, Attributes: attrs}, nil
 
@@ -807,11 +868,13 @@ func (p *Parser) ParseMake() (string, map[string]model.Value, error) {
 
 	schema := p.getSchema(classTok.Value)
 	attrs := make(map[string]model.Value)
+	var orderedAttrs []string
 	posIndex := 0
 
 	for p.current.Type != TokenRParen && p.current.Type != TokenEOF {
 		if p.current.Type == TokenAttribute {
 			attrName := model.NormalizeAttribute(p.current.Value)
+			orderedAttrs = append(orderedAttrs, attrName)
 			if err := p.advance(); err != nil {
 				return "", nil, err
 			}
@@ -856,6 +919,7 @@ func (p *Parser) ParseMake() (string, map[string]model.Value, error) {
 			if schema != nil && posIndex < len(schema.Attributes) {
 				attrName = schema.Attributes[posIndex]
 			}
+			orderedAttrs = append(orderedAttrs, attrName)
 			isVec := p.IsVectorAttribute(attrName) || (schema != nil && schema.IsVectorAttribute(attrName))
 			if isVec {
 				if existing, ok := attrs[attrName]; ok && existing.IsVector() {
@@ -875,6 +939,11 @@ func (p *Parser) ParseMake() (string, map[string]model.Value, error) {
 
 	if _, err := p.expect(TokenRParen); err != nil {
 		return "", nil, err
+	}
+
+	if schema == nil && len(orderedAttrs) > 0 {
+		schema = model.NewClassSchema(classTok.Value, orderedAttrs)
+		p.RegisterSchema(schema)
 	}
 
 	return classTok.Value, attrs, nil
@@ -1069,7 +1138,7 @@ func (p *Parser) NextStatement() (*Statement, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &Statement{Type: StmtMake, MakeClass: class, MakeAttributes: attrs}, nil
+		return &Statement{Type: StmtMake, MakeClass: class, MakeAttributes: attrs, Schema: p.getSchema(class)}, nil
 
 	case "literalize":
 		class, attrs, err := p.ParseLiteralize()

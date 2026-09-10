@@ -42,6 +42,7 @@ type Engine struct {
 	currentCol       int
 	lastAddedTimetag int64
 	genatomCounter   int64
+	attrIndices      map[string]int
 
 	// File I/O subsystem
 	openFiles           map[string]*openFileEntry
@@ -76,6 +77,7 @@ func New() *Engine {
 		currentCol:          1,
 		lastAddedTimetag:    0,
 		genatomCounter:      0,
+		attrIndices:         make(map[string]int),
 		openFiles:           make(map[string]*openFileEntry),
 		defaultAcceptStream: "",
 		defaultWriteStream:  "",
@@ -176,6 +178,9 @@ func (e *Engine) DeclareClass(class string, attributes []string) *model.ClassSch
 		}
 	}
 	e.schemas[schema.Class] = schema
+	for i, a := range schema.Attributes {
+		e.attrIndices[a] = i + 2
+	}
 	return schema
 }
 
@@ -200,10 +205,82 @@ func (e *Engine) Schemas() []*model.ClassSchema {
 	return res
 }
 
-// Make asserts a new WME, resolving any RHS value functions (compute, accept, genatom).
+// Litval returns the 1-based WME element index of the given attribute (or attribute in class).
+func (e *Engine) Litval(class, attr string) (int, bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.litvalLocked(class, attr)
+}
+
+func (e *Engine) litvalLocked(class, attr string) (int, bool) {
+	normAttr := model.NormalizeAttribute(attr)
+	if normAttr == "" {
+		return 0, false
+	}
+
+	// 1. If class is specified, check that class's schema
+	if class != "" {
+		normClass := strings.ToLower(class)
+		if schema, ok := e.schemas[normClass]; ok {
+			if idx, found := schema.IndexOf(normAttr); found {
+				return idx + 2, true
+			}
+		}
+		return 0, false
+	}
+
+	// 2. If class is empty, check registered schemas in deterministic order
+	var schemaKeys []string
+	for k := range e.schemas {
+		schemaKeys = append(schemaKeys, k)
+	}
+	sort.Strings(schemaKeys)
+	for _, k := range schemaKeys {
+		schema := e.schemas[k]
+		if idx, found := schema.IndexOf(normAttr); found {
+			return idx + 2, true
+		}
+	}
+
+	// 3. Check global attribute indices map
+	if idx, ok := e.attrIndices[normAttr]; ok {
+		return idx, true
+	}
+
+	return 0, false
+}
+
+// Make asserts a new WME, resolving any RHS value functions (compute, accept, genatom, litval).
 func (e *Engine) Make(class string, attrs map[string]model.Value) *model.WME {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+
+	normClass := strings.ToLower(class)
+	if schema, ok := e.schemas[normClass]; ok {
+		orderedKeys := e.getOrderedAttributeKeys(class, attrs)
+		for _, k := range orderedKeys {
+			schema.AddAttribute(k)
+			if idx, ok := schema.IndexOf(k); ok {
+				if _, exists := e.attrIndices[k]; !exists {
+					e.attrIndices[k] = idx + 2
+				}
+			}
+		}
+	} else if len(attrs) > 0 {
+		orderedKeys := e.getOrderedAttributeKeys(class, attrs)
+		schema := model.NewClassSchema(class, orderedKeys)
+		for a := range e.vectorAttrs {
+			if schema.HasAttribute(a) {
+				schema.SetVectorAttribute(a, true)
+			}
+		}
+		e.schemas[normClass] = schema
+		for i, k := range orderedKeys {
+			if _, exists := e.attrIndices[k]; !exists {
+				e.attrIndices[k] = i + 2
+			}
+		}
+	}
 
 	resolvedAttrs := make(map[string]model.Value, len(attrs))
 	orderedKeys := e.getOrderedAttributeKeys(class, attrs)
@@ -723,6 +800,25 @@ func (e *Engine) resolveValue(val model.Value, bindings map[string]model.Value) 
 	}
 	if val.IsGenatom() {
 		return e.genatomLocked()
+	}
+	if val.IsLitval() {
+		le := val.LitvalExpr()
+		class := le.Class
+		if strings.HasPrefix(class, "<") && strings.HasSuffix(class, ">") {
+			classVal := e.resolveValue(model.NewVariable(class), bindings)
+			if classVal.Type() == model.TypeSymbol || classVal.Type() == model.TypeString {
+				class = classVal.Raw().(string)
+			}
+		}
+		attrVal := e.resolveValue(le.Attribute, bindings)
+		attrName := attrVal.String()
+		if attrVal.Type() == model.TypeSymbol || attrVal.Type() == model.TypeString {
+			attrName = attrVal.Raw().(string)
+		}
+		if idx, ok := e.litvalLocked(class, attrName); ok {
+			return model.NewInt(int64(idx))
+		}
+		return model.NewSymbol("nil")
 	}
 	return val
 }

@@ -206,4 +206,51 @@ func TestREPLGenatom(t *testing.T) {
 	}
 }
 
+func TestREPLLitval(t *testing.T) {
+	// User's exact scenario:
+	// (make City ^name Albuquerque ^state NM)
+	// (litval name) will evaluate to the integer 2
+	input := `(make City ^name Albuquerque ^state NM)
+(litval name)
+(litval state)
+litval name
+(litval City name)
+litval City state
+(literalize Point x y)
+(litval x)
+(litval y)
+exit
+`
+	in := bytes.NewBufferString(input)
+	var out bytes.Buffer
+
+	repl := NewREPL(in, &out)
+	repl.Start()
+
+	output := out.String()
+	lines := strings.Split(output, "\n")
+
+	// Find the outputs
+	var numericOutputs []string
+	for _, l := range lines {
+		trimmed := strings.TrimSpace(l)
+		trimmed = strings.TrimPrefix(trimmed, "ops5> ")
+		trimmed = strings.TrimSpace(trimmed)
+		if trimmed == "2" || trimmed == "3" {
+			numericOutputs = append(numericOutputs, trimmed)
+		}
+	}
+
+	expected := []string{"2", "3", "2", "2", "3", "2", "3"}
+	if len(numericOutputs) != len(expected) {
+		t.Fatalf("expected %d numeric outputs %v, got %d: %v\nFull output:\n%s", len(expected), expected, len(numericOutputs), numericOutputs, output)
+	}
+	for i, exp := range expected {
+		if numericOutputs[i] != exp {
+			t.Errorf("output %d: expected %s, got %s", i, exp, numericOutputs[i])
+		}
+	}
+}
+
+
 

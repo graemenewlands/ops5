@@ -149,6 +149,12 @@ func (r *REPL) handleCommand(input string) bool {
 		return false
 	}
 
+	// 8. S-expression litval: (litval ...)
+	if strings.HasPrefix(strings.ToLower(input), "(litval ") || strings.ToLower(strings.TrimSpace(input)) == "(litval)" {
+		r.handleLitval(input)
+		return false
+	}
+
 	// Strip outer parentheses for command convenience if present: e.g. (wm) -> wm
 	cmd := input
 	if strings.HasPrefix(cmd, "(") && strings.HasSuffix(cmd, ")") && !strings.Contains(cmd, "^") {
@@ -282,6 +288,9 @@ func (r *REPL) handleCommand(input string) bool {
 	case "genatom":
 		fmt.Fprintln(r.out, r.engine.Genatom().String())
 
+	case "litval":
+		r.handleLitval(input)
+
 	case "reset":
 		r.engine.WorkingMemory().Reset()
 		r.engine.ConflictSet().Reset()
@@ -332,6 +341,11 @@ func (r *REPL) handleMake(src string) {
 	if err != nil {
 		fmt.Fprintf(r.out, "Make syntax error: %v\n", err)
 		return
+	}
+	for _, s := range p.Schemas() {
+		if _, ok := r.engine.GetSchema(s.Class); !ok {
+			r.engine.DeclareClass(s.Class, s.Attributes)
+		}
 	}
 	wme := r.engine.Make(class, attrs)
 	fmt.Fprintf(r.out, "Asserted: %s\n", wme.String())
@@ -385,6 +399,35 @@ func (r *REPL) handleVectorAttribute(src string) {
 		r.engine.DeclareVectorAttribute(a)
 	}
 	fmt.Fprintf(r.out, "Declared vector attribute(s): %v\n", attrs)
+}
+
+func (r *REPL) handleLitval(input string) {
+	trimmed := strings.TrimSpace(input)
+	if strings.HasPrefix(trimmed, "(") && strings.HasSuffix(trimmed, ")") {
+		trimmed = strings.TrimSpace(trimmed[1 : len(trimmed)-1])
+	}
+	parts := strings.Fields(trimmed)
+	if len(parts) < 2 {
+		fmt.Fprintln(r.out, "Usage: (litval [<class>] <attr>)")
+		return
+	}
+	var class, attr string
+	if len(parts) == 2 {
+		attr = parts[1]
+	} else {
+		class = parts[1]
+		attr = parts[2]
+	}
+	idx, ok := r.engine.Litval(class, attr)
+	if !ok {
+		if class != "" {
+			fmt.Fprintf(r.out, "Unknown attribute '%s' in class '%s'\n", attr, class)
+		} else {
+			fmt.Fprintf(r.out, "Unknown attribute '%s'\n", attr)
+		}
+		return
+	}
+	fmt.Fprintf(r.out, "%d\n", idx)
 }
 
 func (r *REPL) printVectorAttributes() {
@@ -537,6 +580,11 @@ func (r *REPL) LoadFile(path string) error {
 			r.engine.AddRule(stmt.Rule)
 			rulesCount++
 		case parser.StmtMake:
+			if stmt.Schema != nil {
+				if _, ok := r.engine.GetSchema(stmt.Schema.Class); !ok {
+					r.engine.DeclareClass(stmt.Schema.Class, stmt.Schema.Attributes)
+				}
+			}
 			r.engine.Make(stmt.MakeClass, stmt.MakeAttributes)
 			makesCount++
 		case parser.StmtLiteralize:
@@ -621,6 +669,7 @@ Commands:
   closefile <log>           Close an open file stream
   default <log> <subsys>    Set default stream for accept, write, or trace
   genatom                   Generate a unique symbolic atom (e.g. atom1)
+  litval [<cls>] <attr>     Display the numeric index assigned to an attribute
   wm [class]                Display current working memory elements
   schemas [class]           Display declared class schemas
   cs                        Display conflict set (pending instantiations in salience order)

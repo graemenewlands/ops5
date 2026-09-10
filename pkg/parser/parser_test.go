@@ -615,6 +615,59 @@ func TestParseGenatom(t *testing.T) {
 	}
 }
 
+func TestParseLitval(t *testing.T) {
+	src := `
+	(p test-litval
+		(City ^name <n>)
+		-->
+		(bind <idx> (litval name))
+		(bind <idx2> (litval ^state))
+		(bind <idx3> (litval City name))
+		(make Record ^slot (litval name))
+		(write (litval name) (crlf))
+	)
+	`
+	rules, err := ParseRules(src)
+	if err != nil {
+		t.Fatalf("failed to parse rule: %v", err)
+	}
+	if len(rules) != 1 {
+		t.Fatalf("expected 1 rule, got %d", len(rules))
+	}
+	r := rules[0]
+	if len(r.Actions) != 5 {
+		t.Fatalf("expected 5 actions, got %d", len(r.Actions))
+	}
+
+	// 0: bind <idx> (litval name)
+	b0, ok := r.Actions[0].(model.BindAction)
+	if !ok || b0.Variable != "idx" || !b0.Value.IsLitval() {
+		t.Fatalf("expected bind with litval, got %+v", r.Actions[0])
+	}
+	if b0.Value.LitvalExpr().Class != "" || b0.Value.LitvalExpr().Attribute.String() != "name" {
+		t.Errorf("expected litval attribute 'name', got %+v", b0.Value.LitvalExpr())
+	}
+
+	// 1: bind <idx2> (litval ^state)
+	b1, ok := r.Actions[1].(model.BindAction)
+	if !ok || b1.Variable != "idx2" || !b1.Value.IsLitval() {
+		t.Fatalf("expected bind with litval, got %+v", r.Actions[1])
+	}
+	if b1.Value.LitvalExpr().Attribute.String() != "state" {
+		t.Errorf("expected litval attribute 'state', got %+v", b1.Value.LitvalExpr())
+	}
+
+	// 2: bind <idx3> (litval City name)
+	b2, ok := r.Actions[2].(model.BindAction)
+	if !ok || b2.Variable != "idx3" || !b2.Value.IsLitval() {
+		t.Fatalf("expected bind with litval, got %+v", r.Actions[2])
+	}
+	if b2.Value.LitvalExpr().Class != "City" || b2.Value.LitvalExpr().Attribute.String() != "name" {
+		t.Errorf("expected litval City name, got %+v", b2.Value.LitvalExpr())
+	}
+}
+
+
 
 
 

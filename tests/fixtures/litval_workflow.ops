@@ -1,0 +1,17 @@
+; Workflow validating litval attribute index resolution
+(literalize City name location state country population)
+(literalize schema-meta attr-name position)
+
+(p index-city-attributes
+   (City ^name <city-name> ^state <st>)
+   -(schema-meta ^attr-name name)
+   -->
+   (bind <name-idx> (litval name))
+   (bind <loc-idx> (litval City location))
+   (bind <state-idx> (litval state))
+   (make schema-meta ^attr-name name ^position <name-idx>)
+   (make schema-meta ^attr-name location ^position <loc-idx>)
+   (make schema-meta ^attr-name state ^position <state-idx>)
+   (write "City name index:" <name-idx> "location index:" <loc-idx> "state index:" <state-idx> (crlf))
+   (halt)
+)

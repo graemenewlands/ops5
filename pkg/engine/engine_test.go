@@ -682,5 +682,97 @@ func TestEngineGenatom(t *testing.T) {
 	}
 }
 
+func TestEngineLitval(t *testing.T) {
+	eng := New()
+	var outBuf bytes.Buffer
+	eng.SetOutputWriter(&outBuf)
+
+	// User's exact scenario:
+	// (make City ^name Albuquerque ^state NM)
+	// (litval name) will evaluate to 2
+	eng.Make("City", map[string]model.Value{
+		"name":  model.NewSymbol("Albuquerque"),
+		"state": model.NewSymbol("NM"),
+	})
+
+	idxName, ok := eng.Litval("", "name")
+	if !ok || idxName != 2 {
+		t.Fatalf("expected litval name = 2, got %d (ok=%v)", idxName, ok)
+	}
+
+	idxState, ok := eng.Litval("", "state")
+	if !ok || idxState != 3 {
+		t.Fatalf("expected litval state = 3, got %d (ok=%v)", idxState, ok)
+	}
+
+	idxCityName, ok := eng.Litval("City", "name")
+	if !ok || idxCityName != 2 {
+		t.Fatalf("expected litval City name = 2, got %d (ok=%v)", idxCityName, ok)
+	}
+
+	// Explicit schema via DeclareClass
+	eng.DeclareClass("person", []string{"id", "first-name", "age", "city"})
+	idxAge, ok := eng.Litval("person", "age")
+	if !ok || idxAge != 4 {
+		t.Fatalf("expected litval person age = 4, got %d (ok=%v)", idxAge, ok)
+	}
+
+	// Test in rule execution: bind, make, and compute
+	rule := model.NewRule("litval-rule")
+	rule.AddCondition(model.NewPositiveCE("City"))
+	rule.AddAction(model.BindAction{
+		Variable: "name-slot",
+		Value:    model.NewLitval("", model.NewSymbol("name")),
+	})
+	rule.AddAction(model.BindAction{
+		Variable: "computed-slot",
+		Value: model.NewCompute([]model.Value{
+			model.NewLitval("", model.NewSymbol("name")),
+			model.NewInt(10),
+		}, []model.ComputeOp{model.ComputeOpAdd}),
+	})
+	rule.AddAction(model.MakeAction{
+		Class: "result",
+		Attributes: map[string]model.Value{
+			"pos":   model.NewVariable("<name-slot>"),
+			"c-pos": model.NewVariable("<computed-slot>"),
+		},
+	})
+	rule.AddAction(model.WriteAction{
+		Args: []model.WriteArg{
+			model.WriteValue(model.NewSymbol("Slot:")),
+			model.WriteValue(model.NewLitval("", model.NewSymbol("name"))),
+			model.WriteCRLF(),
+		},
+	})
+	rule.AddAction(model.HaltAction{})
+	eng.AddRule(rule)
+
+	cycles, err := eng.Run(10)
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	if cycles != 1 {
+		t.Fatalf("expected 1 cycle, got %d", cycles)
+	}
+
+	resWMEs := eng.WorkingMemory().FindByClass("result")
+	if len(resWMEs) != 1 {
+		t.Fatalf("expected 1 result WME, got %d", len(resWMEs))
+	}
+	posVal, _ := resWMEs[0].Get("pos")
+	if !posVal.Equal(model.NewInt(2)) {
+		t.Fatalf("expected pos 2, got %v", posVal)
+	}
+	cPosVal, _ := resWMEs[0].Get("c-pos")
+	if !cPosVal.Equal(model.NewInt(12)) {
+		t.Fatalf("expected c-pos 12, got %v", cPosVal)
+	}
+	if !strings.Contains(outBuf.String(), "Slot: 2") {
+		t.Fatalf("expected write output to contain 'Slot: 2', got %q", outBuf.String())
+	}
+}
+
+
 
 

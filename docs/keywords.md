@@ -41,6 +41,7 @@ These action verbs execute sequentially when a production rule fires.
 | **`accept`** | `(accept [<log-name>])` | RHS value function reading the next whitespace-delimited atom from input stream. See [`file_io` Reference](file_io.md). | `(make user ^id (accept))` |
 | **`acceptline`** | `(acceptline [<log-name>])` | RHS value function reading a full line of text into a scalar or vector. See [`file_io` Reference](file_io.md). | `(make data ^tokens (acceptline))` |
 | **`genatom`** | `(genatom)` | RHS function generating a unique symbolic atom (`atom1`, `atom2`, ...). See [`genatom` Reference](genatom.md). | `(make node ^id (genatom))` |
+| **`litval`** | `(litval [<class>] <attr>)` | RHS function returning the numeric index (2, 3, ...) of an attribute. See [`litval` Reference](litval.md). | `(make meta ^slot (litval name))` |
 | **`halt`** | `(halt)` | Halts the inference engine execution loop immediately. Current cycle completes, but no further rules fire. | `(halt)` |
 
 ---
@@ -84,6 +85,7 @@ The interactive CLI shell (`ops5`) supports both bare words and paren-enclosed c
 | **`closefile`** | `<logical-name>` | Closes an open file stream. |
 | **`default`** | `[<logical-name> <subsystem>]` | Sets or displays default streams for `accept`, `write`, `trace`. |
 | **`genatom`** | _none_ | Generates and displays a unique symbolic atom (e.g. `atom1`). |
+| **`litval`** | `[<class>] <attr>` | Displays the numeric index assigned to an attribute name. |
 | **`literalize`** | `<class> <attr1> ...` | Declares a class schema with positional attribute layout. |
 | **`schemas`** / **`schema`** | `[class]` | Prints registered class schemas and their vector attributes. |
 | **`vector-attribute`** | `<attr1> ...` | Declares attribute(s) as multi-valued vector attributes. |

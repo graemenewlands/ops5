@@ -141,6 +141,11 @@ func (r *Runner) Run(tc *TestCase) *Result {
 			case parser.StmtRule:
 				eng.AddRule(stmt.Rule)
 			case parser.StmtMake:
+				if stmt.Schema != nil {
+					if _, ok := eng.GetSchema(stmt.Schema.Class); !ok {
+						eng.DeclareClass(stmt.Schema.Class, stmt.Schema.Attributes)
+					}
+				}
 				eng.Make(stmt.MakeClass, stmt.MakeAttributes)
 			case parser.StmtLiteralize:
 				eng.DeclareClass(stmt.LiteralizeClass, stmt.LiteralizeAttrs)

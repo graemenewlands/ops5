@@ -1,0 +1,47 @@
+{
+  "name": "litval_workflow_test",
+  "description": "Validates litval attribute index resolution in production rules",
+  "strategy": "LEX",
+  "source_file": "fixtures/litval_workflow.ops",
+  "initial_wm": [
+    {
+      "class": "City",
+      "attributes": {
+        "name": "Albuquerque",
+        "state": "NM"
+      }
+    }
+  ],
+  "max_cycles": 5,
+  "expected_cycles": 1,
+  "expected_wm": [
+    {
+      "class": "City",
+      "attributes": {
+        "name": "Albuquerque",
+        "state": "NM"
+      }
+    },
+    {
+      "class": "schema-meta",
+      "attributes": {
+        "attr-name": "name",
+        "position": "2"
+      }
+    },
+    {
+      "class": "schema-meta",
+      "attributes": {
+        "attr-name": "location",
+        "position": "3"
+      }
+    },
+    {
+      "class": "schema-meta",
+      "attributes": {
+        "attr-name": "state",
+        "position": "4"
+      }
+    }
+  ]
+}
