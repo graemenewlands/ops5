@@ -1,0 +1,90 @@
+{
+  "name": "bind_compute_workflow_test",
+  "description": "Validates bind action directive and compute arithmetic expressions across multiple rules",
+  "strategy": "LEX",
+  "source_file": "fixtures/bind_compute_workflow.ops",
+  "initial_wm": [
+    {
+      "class": "stage",
+      "attributes": {
+        "name": "items"
+      }
+    },
+    {
+      "class": "tax-config",
+      "attributes": {
+        "rate": "0.05"
+      }
+    },
+    {
+      "class": "item",
+      "attributes": {
+        "id": "1",
+        "name": "Widget",
+        "price": "20",
+        "qty": "3",
+        "total": "pending"
+      }
+    },
+    {
+      "class": "item",
+      "attributes": {
+        "id": "2",
+        "name": "Gadget",
+        "price": "15",
+        "qty": "2",
+        "total": "pending"
+      }
+    }
+  ],
+  "max_cycles": 10,
+  "expected_cycles": 4,
+  "expected_wm": [
+    {
+      "class": "stage",
+      "attributes": {
+        "name": "done"
+      }
+    },
+    {
+      "class": "item",
+      "attributes": {
+        "id": "1",
+        "total": "60"
+      }
+    },
+    {
+      "class": "item",
+      "attributes": {
+        "id": "2",
+        "total": "30"
+      }
+    },
+    {
+      "class": "invoice",
+      "attributes": {
+        "subtotal": "90",
+        "tax-amount": "4.5",
+        "total-due": "94.5"
+      }
+    }
+  ],
+  "forbidden_wm": [
+    {
+      "class": "item",
+      "attributes": {
+        "total": "pending"
+      }
+    }
+  ],
+  "expected_outputs": [
+    "Widget",
+    "Gadget",
+    "Subtotal:",
+    "90",
+    "Tax:",
+    "4.5",
+    "Total Due:",
+    "94.5"
+  ]
+}

@@ -351,3 +351,76 @@ func TestParseWriteFormatting(t *testing.T) {
 	}
 }
 
+func TestParseBindAndCompute(t *testing.T) {
+	src := `
+	(p compute-test
+	   (item ^price <p> ^tax-rate <r>)
+	   -->
+	   (bind <tax> (compute <p> * <r>))
+	   (bind <total> (compute <p> + (compute <p> * <r>)))
+	   (bind <step> 1)
+	   (make invoice ^amount <total> ^status "paid")
+	)
+	`
+	rules, err := ParseRules(src)
+	if err != nil {
+		t.Fatalf("failed to parse rule: %v", err)
+	}
+	if len(rules) != 1 {
+		t.Fatalf("expected 1 rule, got %d", len(rules))
+	}
+	r := rules[0]
+	if len(r.Actions) != 4 {
+		t.Fatalf("expected 4 actions, got %d", len(r.Actions))
+	}
+
+	// Action 1: (bind <tax> (compute <p> * <r>))
+	b1, ok := r.Actions[0].(model.BindAction)
+	if !ok {
+		t.Fatalf("action 0 not BindAction: %T", r.Actions[0])
+	}
+	if b1.Variable != "tax" {
+		t.Errorf("expected tax, got %s", b1.Variable)
+	}
+	if !b1.Value.IsCompute() {
+		t.Fatalf("expected b1.Value to be compute expr")
+	}
+
+	// Action 2: (bind <total> (compute <p> + (compute <p> * <r>)))
+	b2, ok := r.Actions[1].(model.BindAction)
+	if !ok {
+		t.Fatalf("action 1 not BindAction: %T", r.Actions[1])
+	}
+	if b2.Variable != "total" {
+		t.Errorf("expected total, got %s", b2.Variable)
+	}
+	if !b2.Value.IsCompute() {
+		t.Fatalf("expected b2.Value to be compute expr")
+	}
+	c2 := b2.Value.ComputeExpr()
+	if len(c2.Operands) != 2 || len(c2.Operators) != 1 {
+		t.Fatalf("expected 2 operands and 1 operator in outer compute")
+	}
+	if !c2.Operands[1].IsCompute() {
+		t.Fatalf("expected operand 1 to be nested compute")
+	}
+
+	// Action 3: (bind <step> 1)
+	b3, ok := r.Actions[2].(model.BindAction)
+	if !ok {
+		t.Fatalf("action 2 not BindAction: %T", r.Actions[2])
+	}
+	if b3.Variable != "step" || !b3.Value.Equal(model.NewInt(1)) {
+		t.Errorf("expected step = 1, got %v = %v", b3.Variable, b3.Value)
+	}
+
+	// Action 4: (make invoice ^amount <total> ^status "paid")
+	m, ok := r.Actions[3].(model.MakeAction)
+	if !ok {
+		t.Fatalf("action 3 not MakeAction: %T", r.Actions[3])
+	}
+	if m.Class != "invoice" {
+		t.Errorf("expected invoice, got %s", m.Class)
+	}
+}
+

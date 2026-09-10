@@ -3,8 +3,10 @@ package engine
 import (
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -186,7 +188,123 @@ func (e *Engine) Modify(timetag int64, attrs map[string]model.Value) (*model.WME
 	return e.wm.Modify(timetag, attrs)
 }
 
-// resolveValue substitutes variable placeholders using token bindings.
+// applyArithmeticOp applies an arithmetic operator to two numeric values.
+func applyArithmeticOp(a model.Value, op model.ComputeOp, b model.Value) (model.Value, error) {
+	// If both are integers
+	if a.Type() == model.TypeInteger && b.Type() == model.TypeInteger {
+		i1 := a.Raw().(int64)
+		i2 := b.Raw().(int64)
+		switch op {
+		case model.ComputeOpAdd:
+			return model.NewInt(i1 + i2), nil
+		case model.ComputeOpSub:
+			return model.NewInt(i1 - i2), nil
+		case model.ComputeOpMul:
+			return model.NewInt(i1 * i2), nil
+		case model.ComputeOpDiv:
+			if i2 == 0 {
+				return model.NewInt(0), fmt.Errorf("division by zero in compute")
+			}
+			return model.NewInt(i1 / i2), nil
+		case model.ComputeOpMod:
+			if i2 == 0 {
+				return model.NewInt(0), fmt.Errorf("division by zero in compute modulo")
+			}
+			return model.NewInt(i1 % i2), nil
+		}
+	}
+
+	// Floating point arithmetic if either operand is Float (or numeric string)
+	var f1, f2 float64
+	if a.Type() == model.TypeInteger {
+		f1 = float64(a.Raw().(int64))
+	} else if a.Type() == model.TypeFloat {
+		f1 = a.Raw().(float64)
+	} else if aStr, ok := a.Raw().(string); ok {
+		if val, err := strconv.ParseFloat(aStr, 64); err == nil {
+			f1 = val
+		} else {
+			return model.NewInt(0), fmt.Errorf("non-numeric operand in compute: %v", a)
+		}
+	} else {
+		return model.NewInt(0), fmt.Errorf("non-numeric operand in compute: %v", a)
+	}
+
+	if b.Type() == model.TypeInteger {
+		f2 = float64(b.Raw().(int64))
+	} else if b.Type() == model.TypeFloat {
+		f2 = b.Raw().(float64)
+	} else if bStr, ok := b.Raw().(string); ok {
+		if val, err := strconv.ParseFloat(bStr, 64); err == nil {
+			f2 = val
+		} else {
+			return model.NewInt(0), fmt.Errorf("non-numeric operand in compute: %v", b)
+		}
+	} else {
+		return model.NewInt(0), fmt.Errorf("non-numeric operand in compute: %v", b)
+	}
+
+	switch op {
+	case model.ComputeOpAdd:
+		return model.NewFloat(f1 + f2), nil
+	case model.ComputeOpSub:
+		return model.NewFloat(f1 - f2), nil
+	case model.ComputeOpMul:
+		return model.NewFloat(f1 * f2), nil
+	case model.ComputeOpDiv:
+		if f2 == 0 {
+			return model.NewInt(0), fmt.Errorf("division by zero in compute")
+		}
+		return model.NewFloat(f1 / f2), nil
+	case model.ComputeOpMod:
+		if f2 == 0 {
+			return model.NewInt(0), fmt.Errorf("division by zero in compute modulo")
+		}
+		return model.NewFloat(math.Mod(f1, f2)), nil
+	default:
+		return model.NewInt(0), fmt.Errorf("unknown compute operator: %v", op)
+	}
+}
+
+// evaluateCompute evaluates a (compute ...) expression using the provided variable bindings.
+func evaluateCompute(expr *model.ComputeExpr, bindings map[string]model.Value) (model.Value, error) {
+	if len(expr.Operands) == 0 {
+		return model.NewInt(0), nil
+	}
+
+	current := resolveValue(expr.Operands[0], bindings)
+	if current.IsCompute() {
+		var err error
+		current, err = evaluateCompute(current.ComputeExpr(), bindings)
+		if err != nil {
+			return model.NewInt(0), err
+		}
+	}
+
+	for i, op := range expr.Operators {
+		if i+1 >= len(expr.Operands) {
+			break
+		}
+		next := resolveValue(expr.Operands[i+1], bindings)
+		if next.IsCompute() {
+			var err error
+			next, err = evaluateCompute(next.ComputeExpr(), bindings)
+			if err != nil {
+				return model.NewInt(0), err
+			}
+		}
+
+		res, err := applyArithmeticOp(current, op, next)
+		if err != nil {
+			return model.NewInt(0), err
+		}
+		current = res
+	}
+
+	return current, nil
+}
+
+// resolveValue substitutes variable placeholders and evaluates compute expressions.
 func resolveValue(val model.Value, bindings map[string]model.Value) model.Value {
 	if val.IsVariable() {
 		vName := val.VariableName()
@@ -202,14 +320,20 @@ func resolveValue(val model.Value, bindings map[string]model.Value) model.Value 
 		}
 		return model.NewVector(resolved)
 	}
+	if val.IsCompute() {
+		res, err := evaluateCompute(val.ComputeExpr(), bindings)
+		if err == nil {
+			return res
+		}
+	}
 	return val
 }
 
 // resolveTargetTimetag locates the WME timetag referenced by element variable or index.
-func resolveTargetTimetag(act *conflict.Activation, elemVar string, index int) (int64, error) {
+func resolveTargetTimetag(act *conflict.Activation, elemVar string, index int, bindings map[string]model.Value) (int64, error) {
 	if elemVar != "" {
 		vName := strings.TrimPrefix(strings.TrimSuffix(elemVar, ">"), "<")
-		if bound, ok := act.Token.Bindings[vName]; ok {
+		if bound, ok := bindings[vName]; ok {
 			if bound.Type() == model.TypeInteger {
 				return bound.Raw().(int64), nil
 			}
@@ -249,24 +373,35 @@ func (e *Engine) Step() (bool, error) {
 		fmt.Fprintf(e.outputWriter, "[Cycle %d] Fired rule '%s' with WMEs %v\n", e.cycleCount, dominant.Rule.Name, dominant.Timetags)
 	}
 
+	// Local bindings for this rule firing, initialized with token bindings
+	localBindings := make(map[string]model.Value, len(dominant.Token.Bindings))
+	for k, v := range dominant.Token.Bindings {
+		localBindings[k] = v
+	}
+
 	// Execute RHS actions
 	for _, action := range dominant.Rule.Actions {
 		switch act := action.(type) {
+		case model.BindAction:
+			resolved := resolveValue(act.Value, localBindings)
+			varName := strings.TrimPrefix(strings.TrimSuffix(act.Variable, ">"), "<")
+			localBindings[varName] = resolved
+
 		case model.MakeAction:
 			resolvedAttrs := make(map[string]model.Value, len(act.Attributes))
 			for k, v := range act.Attributes {
-				resolvedAttrs[k] = resolveValue(v, dominant.Token.Bindings)
+				resolvedAttrs[k] = resolveValue(v, localBindings)
 			}
 			e.wm.Make(act.Class, resolvedAttrs)
 
 		case model.ModifyAction:
-			targetTimetag, err := resolveTargetTimetag(dominant, act.TargetElementVar, act.TargetIndex)
+			targetTimetag, err := resolveTargetTimetag(dominant, act.TargetElementVar, act.TargetIndex, localBindings)
 			if err != nil {
 				return true, err
 			}
 			resolvedAttrs := make(map[string]model.Value, len(act.Attributes))
 			for k, v := range act.Attributes {
-				resolvedAttrs[k] = resolveValue(v, dominant.Token.Bindings)
+				resolvedAttrs[k] = resolveValue(v, localBindings)
 			}
 			_, err = e.wm.Modify(targetTimetag, resolvedAttrs)
 			if err != nil {
@@ -274,7 +409,7 @@ func (e *Engine) Step() (bool, error) {
 			}
 
 		case model.RemoveAction:
-			targetTimetag, err := resolveTargetTimetag(dominant, act.TargetElementVar, act.TargetIndex)
+			targetTimetag, err := resolveTargetTimetag(dominant, act.TargetElementVar, act.TargetIndex, localBindings)
 			if err != nil {
 				return true, err
 			}
@@ -303,7 +438,7 @@ func (e *Engine) Step() (bool, error) {
 
 					case model.WriteArgTabTo:
 						targetCol := 1
-						resolvedCol := resolveValue(arg.Value, dominant.Token.Bindings)
+						resolvedCol := resolveValue(arg.Value, localBindings)
 						if resolvedCol.Type() == model.TypeInteger {
 							targetCol = int(resolvedCol.Raw().(int64))
 						} else if resolvedCol.Type() == model.TypeFloat {
@@ -324,7 +459,7 @@ func (e *Engine) Step() (bool, error) {
 						lastWasSpaceOrTab = true
 
 					case model.WriteArgValue:
-						resolved := resolveValue(arg.Value, dominant.Token.Bindings)
+						resolved := resolveValue(arg.Value, localBindings)
 						var text string
 						if resolved.Type() == model.TypeString {
 							text = resolved.Raw().(string)

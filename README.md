@@ -332,6 +332,25 @@ Emits symbols, numbers, strings, and resolved variables to the engine's configur
   ```
 - If no `(crlf)` is present in the `write` action, a trailing newline is appended automatically.
 
+#### `(bind <var> <val-or-compute>)`
+> [!NOTE]
+> For complete details on arithmetic operators, evaluation order, and nested sub-expressions, see the [OPS5 `bind` and `compute` Reference](docs/bind.md).
+
+Assigns the evaluated value or the result of a `compute` expression to a local variable `<var>` during the rule firing cycle:
+```ops5
+(bind <item-total> (compute <price> * <qty>))
+(modify <it> ^total <item-total>)
+```
+Variables bound by `bind` are immediately accessible to all subsequent actions in the same rule firing.
+
+#### `(compute <op1> <operator> <op2> ...)`
+Evaluates arithmetic expressions using standard OPS5 left-to-right evaluation:
+- Operators: `+`, `-` (including unary minus), `*`, `/` (or `//`, `\`), and `%` (or `\\`).
+- Usable inside `bind`, or directly as values in `make`, `modify`, and `write`:
+```ops5
+(write "Grand Total:" (compute <subtotal> + (compute <subtotal> * <rate>)) (crlf))
+```
+
 #### `(halt)`
 Halts the engine execution immediately. The current cycle completes, but no further rules fire.
 

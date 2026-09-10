@@ -9,6 +9,7 @@ const (
 	ActionRemove
 	ActionWrite
 	ActionHalt
+	ActionBind
 	ActionCustom
 )
 
@@ -83,6 +84,14 @@ func (a WriteAction) Type() ActionType { return ActionWrite }
 type HaltAction struct{}
 
 func (a HaltAction) Type() ActionType { return ActionHalt }
+
+// BindAction assigns the result of a value or computation to a local variable.
+type BindAction struct {
+	Variable string // e.g. "<total>" or "total"
+	Value    Value  // resolved value, vector, or TypeCompute
+}
+
+func (a BindAction) Type() ActionType { return ActionBind }
 
 // CustomAction executes an arbitrary user function during firing.
 type CustomAction struct {

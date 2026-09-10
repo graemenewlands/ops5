@@ -197,3 +197,90 @@ func TestEngineWriteFormattingGrid(t *testing.T) {
 		t.Fatalf("grid formatting mismatch:\ngot:\n%q\nwant:\n%q", got, expected)
 	}
 }
+
+func TestEngineBindAndCompute(t *testing.T) {
+	eng := New()
+	var buf bytes.Buffer
+	eng.SetOutputWriter(&buf)
+
+	r1 := model.NewRule("calculate-total")
+	ce := model.NewPositiveCE("order").
+		WithElementVariable("o").
+		AddEqualTest("price", model.NewVariable("<p>")).
+		AddEqualTest("tax-rate", model.NewVariable("<r>"))
+	r1.AddCondition(ce)
+
+	// (bind <tax> (compute <p> * <r>))
+	r1.AddAction(model.BindAction{
+		Variable: "tax",
+		Value: model.NewCompute(
+			[]model.Value{model.NewVariable("<p>"), model.NewVariable("<r>")},
+			[]model.ComputeOp{model.ComputeOpMul},
+		),
+	})
+
+	// (bind <total> (compute <p> + <tax>))
+	r1.AddAction(model.BindAction{
+		Variable: "total",
+		Value: model.NewCompute(
+			[]model.Value{model.NewVariable("<p>"), model.NewVariable("<tax>")},
+			[]model.ComputeOp{model.ComputeOpAdd},
+		),
+	})
+
+	// (make invoice ^price <p> ^tax <tax> ^total <total>)
+	r1.AddAction(model.MakeAction{
+		Class: "invoice",
+		Attributes: map[string]model.Value{
+			"price": model.NewVariable("<p>"),
+			"tax":   model.NewVariable("<tax>"),
+			"total": model.NewVariable("<total>"),
+		},
+	})
+
+	// (write (crlf) |Total:| <total> (crlf))
+	r1.AddAction(model.WriteAction{
+		Args: []model.WriteArg{
+			model.WriteCRLF(),
+			model.WriteValue(model.NewSymbol("Total:")),
+			model.WriteValue(model.NewVariable("<total>")),
+			model.WriteCRLF(),
+		},
+	})
+
+	// (remove <o>)
+	r1.AddAction(model.RemoveAction{TargetElementVar: "o"})
+	eng.AddRule(r1)
+
+	eng.Make("order", map[string]model.Value{
+		"price":    model.NewFloat(100.0),
+		"tax-rate": model.NewFloat(0.05),
+	})
+
+	cycles, err := eng.Run(10)
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	if cycles != 1 {
+		t.Fatalf("expected 1 cycle, got %d", cycles)
+	}
+
+	expectedOut := "\nTotal: 105\n"
+	if buf.String() != expectedOut {
+		t.Fatalf("expected output %q, got %q", expectedOut, buf.String())
+	}
+
+	invoices := eng.WorkingMemory().FindByClass("invoice")
+	if len(invoices) != 1 {
+		t.Fatalf("expected 1 invoice WME, got %d", len(invoices))
+	}
+	taxVal, _ := invoices[0].Get("tax")
+	if !taxVal.Equal(model.NewFloat(5.0)) {
+		t.Fatalf("expected invoice tax 5.0, got %v", taxVal)
+	}
+	totalVal, _ := invoices[0].Get("total")
+	if !totalVal.Equal(model.NewFloat(105.0)) {
+		t.Fatalf("expected invoice total 105.0, got %v", totalVal)
+	}
+}
+

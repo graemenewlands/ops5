@@ -1,0 +1,39 @@
+; Workflow demonstrating (bind ...) and (compute ...) arithmetic expressions
+(literalize item id name price qty total)
+(literalize tax-config rate)
+(literalize invoice subtotal tax-amount total-due)
+(literalize stage name)
+
+(p compute-item-total
+   (stage ^name items)
+   <it> (item ^id <id> ^name <name> ^price <p> ^qty <q> ^total pending)
+   -->
+   (bind <item-total> (compute <p> * <q>))
+   (modify <it> ^total <item-total>)
+   (write (crlf) (tabto 5) <name> (tabto 20) "qty:" <q> (tabto 30) "price:" <p> (tabto 42) "total:" <item-total>)
+)
+
+(p finish-items
+   <sVar> (stage ^name items)
+   -(item ^total pending)
+   -->
+   (modify <sVar> ^name summary)
+)
+
+(p generate-invoice
+   <sVar> (stage ^name summary)
+   (tax-config ^rate <r>)
+   (item ^id 1 ^total <t1>)
+   (item ^id 2 ^total <t2>)
+   -->
+   (bind <subtotal> (compute <t1> + <t2>))
+   (bind <tax> (compute <subtotal> * <r>))
+   (bind <grand-total> (compute <subtotal> + <tax>))
+   (make invoice ^subtotal <subtotal> ^tax-amount <tax> ^total-due <grand-total>)
+   (write (crlf) (tabto 5) "--------------------------------------------------" (crlf)
+          (tabto 5) "Subtotal:" (tabto 42) <subtotal> (crlf)
+          (tabto 5) "Tax:" (tabto 42) <tax> (crlf)
+          (tabto 5) "Total Due:" (tabto 42) <grand-total> (crlf))
+   (modify <sVar> ^name done)
+   (halt)
+)

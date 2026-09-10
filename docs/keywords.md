@@ -29,6 +29,8 @@ These action verbs execute sequentially when a production rule fires.
 | **`write`** | `(write <val1> ...)` | Emits values, strings, or resolved variables to output. Supports `(crlf)` and `(tabto N)`. See [`write` Reference](write.md). | `(write (crlf) (tabto 5) <id> (tabto 20) <name> (crlf))` |
 | **`crlf`** | `(crlf)` or `crlf` | Directs `(write ...)` to emit a newline and reset horizontal column counter to 1. | `(write (crlf) "Start")` |
 | **`tabto`** | `(tabto <col>)` | Directs `(write ...)` to pad output with spaces until column `<col>` is reached. | `(write (tabto 15) "Column 2")` |
+| **`bind`** | `(bind <var> <val-or-expr>)` | Evaluates a value or `compute` expression and binds it to a local variable for subsequent actions. See [`bind` Reference](bind.md). | `(bind <total> (compute <subtotal> + <tax>))` |
+| **`compute`** | `(compute <op1> <op> <op2> ...)` | Evaluates arithmetic expressions (`+`, `-`, `*`, `/`, `//`, `\`, `%`). Supports nesting and unary minus. See [`bind` Reference](bind.md). | `(compute <price> * <qty>)`<br>`(compute <p> + (compute <p> * <r>))` |
 | **`halt`** | `(halt)` | Halts the inference engine execution loop immediately. Current cycle completes, but no further rules fire. | `(halt)` |
 
 ---
@@ -87,8 +89,6 @@ The interactive CLI shell (`ops5`) supports both bare words and paren-enclosed c
 For reference and future engine development, the following standard OPS5 constructs from the classic Charles Forgy specification are planned or tracked for future implementation:
 
 ### RHS Functions & Computations
-- **`compute`**: Evaluates arithmetic expressions on the RHS, e.g. `(compute <x> + 1)`.
-- **`bind`**: Assigns the result of an expression to a local variable, e.g. `(bind <new-val> (compute <x> * 2))`.
 - **`substr`**: Extracts a sub-vector or substring from a value, e.g. `(substr <vec> 1 2)`.
 - **`genatom`**: Generates a unique symbol atom (e.g., `atom1`, `atom2`).
 - **`accept`** / **`acceptline`**: Reads user input from standard input on the RHS.

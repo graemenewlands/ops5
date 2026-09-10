@@ -17,6 +17,7 @@ const (
 	TypeBoolean
 	TypeVariable
 	TypeVector
+	TypeCompute
 )
 
 func (t ValueType) String() string {
@@ -35,6 +36,8 @@ func (t ValueType) String() string {
 		return "variable"
 	case TypeVector:
 		return "vector"
+	case TypeCompute:
+		return "compute"
 	default:
 		return "unknown"
 	}
@@ -85,6 +88,51 @@ func NewVector(elements []Value) Value {
 	return Value{typ: TypeVector, val: copied}
 }
 
+// ComputeOp represents an arithmetic operator in a compute expression.
+type ComputeOp int
+
+const (
+	ComputeOpAdd ComputeOp = iota
+	ComputeOpSub
+	ComputeOpMul
+	ComputeOpDiv
+	ComputeOpMod
+)
+
+func (op ComputeOp) String() string {
+	switch op {
+	case ComputeOpAdd:
+		return "+"
+	case ComputeOpSub:
+		return "-"
+	case ComputeOpMul:
+		return "*"
+	case ComputeOpDiv:
+		return "/"
+	case ComputeOpMod:
+		return "//"
+	default:
+		return "+"
+	}
+}
+
+// ComputeExpr represents a (compute ...) arithmetic expression.
+type ComputeExpr struct {
+	Operands  []Value
+	Operators []ComputeOp
+}
+
+// NewCompute creates a new compute expression value.
+func NewCompute(operands []Value, operators []ComputeOp) Value {
+	return Value{
+		typ: TypeCompute,
+		val: &ComputeExpr{
+			Operands:  operands,
+			Operators: operators,
+		},
+	}
+}
+
 // Type returns the ValueType.
 func (v Value) Type() ValueType {
 	return v.typ
@@ -126,6 +174,19 @@ func (v Value) VectorElements() []Value {
 	return nil
 }
 
+// IsCompute returns true if this value is a compute expression.
+func (v Value) IsCompute() bool {
+	return v.typ == TypeCompute
+}
+
+// ComputeExpr returns the underlying ComputeExpr pointer if this value is a compute expression.
+func (v Value) ComputeExpr() *ComputeExpr {
+	if v.typ == TypeCompute {
+		return v.val.(*ComputeExpr)
+	}
+	return nil
+}
+
 // VariableName returns the variable identifier without enclosing brackets.
 func (v Value) VariableName() string {
 	if v.typ == TypeVariable {
@@ -159,6 +220,17 @@ func (v Value) String() string {
 			parts = append(parts, el.String())
 		}
 		return strings.Join(parts, " ")
+	case TypeCompute:
+		ce := v.val.(*ComputeExpr)
+		var parts []string
+		parts = append(parts, "compute")
+		for i, op := range ce.Operands {
+			parts = append(parts, op.String())
+			if i < len(ce.Operators) {
+				parts = append(parts, ce.Operators[i].String())
+			}
+		}
+		return "(" + strings.Join(parts, " ") + ")"
 	default:
 		return fmt.Sprintf("%v", v.val)
 	}
@@ -176,6 +248,24 @@ func (v Value) Equal(o Value) bool {
 			}
 			for i := range v1 {
 				if !v1[i].Equal(v2[i]) {
+					return false
+				}
+			}
+			return true
+		}
+		if v.typ == TypeCompute {
+			c1 := v.val.(*ComputeExpr)
+			c2 := o.val.(*ComputeExpr)
+			if len(c1.Operands) != len(c2.Operands) || len(c1.Operators) != len(c2.Operators) {
+				return false
+			}
+			for i := range c1.Operators {
+				if c1.Operators[i] != c2.Operators[i] {
+					return false
+				}
+			}
+			for i := range c1.Operands {
+				if !c1.Operands[i].Equal(c2.Operands[i]) {
 					return false
 				}
 			}
