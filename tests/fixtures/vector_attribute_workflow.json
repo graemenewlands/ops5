@@ -1,6 +1,6 @@
 {
   "name": "vector_attribute_workflow_test",
-  "description": "Validates literalize and vector-attribute directives with multi-valued attribute matching and modification",
+  "description": "Validates literalize and vector-attribute directives with multi-valued attribute matching and modification across floats, strings, integers, and booleans",
   "strategy": "LEX",
   "source_file": "fixtures/vector_attribute_workflow.ops",
   "initial_wm": [
@@ -11,7 +11,10 @@
         "location": "42.36 -71.05",
         "state": "MA",
         "country": "USA",
-        "population": "675000"
+        "population": "675000",
+        "nicknames": "\"Beantown\" \"The Hub\" \"Cradle of Liberty\"",
+        "zipcodes": "2101 2108 2115",
+        "flags": "true false true"
       }
     }
   ],
@@ -25,11 +28,16 @@
         "location": "42.36 -71.05",
         "state": "MA",
         "country": "USA",
-        "population": "680000"
+        "population": "680000",
+        "nicknames": "\"Beantown\" \"The Hub\" \"The Walking City\"",
+        "zipcodes": "2101 2108 2115 2201",
+        "flags": "true true true"
       }
     }
   ],
   "expected_outputs": [
-    "City Boston located at latitude 42.36 and longitude -71.05"
+    "City Boston located at latitude 42.36 and longitude -71.05",
+    "Primary nickname: Beantown Secondary nickname: The Hub",
+    "Subway flag verified: false"
   ]
 }

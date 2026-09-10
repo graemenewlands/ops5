@@ -118,7 +118,7 @@ The tokenizer supports standard OPS5 S-expression syntax. Whitespace and newline
 ; This is an OPS5 comment line
 ```
 
-The engine supports five first-class data types:
+The engine supports first-class data types:
 
 | Data Type | Syntax Pattern | Go Representation | Examples |
 | :--- | :--- | :--- | :--- |
@@ -126,6 +126,8 @@ The engine supports five first-class data types:
 | **Integer** | Optional sign with digits | `model.TypeInteger` (`int64`) | `0`, `42`, `-101`, `1000000` |
 | **Float** | Floating-point decimal | `model.TypeFloat` (`float64`) | `3.14`, `0.001`, `-12.5` |
 | **String** | Double-quoted text | `model.TypeString` (`string`) | `"Hello World"`, `"Batch complete"` |
+| **Boolean** | Case-insensitive boolean literals | `model.TypeBoolean` (`bool`) | `true`, `false` |
+| **Vector** | Space-separated sequence of values | `model.TypeVector` (`[]model.Value`) | `42.36 -71.05`, `"Beantown" "The Hub"` |
 | **Variable** | Delimited by angle brackets `<...>` | `model.TypeVariable` (`string`) | `<x>`, `<id>`, `<goal-ptr>`, `<val>` |
 
 ### Schema & Vector Declarations (`literalize`, `vector-attribute`)

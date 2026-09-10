@@ -120,6 +120,15 @@ func TokenToValue(tok Token) model.Value {
 			return model.NewFloat(f)
 		}
 		return model.NewSymbol(tok.Value)
+	case TokenSymbol:
+		lower := strings.ToLower(tok.Value)
+		if lower == "true" {
+			return model.NewBoolean(true)
+		}
+		if lower == "false" {
+			return model.NewBoolean(false)
+		}
+		return model.NewSymbol(tok.Value)
 	default:
 		return model.NewSymbol(tok.Value)
 	}

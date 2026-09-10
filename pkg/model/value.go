@@ -14,6 +14,7 @@ const (
 	TypeInteger
 	TypeFloat
 	TypeString
+	TypeBoolean
 	TypeVariable
 	TypeVector
 )
@@ -28,6 +29,8 @@ func (t ValueType) String() string {
 		return "float"
 	case TypeString:
 		return "string"
+	case TypeBoolean:
+		return "boolean"
 	case TypeVariable:
 		return "variable"
 	case TypeVector:
@@ -63,6 +66,11 @@ func NewString(s string) Value {
 	return Value{typ: TypeString, val: s}
 }
 
+// NewBoolean creates a new boolean value.
+func NewBoolean(b bool) Value {
+	return Value{typ: TypeBoolean, val: b}
+}
+
 // NewVariable creates a new variable placeholder (e.g. <x>).
 func NewVariable(name string) Value {
 	// Strip enclosing angle brackets if present
@@ -90,6 +98,19 @@ func (v Value) Raw() any {
 // IsVariable returns true if this value is a variable reference.
 func (v Value) IsVariable() bool {
 	return v.typ == TypeVariable
+}
+
+// IsBoolean returns true if this value is a boolean.
+func (v Value) IsBoolean() bool {
+	return v.typ == TypeBoolean
+}
+
+// Boolean returns the underlying boolean if this value is a boolean, otherwise false.
+func (v Value) Boolean() bool {
+	if v.typ == TypeBoolean {
+		return v.val.(bool)
+	}
+	return false
 }
 
 // IsVector returns true if this value is a vector of values.
@@ -124,6 +145,11 @@ func (v Value) String() string {
 		return strconv.FormatFloat(v.val.(float64), 'g', -1, 64)
 	case TypeString:
 		return strconv.Quote(v.val.(string))
+	case TypeBoolean:
+		if v.val.(bool) {
+			return "true"
+		}
+		return "false"
 	case TypeVariable:
 		return "<" + v.val.(string) + ">"
 	case TypeVector:
@@ -163,6 +189,13 @@ func (v Value) Equal(o Value) bool {
 	}
 	if v.typ == TypeFloat && o.typ == TypeInteger {
 		return v.val.(float64) == float64(o.val.(int64))
+	}
+	// Boolean and Symbol cross-comparison (e.g. true vs "true", false vs "false")
+	if v.typ == TypeBoolean && o.typ == TypeSymbol {
+		return strings.EqualFold(strconv.FormatBool(v.val.(bool)), o.val.(string))
+	}
+	if v.typ == TypeSymbol && o.typ == TypeBoolean {
+		return strings.EqualFold(v.val.(string), strconv.FormatBool(o.val.(bool)))
 	}
 	return false
 }
@@ -207,9 +240,31 @@ func (v Value) Compare(o Value) (int, error) {
 		return 0, nil
 	}
 
+	if v.typ == TypeBoolean && o.typ == TypeBoolean {
+		b1 := v.val.(bool)
+		b2 := o.val.(bool)
+		if !b1 && b2 {
+			return -1, nil
+		} else if b1 && !b2 {
+			return 1, nil
+		}
+		return 0, nil
+	}
+
 	if v.typ == TypeSymbol && o.typ == TypeSymbol {
 		s1 := v.val.(string)
 		s2 := o.val.(string)
+		if s1 < s2 {
+			return -1, nil
+		} else if s1 > s2 {
+			return 1, nil
+		}
+		return 0, nil
+	}
+
+	if (v.typ == TypeBoolean && o.typ == TypeSymbol) || (v.typ == TypeSymbol && o.typ == TypeBoolean) {
+		s1 := v.String()
+		s2 := o.String()
 		if s1 < s2 {
 			return -1, nil
 		} else if s1 > s2 {
@@ -224,6 +279,7 @@ func (v Value) Compare(o Value) (int, error) {
 // AutoValue creates an appropriate Value from a string token.
 // - If wrapped in quotes, creates a String.
 // - If starts with '<' and ends with '>', creates a Variable.
+// - If "true" or "false" (case-insensitive), creates a Boolean.
 // - If parses as integer, creates an Int.
 // - If parses as float, creates a Float.
 // - Otherwise, creates a Symbol.
@@ -237,6 +293,13 @@ func AutoValue(token string) Value {
 	}
 	if strings.HasPrefix(token, "<") && strings.HasSuffix(token, ">") && len(token) > 2 {
 		return NewVariable(token)
+	}
+	lower := strings.ToLower(token)
+	if lower == "true" {
+		return NewBoolean(true)
+	}
+	if lower == "false" {
+		return NewBoolean(false)
 	}
 	if n, err := strconv.ParseInt(token, 10, 64); err == nil {
 		return NewInt(n)

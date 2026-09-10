@@ -20,6 +20,10 @@ func TestValueEquality(t *testing.T) {
 		{"string equality", NewString("hello"), NewString("hello"), true},
 		{"variable equality", NewVariable("<x>"), NewVariable("x"), true},
 		{"symbol vs string", NewSymbol("hello"), NewString("hello"), false},
+		{"boolean equality", NewBoolean(true), NewBoolean(true), true},
+		{"boolean diff", NewBoolean(true), NewBoolean(false), false},
+		{"boolean and symbol cross-equality", NewBoolean(true), NewSymbol("true"), true},
+		{"boolean and symbol false cross-equality", NewBoolean(false), NewSymbol("false"), true},
 	}
 
 	for _, tt := range tests {
@@ -71,6 +75,8 @@ func TestAutoValue(t *testing.T) {
 		{"3.14", TypeFloat, "3.14"},
 		{"<x>", TypeVariable, "<x>"},
 		{`"quoted text"`, TypeString, `"quoted text"`},
+		{"true", TypeBoolean, "true"},
+		{"false", TypeBoolean, "false"},
 	}
 
 	for _, tt := range tests {
@@ -108,5 +114,26 @@ func TestVectorValue(t *testing.T) {
 	}
 	if len(v1.VectorElements()) != 2 {
 		t.Fatalf("expected 2 elements, got %d", len(v1.VectorElements()))
+	}
+
+	// Vectors of strings, integers, booleans, and heterogeneous elements
+	strVec := NewVector([]Value{NewString("Beantown"), NewString("The Hub")})
+	if strVec.String() != `"Beantown" "The Hub"` {
+		t.Fatalf("expected '\"Beantown\" \"The Hub\"', got %q", strVec.String())
+	}
+
+	intVec := NewVector([]Value{NewInt(2101), NewInt(2108), NewInt(2115)})
+	if intVec.String() != "2101 2108 2115" {
+		t.Fatalf("expected '2101 2108 2115', got %q", intVec.String())
+	}
+
+	boolVec := NewVector([]Value{NewBoolean(true), NewBoolean(false), NewBoolean(true)})
+	if boolVec.String() != "true false true" {
+		t.Fatalf("expected 'true false true', got %q", boolVec.String())
+	}
+
+	hetVec := NewVector([]Value{NewString("alpha"), NewInt(10), NewFloat(3.14), NewBoolean(true)})
+	if hetVec.String() != `"alpha" 10 3.14 true` {
+		t.Fatalf("expected '\"alpha\" 10 3.14 true', got %q", hetVec.String())
 	}
 }

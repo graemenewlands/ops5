@@ -47,6 +47,7 @@ These keywords, delimiters, and operators are recognized in rule condition patte
 | **`<=`** | Relational test | Less than or equal to. | `(sensor ^temp <= 100)` |
 | **`>`** | Relational test | Strictly greater than. | `(priority ^level > 1)` |
 | **`>=`** | Relational test | Greater than or equal to. | `(priority ^level >= 1)` |
+| **`true`**, **`false`** | Boolean literals | First-class boolean values (case-insensitive) for scalar and vector attributes. | `(sensor ^active true)` |
 | **`nil`** | Value literal | Represents unset/null attributes when an attribute is specified without a value. | `(modify <g> ^result nil)` |
 | **`;`** | Comment marker | Line comment running to the end of the line. | `; Process next batch item` |
 

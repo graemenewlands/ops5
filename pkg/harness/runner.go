@@ -154,15 +154,14 @@ func (r *Runner) Run(tc *TestCase) *Result {
 	for _, w := range tc.InitialWM {
 		attrs := make(map[string]model.Value, len(w.Attributes))
 		for k, v := range w.Attributes {
-			if eng.IsVectorAttribute(k) {
-				fields := strings.Fields(v)
-				vec := make([]model.Value, len(fields))
-				for fi, f := range fields {
-					vec[fi] = model.AutoValue(f)
-				}
-				attrs[k] = model.NewVector(vec)
+			normK := model.NormalizeAttribute(k)
+			vals := parseVectorString(v)
+			if eng.IsVectorAttribute(normK) || len(vals) > 1 {
+				attrs[normK] = model.NewVector(vals)
+			} else if len(vals) == 1 {
+				attrs[normK] = vals[0]
 			} else {
-				attrs[k] = model.AutoValue(v)
+				attrs[normK] = model.AutoValue(v)
 			}
 		}
 		eng.Make(w.Class, attrs)
@@ -277,6 +276,19 @@ func (r *Runner) Run(tc *TestCase) *Result {
 	}
 }
 
+func parseVectorString(s string) []model.Value {
+	l := parser.NewLexer(s)
+	var vals []model.Value
+	for {
+		tok, err := l.NextToken()
+		if err != nil || tok.Type == parser.TokenEOF {
+			break
+		}
+		vals = append(vals, parser.TokenToValue(tok))
+	}
+	return vals
+}
+
 func matchAttributeValue(actual model.Value, expectedStr string) bool {
 	if actual.Equal(model.AutoValue(expectedStr)) {
 		return true
@@ -285,12 +297,12 @@ func matchAttributeValue(actual model.Value, expectedStr string) bool {
 		if actual.String() == expectedStr {
 			return true
 		}
-		fields := strings.Fields(expectedStr)
+		expectedElems := parseVectorString(expectedStr)
 		elems := actual.VectorElements()
-		if len(fields) == len(elems) {
+		if len(expectedElems) == len(elems) {
 			match := true
-			for i, f := range fields {
-				if !elems[i].Equal(model.AutoValue(f)) {
+			for i := range expectedElems {
+				if !elems[i].Equal(expectedElems[i]) {
 					match = false
 					break
 				}

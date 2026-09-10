@@ -1,11 +1,24 @@
-; OPS5 Workflow with vector-attribute and literalize
-(literalize City name location state country population)
-(vector-attribute location)
+; OPS5 Workflow with vector-attribute and literalize demonstrating support for
+; vectors of floats, strings, integers, and booleans.
+(literalize City name location state country population nicknames zipcodes flags)
+(vector-attribute location nicknames zipcodes flags)
 
-(p report-city
-   <c> (City ^name <name> ^location <lat> <long> ^state MA)
+(p report-and-update-city
+   <c> (City ^name <name>
+             ^location <lat> <long>
+             ^state MA
+             ^country USA
+             ^nicknames <primary-nick> <secondary-nick> <tertiary-nick>
+             ^zipcodes 2108
+             ^flags true <has-subway> true)
    -->
-   (modify <c> ^population 680000)
+   (modify <c>
+           ^population 680000
+           ^nicknames "Beantown" "The Hub" "The Walking City"
+           ^zipcodes 2101 2108 2115 2201
+           ^flags true true true)
    (write "City" <name> "located at latitude" <lat> "and longitude" <long>)
+   (write "Primary nickname:" <primary-nick> "Secondary nickname:" <secondary-nick>)
+   (write "Subway flag verified:" <has-subway>)
    (halt)
 )
