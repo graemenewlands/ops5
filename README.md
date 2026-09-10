@@ -26,6 +26,7 @@ This engine provides a complete, modern execution environment for rule-based sys
    - [Negative Condition Elements](#negative-condition-elements)
    - [Dynamic & Retroactive Compilation](#dynamic--retroactive-compilation)
 4. [Conflict Resolution & Execution Lifecycle](#conflict-resolution--execution-lifecycle)
+   - [Selection Strategies (LEX & MEA) Reference](docs/conflict_resolution.md)
    - [Match-Resolve-Act Cycle](#match-resolve-act-cycle)
    - [Refraction Semantics](#refraction-semantics)
    - [LEX Strategy (Lexicographic)](#lex-strategy-lexicographic)
@@ -461,6 +462,9 @@ In many classic Rete implementations, all rules had to be declared before assert
 ---
 
 ## Conflict Resolution & Execution Lifecycle
+
+> [!NOTE]
+> For an in-depth guide on selection algorithms, priority vectors, goal stack patterns, and side-by-side execution walkthroughs, see the [OPS5 Selection Strategy Reference (LEX & MEA)](docs/conflict_resolution.md).
 
 ```mermaid
 sequenceDiagram

@@ -90,7 +90,7 @@ The interactive CLI shell (`ops5`) supports both bare words and paren-enclosed c
 | **`schemas`** / **`schema`** | `[class]` | Prints registered class schemas and their vector attributes. |
 | **`vector-attribute`** | `<attr1> ...` | Declares attribute(s) as multi-valued vector attributes. |
 | **`vector-attributes`** | _none_ | Lists all registered vector attributes. |
-| **`strategy`** | `[lex\|mea]` | Displays or sets the conflict resolution strategy (`LEX` or `MEA`). |
+| **`strategy`** | `[lex\|mea]` | Displays or sets conflict resolution strategy (`LEX` or `MEA`). See [Selection Strategy Reference](conflict_resolution.md). |
 | **`trace`** | `on\|off` | Toggles rule firing execution traces. |
 | **`load`** | `<file.ops>` | Loads and parses an external OPS5 source file. |
 | **`test`** | `<file.json>` | Executes a JSON test harness case. |
