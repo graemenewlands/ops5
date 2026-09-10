@@ -19,6 +19,7 @@ const (
 	TypeVector
 	TypeCompute
 	TypeAccept
+	TypeGenatom
 )
 
 func (t ValueType) String() string {
@@ -41,6 +42,8 @@ func (t ValueType) String() string {
 		return "compute"
 	case TypeAccept:
 		return "accept"
+	case TypeGenatom:
+		return "genatom"
 	default:
 		return "unknown"
 	}
@@ -166,6 +169,19 @@ func (v Value) AcceptExpr() *AcceptExpr {
 	return nil
 }
 
+// NewGenatom creates a new genatom function value.
+func NewGenatom() Value {
+	return Value{
+		typ: TypeGenatom,
+		val: "genatom",
+	}
+}
+
+// IsGenatom returns true if this value is a genatom function call.
+func (v Value) IsGenatom() bool {
+	return v.typ == TypeGenatom
+}
+
 // Type returns the ValueType.
 func (v Value) Type() ValueType {
 	return v.typ
@@ -274,6 +290,8 @@ func (v Value) String() string {
 			return "(" + name + " " + ae.LogicalFile + ")"
 		}
 		return "(" + name + ")"
+	case TypeGenatom:
+		return "(genatom)"
 	default:
 		return fmt.Sprintf("%v", v.val)
 	}
@@ -283,6 +301,9 @@ func (v Value) String() string {
 // Supports numeric cross-equality between integer and float if values match.
 func (v Value) Equal(o Value) bool {
 	if v.typ == o.typ {
+		if v.typ == TypeGenatom {
+			return true
+		}
 		if v.typ == TypeVector {
 			v1 := v.val.([]Value)
 			v2 := o.val.([]Value)

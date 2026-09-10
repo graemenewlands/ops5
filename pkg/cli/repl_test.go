@@ -174,3 +174,36 @@ func TestREPLFileIOCommands(t *testing.T) {
 	}
 }
 
+func TestREPLGenatom(t *testing.T) {
+	commands := `
+	genatom
+	(genatom)
+	(make item ^id (genatom))
+	wm item
+	reset
+	genatom
+	exit
+	`
+
+	in := strings.NewReader(commands)
+	var out bytes.Buffer
+
+	repl := NewREPL(in, &out)
+	repl.Start()
+
+	output := out.String()
+	if !strings.Contains(output, "atom1\n") {
+		t.Fatalf("expected first atom to be atom1, got:\n%s", output)
+	}
+	if !strings.Contains(output, "atom2\n") {
+		t.Fatalf("expected second atom to be atom2, got:\n%s", output)
+	}
+	if !strings.Contains(output, "(1: item ^id atom3)") {
+		t.Fatalf("expected item with id atom3 asserted, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Working memory, conflict set, and genatom counter reset.") {
+		t.Fatalf("expected reset message, got:\n%s", output)
+	}
+}
+
+

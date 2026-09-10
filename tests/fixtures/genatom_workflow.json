@@ -1,0 +1,90 @@
+{
+  "name": "genatom_workflow_test",
+  "description": "Validates genatom unique symbol generation in rule LHS/RHS pipeline",
+  "strategy": "LEX",
+  "source_file": "fixtures/genatom_workflow.ops",
+  "initial_wm": [
+    {
+      "class": "stage",
+      "attributes": {
+        "name": "assign"
+      }
+    },
+    {
+      "class": "request",
+      "attributes": {
+        "item": "book",
+        "status": "pending",
+        "tx-id": "nil"
+      }
+    },
+    {
+      "class": "request",
+      "attributes": {
+        "item": "pen",
+        "status": "pending",
+        "tx-id": "nil"
+      }
+    }
+  ],
+  "max_cycles": 10,
+  "expected_cycles": 6,
+  "expected_wm": [
+    {
+      "class": "stage",
+      "attributes": {
+        "name": "done"
+      }
+    },
+    {
+      "class": "request",
+      "attributes": {
+        "item": "pen",
+        "status": "done",
+        "tx-id": "atom1"
+      }
+    },
+    {
+      "class": "request",
+      "attributes": {
+        "item": "book",
+        "status": "done",
+        "tx-id": "atom2"
+      }
+    },
+    {
+      "class": "processed-tx",
+      "attributes": {
+        "item": "book",
+        "tx-id": "atom2"
+      }
+    },
+    {
+      "class": "processed-tx",
+      "attributes": {
+        "item": "pen",
+        "tx-id": "atom1"
+      }
+    }
+  ],
+  "forbidden_wm": [
+    {
+      "class": "request",
+      "attributes": {
+        "status": "pending"
+      }
+    },
+    {
+      "class": "request",
+      "attributes": {
+        "status": "assigned"
+      }
+    }
+  ],
+  "expected_outputs": [
+    "Assigned transaction ID: atom1 to pen",
+    "Assigned transaction ID: atom2 to book",
+    "Completed transaction: atom2",
+    "Completed transaction: atom1"
+  ]
+}

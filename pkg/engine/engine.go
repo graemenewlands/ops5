@@ -41,6 +41,7 @@ type Engine struct {
 	traceEnabled     bool
 	currentCol       int
 	lastAddedTimetag int64
+	genatomCounter   int64
 
 	// File I/O subsystem
 	openFiles           map[string]*openFileEntry
@@ -74,6 +75,7 @@ func New() *Engine {
 		traceEnabled:        false,
 		currentCol:          1,
 		lastAddedTimetag:    0,
+		genatomCounter:      0,
 		openFiles:           make(map[string]*openFileEntry),
 		defaultAcceptStream: "",
 		defaultWriteStream:  "",
@@ -198,9 +200,17 @@ func (e *Engine) Schemas() []*model.ClassSchema {
 	return res
 }
 
-// Make asserts a new WME.
+// Make asserts a new WME, resolving any RHS value functions (compute, accept, genatom).
 func (e *Engine) Make(class string, attrs map[string]model.Value) *model.WME {
-	wme := e.wm.Make(class, attrs)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	resolvedAttrs := make(map[string]model.Value, len(attrs))
+	orderedKeys := e.getOrderedAttributeKeys(class, attrs)
+	for _, k := range orderedKeys {
+		resolvedAttrs[k] = e.resolveValue(attrs[k], nil)
+	}
+	wme := e.wm.Make(class, resolvedAttrs)
 	e.lastAddedTimetag = wme.Timetag
 	return wme
 }
@@ -210,9 +220,22 @@ func (e *Engine) Remove(timetag int64) (*model.WME, error) {
 	return e.wm.Remove(timetag)
 }
 
-// Modify updates an existing WME.
+// Modify updates an existing WME, resolving any RHS value functions.
 func (e *Engine) Modify(timetag int64, attrs map[string]model.Value) (*model.WME, error) {
-	wme, err := e.wm.Modify(timetag, attrs)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	var clsName string
+	if existingWme, exists := e.wm.Get(timetag); exists && existingWme != nil {
+		clsName = existingWme.Class
+	}
+	resolvedAttrs := make(map[string]model.Value, len(attrs))
+	orderedKeys := e.getOrderedAttributeKeys(clsName, attrs)
+	for _, k := range orderedKeys {
+		resolvedAttrs[k] = e.resolveValue(attrs[k], nil)
+	}
+
+	wme, err := e.wm.Modify(timetag, resolvedAttrs)
 	if err == nil && wme != nil {
 		e.lastAddedTimetag = wme.Timetag
 	}
@@ -698,6 +721,9 @@ func (e *Engine) resolveValue(val model.Value, bindings map[string]model.Value) 
 		}
 		return model.NewSymbol("nil")
 	}
+	if val.IsGenatom() {
+		return e.genatomLocked()
+	}
 	return val
 }
 
@@ -993,4 +1019,24 @@ func (e *Engine) getOrderedAttributeKeys(class string, attrs map[string]model.Va
 	keys = append(keys, remaining...)
 	return keys
 }
+
+// Genatom generates a new unique symbolic atom (atom1, atom2, ...).
+func (e *Engine) Genatom() model.Value {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.genatomLocked()
+}
+
+func (e *Engine) genatomLocked() model.Value {
+	e.genatomCounter++
+	return model.NewSymbol(fmt.Sprintf("atom%d", e.genatomCounter))
+}
+
+// ResetGenatom resets the genatom sequential counter to 0.
+func (e *Engine) ResetGenatom() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.genatomCounter = 0
+}
+
 

@@ -12,6 +12,7 @@ This engine provides a complete, modern execution environment for rule-based sys
 2. [Language & Syntax Specification](#language--syntax-specification)
    - [Keywords & Syntax Quick Reference](docs/keywords.md)
    - [File I/O, Stream Redirection & Input](docs/file_io.md)
+   - [Unique Atom Generation (`genatom`)](docs/genatom.md)
    - [Lexical Elements & Data Types](#lexical-elements--data-types)
    - [Schema & Vector Declarations (`literalize`, `vector-attribute`)](#schema--vector-declarations-literalize-vector-attribute)
    - [Working Memory Elements (WMEs)](#working-memory-elements-wmes)
@@ -380,6 +381,17 @@ Reads user input from standard input or a redirected logical file stream:
 - `(accept)`: Reads the next whitespace-delimited atom (symbol, integer, float).
 - `(acceptline)`: Reads an entire line of input into a scalar or vector.
 
+#### `(genatom)`
+> [!NOTE]
+> For complete documentation and examples, see the [OPS5 `genatom` Reference](docs/genatom.md).
+
+Generates a unique sequential symbolic atom (`atom1`, `atom2`, `atom3`, ...):
+```ops5
+(bind <id> (genatom))
+(make task ^id <id> ^status ready)
+```
+Can also be used directly as an attribute value in `make` and `modify`, in `write` output, and in top-level `make` declarations.
+
 ---
 
 ## Rete Pattern Matching Engine
@@ -596,6 +608,7 @@ Defined rule 'classify-alert' (conditions=1, specificity=3)
 | `openfile` | `<log-name> <filespec> <mode>` | Open file stream (`in`, `out`, `append`) | `(openfile ruletrace \|RuleTrace.ops\| out)` |
 | `closefile` | `<log-name>` | Close an open file stream | `(closefile ruletrace)` |
 | `default` | `[<log-name> <subsystem>]` | View or set default stream for `accept`, `write`, `trace` | `(default ruletrace accept)` |
+| `genatom` / `(genatom)` | *none* | Generate and display a unique symbolic atom | `(genatom)` |
 | `wm` | `[class]` | Display active WMEs (optionally filtered by class) | `wm item` |
 | `cs` | *none* | Display conflict set in current salience order (`*` indicates dominant) | `cs` |
 | `step` | *none* | Execute exactly one Match-Resolve-Act cycle | `step` |

@@ -279,10 +279,14 @@ func (r *REPL) handleCommand(input string) bool {
 		}
 		r.runTestCase(parts[1])
 
+	case "genatom":
+		fmt.Fprintln(r.out, r.engine.Genatom().String())
+
 	case "reset":
 		r.engine.WorkingMemory().Reset()
 		r.engine.ConflictSet().Reset()
-		fmt.Fprintln(r.out, "Working memory and conflict set reset.")
+		r.engine.ResetGenatom()
+		fmt.Fprintln(r.out, "Working memory, conflict set, and genatom counter reset.")
 
 	default:
 		fmt.Fprintf(r.out, "Unknown command: %s (type 'help' for command list)\n", parts[0])
@@ -616,6 +620,7 @@ Commands:
   openfile <log> <f> <m>    Open a file stream (modes: in, out, append)
   closefile <log>           Close an open file stream
   default <log> <subsys>    Set default stream for accept, write, or trace
+  genatom                   Generate a unique symbolic atom (e.g. atom1)
   wm [class]                Display current working memory elements
   schemas [class]           Display declared class schemas
   cs                        Display conflict set (pending instantiations in salience order)

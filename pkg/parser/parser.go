@@ -374,7 +374,7 @@ func (p *Parser) isRHSFunction() bool {
 		return false
 	}
 	sub := strings.ToLower(p.peek.Value)
-	return sub == "compute" || sub == "accept" || sub == "acceptline"
+	return sub == "compute" || sub == "accept" || sub == "acceptline" || sub == "genatom"
 }
 
 func (p *Parser) parseRHSFunction() (model.Value, error) {
@@ -386,9 +386,25 @@ func (p *Parser) parseRHSFunction() (model.Value, error) {
 		return p.parseAccept(false)
 	case "acceptline":
 		return p.parseAccept(true)
+	case "genatom":
+		return p.parseGenatom()
 	default:
 		return model.NewSymbol("nil"), fmt.Errorf("unknown RHS function: %s", sub)
 	}
+}
+
+func (p *Parser) parseGenatom() (model.Value, error) {
+	if _, err := p.expect(TokenLParen); err != nil {
+		return model.NewSymbol("nil"), err
+	}
+	verbTok, err := p.expect(TokenSymbol)
+	if err != nil || strings.ToLower(verbTok.Value) != "genatom" {
+		return model.NewSymbol("nil"), fmt.Errorf("expected 'genatom', got %v", verbTok.Value)
+	}
+	if _, err := p.expect(TokenRParen); err != nil {
+		return model.NewSymbol("nil"), fmt.Errorf("expected ')' closing genatom at line %d: %w", verbTok.Line, err)
+	}
+	return model.NewGenatom(), nil
 }
 
 func (p *Parser) parseAccept(isLine bool) (model.Value, error) {
@@ -577,17 +593,17 @@ func (p *Parser) parseAction() (model.Action, error) {
 	case "write":
 		var args []model.WriteArg
 		for p.current.Type != TokenRParen && p.current.Type != TokenEOF {
+			if p.isRHSFunction() {
+				fnVal, err := p.parseRHSFunction()
+				if err != nil {
+					return nil, err
+				}
+				args = append(args, model.WriteValue(fnVal))
+				continue
+			}
 			if p.current.Type == TokenLParen {
 				if p.peek.Type == TokenSymbol {
 					subVerb := strings.ToLower(p.peek.Value)
-					if subVerb == "compute" || subVerb == "accept" || subVerb == "acceptline" {
-						fnVal, err := p.parseRHSFunction()
-						if err != nil {
-							return nil, err
-						}
-						args = append(args, model.WriteValue(fnVal))
-						continue
-					}
 					if subVerb == "crlf" {
 						p.advance() // past '('
 						p.advance() // past 'crlf'
@@ -801,9 +817,17 @@ func (p *Parser) ParseMake() (string, map[string]model.Value, error) {
 			}
 			var vals []model.Value
 			for p.current.Type != TokenAttribute && p.current.Type != TokenRParen && p.current.Type != TokenEOF {
-				vals = append(vals, TokenToValue(p.current))
-				if err := p.advance(); err != nil {
-					return "", nil, err
+				if p.isRHSFunction() {
+					fnVal, err := p.parseRHSFunction()
+					if err != nil {
+						return "", nil, err
+					}
+					vals = append(vals, fnVal)
+				} else {
+					vals = append(vals, TokenToValue(p.current))
+					if err := p.advance(); err != nil {
+						return "", nil, err
+					}
 				}
 			}
 			isVec := p.IsVectorAttribute(attrName) || (schema != nil && schema.IsVectorAttribute(attrName))
@@ -815,9 +839,18 @@ func (p *Parser) ParseMake() (string, map[string]model.Value, error) {
 				attrs[attrName] = model.NewSymbol("nil")
 			}
 		} else {
-			val := TokenToValue(p.current)
-			if err := p.advance(); err != nil {
-				return "", nil, err
+			var val model.Value
+			if p.isRHSFunction() {
+				fnVal, err := p.parseRHSFunction()
+				if err != nil {
+					return "", nil, err
+				}
+				val = fnVal
+			} else {
+				val = TokenToValue(p.current)
+				if err := p.advance(); err != nil {
+					return "", nil, err
+				}
 			}
 			attrName := fmt.Sprintf("attr%d", posIndex+1)
 			if schema != nil && posIndex < len(schema.Attributes) {

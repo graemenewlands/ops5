@@ -1,0 +1,37 @@
+; Workflow validating genatom function for unique symbol generation
+(literalize stage name)
+(literalize request item status tx-id)
+(literalize processed-tx tx-id item)
+
+(p assign-tx-id
+   <st> (stage ^name assign)
+   <req> (request ^status pending ^tx-id nil ^item <item>)
+   -->
+   (bind <id> (genatom))
+   (modify <req> ^status assigned ^tx-id <id>)
+   (write "Assigned transaction ID:" <id> "to" <item> (crlf))
+)
+
+(p check-all-assigned
+   <st> (stage ^name assign)
+   -(request ^status pending)
+   -->
+   (modify <st> ^name process)
+)
+
+(p process-transaction
+   (stage ^name process)
+   <req> (request ^status assigned ^tx-id <id> ^item <item>)
+   -->
+   (make processed-tx ^tx-id <id> ^item <item>)
+   (modify <req> ^status done)
+   (write "Completed transaction:" <id> (crlf))
+)
+
+(p finish
+   <st> (stage ^name process)
+   -(request ^status assigned)
+   -->
+   (modify <st> ^name done)
+   (halt)
+)

@@ -567,6 +567,55 @@ func TestParseFileIOAndAccept(t *testing.T) {
 	}
 }
 
+func TestParseGenatom(t *testing.T) {
+	src := `
+	(p test-genatom
+	   (goal ^status active)
+	   -->
+	   (bind <id> (genatom))
+	   (make task ^id (genatom) ^parent <id>)
+	   (modify 1 ^id (genatom))
+	   (write "New atom:" (genatom) (crlf))
+	)
+	`
+	rules, err := ParseRules(src)
+	if err != nil {
+		t.Fatalf("failed to parse rule: %v", err)
+	}
+	if len(rules) != 1 {
+		t.Fatalf("expected 1 rule, got %d", len(rules))
+	}
+	r := rules[0]
+	if len(r.Actions) != 4 {
+		t.Fatalf("expected 4 actions, got %d", len(r.Actions))
+	}
+
+	// 0: bind <id> (genatom)
+	b, ok := r.Actions[0].(model.BindAction)
+	if !ok || b.Variable != "id" || !b.Value.IsGenatom() {
+		t.Errorf("expected bind action with genatom, got %+v", r.Actions[0])
+	}
+
+	// 1: make task ^id (genatom) ^parent <id>
+	m, ok := r.Actions[1].(model.MakeAction)
+	if !ok || !m.Attributes["id"].IsGenatom() {
+		t.Errorf("expected make action with genatom, got %+v", r.Actions[1])
+	}
+
+	// 2: modify 1 ^id (genatom)
+	mod, ok := r.Actions[2].(model.ModifyAction)
+	if !ok || !mod.Attributes["id"].IsGenatom() {
+		t.Errorf("expected modify action with genatom, got %+v", r.Actions[2])
+	}
+
+	// 3: write "New atom:" (genatom) (crlf)
+	w, ok := r.Actions[3].(model.WriteAction)
+	if !ok || len(w.Args) != 3 || !w.Args[1].Value.IsGenatom() {
+		t.Errorf("expected write action with genatom, got %+v", r.Actions[3])
+	}
+}
+
+
 
 
 

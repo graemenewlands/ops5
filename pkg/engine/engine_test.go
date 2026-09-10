@@ -595,4 +595,92 @@ func TestEngineAcceptStdinReader(t *testing.T) {
 	}
 }
 
+func TestEngineGenatom(t *testing.T) {
+	eng := New()
+	var outBuf bytes.Buffer
+	eng.SetOutputWriter(&outBuf)
+
+	eng.DeclareClass("task", []string{"id", "label"})
+	eng.DeclareClass("node", []string{"id", "ref"})
+
+	rule := model.NewRule("create-nodes")
+	rule.AddCondition(model.NewPositiveCE("start"))
+	rule.AddAction(model.BindAction{
+		Variable: "bound-id",
+		Value:    model.NewGenatom(),
+	})
+	rule.AddAction(model.MakeAction{
+		Class: "task",
+		Attributes: map[string]model.Value{
+			"id":    model.NewVariable("<bound-id>"),
+			"label": model.NewSymbol("first"),
+		},
+	})
+	rule.AddAction(model.MakeAction{
+		Class: "node",
+		Attributes: map[string]model.Value{
+			"id":  model.NewGenatom(),
+			"ref": model.NewGenatom(),
+		},
+	})
+	rule.AddAction(model.WriteAction{
+		Args: []model.WriteArg{
+			model.WriteValue(model.NewSymbol("GEN:")),
+			model.WriteValue(model.NewGenatom()),
+			model.WriteCRLF(),
+		},
+	})
+	rule.AddAction(model.HaltAction{})
+	eng.AddRule(rule)
+
+	eng.Make("start", nil)
+	cycles, err := eng.Run(10)
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	if cycles != 1 {
+		t.Fatalf("expected 1 cycle, got %d", cycles)
+	}
+
+	tasks := eng.WorkingMemory().FindByClass("task")
+	if len(tasks) != 1 {
+		t.Fatalf("expected 1 task, got %d", len(tasks))
+	}
+	taskId, _ := tasks[0].Get("id")
+	if !taskId.Equal(model.NewSymbol("atom1")) {
+		t.Fatalf("expected task id 'atom1', got %v", taskId)
+	}
+
+	nodes := eng.WorkingMemory().FindByClass("node")
+	if len(nodes) != 1 {
+		t.Fatalf("expected 1 node, got %d", len(nodes))
+	}
+	nodeId, _ := nodes[0].Get("id")
+	nodeRef, _ := nodes[0].Get("ref")
+	if !nodeId.Equal(model.NewSymbol("atom2")) {
+		t.Fatalf("expected node id 'atom2', got %v", nodeId)
+	}
+	if !nodeRef.Equal(model.NewSymbol("atom3")) {
+		t.Fatalf("expected node ref 'atom3', got %v", nodeRef)
+	}
+
+	if !strings.Contains(outBuf.String(), "GEN: atom4") {
+		t.Fatalf("expected write output to contain 'GEN: atom4', got %q", outBuf.String())
+	}
+
+	// Direct engine API test
+	atom5 := eng.Genatom()
+	if !atom5.Equal(model.NewSymbol("atom5")) {
+		t.Fatalf("expected atom5, got %v", atom5)
+	}
+
+	// Reset genatom counter
+	eng.ResetGenatom()
+	atom1Again := eng.Genatom()
+	if !atom1Again.Equal(model.NewSymbol("atom1")) {
+		t.Fatalf("expected atom1 after reset, got %v", atom1Again)
+	}
+}
+
+
 
