@@ -10,6 +10,7 @@ This engine provides a complete, modern execution environment for rule-based sys
 
 1. [Architectural Overview](#architectural-overview)
 2. [Language & Syntax Specification](#language--syntax-specification)
+   - [Keywords & Syntax Quick Reference](docs/keywords.md)
    - [Lexical Elements & Data Types](#lexical-elements--data-types)
    - [Schema & Vector Declarations (`literalize`, `vector-attribute`)](#schema--vector-declarations-literalize-vector-attribute)
    - [Working Memory Elements (WMEs)](#working-memory-elements-wmes)
@@ -106,6 +107,9 @@ The runtime strictly decouples the pattern-matching network from the working mem
 ---
 
 ## Language & Syntax Specification
+
+> [!TIP]
+> For an exhaustive, quick-reference table of all top-level directives, RHS actions, LHS operators, REPL commands, and roadmap items, see the [OPS5 Syntax & Keyword Reference](docs/keywords.md).
 
 ### Lexical Elements & Data Types
 
