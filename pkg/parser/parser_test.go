@@ -424,3 +424,56 @@ func TestParseBindAndCompute(t *testing.T) {
 	}
 }
 
+func TestParseCBind(t *testing.T) {
+	src := `
+(p test-cbind
+   (goal ^status start)
+   -->
+   (make person ^name "Alice")
+   (cbind <p>)
+   (modify <p> ^age 30)
+   (cbind p2)
+)
+`
+	rules, err := ParseRules(src)
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+	if len(rules) != 1 {
+		t.Fatalf("expected 1 rule, got %d", len(rules))
+	}
+	r := rules[0]
+	if len(r.Actions) != 4 {
+		t.Fatalf("expected 4 actions, got %d", len(r.Actions))
+	}
+
+	cb1, ok := r.Actions[1].(model.CBindAction)
+	if !ok {
+		t.Fatalf("action 1 not CBindAction: %T", r.Actions[1])
+	}
+	if cb1.Variable != "p" {
+		t.Errorf("expected variable p, got %s", cb1.Variable)
+	}
+
+	cb2, ok := r.Actions[3].(model.CBindAction)
+	if !ok {
+		t.Fatalf("action 3 not CBindAction: %T", r.Actions[3])
+	}
+	if cb2.Variable != "p2" {
+		t.Errorf("expected variable p2, got %s", cb2.Variable)
+	}
+
+	// Error test: missing argument
+	errSrc := `(p err-rule (goal) --> (cbind))`
+	if _, err := ParseRules(errSrc); err == nil {
+		t.Errorf("expected error for (cbind) with no argument")
+	}
+
+	// Error test: extra argument
+	errSrc2 := `(p err-rule (goal) --> (cbind <p> <extra>))`
+	if _, err := ParseRules(errSrc2); err == nil {
+		t.Errorf("expected error for (cbind <p> <extra>) with extra argument")
+	}
+}
+
+

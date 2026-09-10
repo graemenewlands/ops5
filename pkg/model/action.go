@@ -10,6 +10,7 @@ const (
 	ActionWrite
 	ActionHalt
 	ActionBind
+	ActionCBind
 	ActionCustom
 )
 
@@ -92,6 +93,13 @@ type BindAction struct {
 }
 
 func (a BindAction) Type() ActionType { return ActionBind }
+
+// CBindAction binds the last element added to working memory (by make, modify, or call) to an element variable.
+type CBindAction struct {
+	Variable string // e.g. "<p>" or "p"
+}
+
+func (a CBindAction) Type() ActionType { return ActionCBind }
 
 // CustomAction executes an arbitrary user function during firing.
 type CustomAction struct {

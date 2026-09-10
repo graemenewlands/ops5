@@ -343,6 +343,14 @@ Assigns the evaluated value or the result of a `compute` expression to a local v
 ```
 Variables bound by `bind` are immediately accessible to all subsequent actions in the same rule firing.
 
+#### `(cbind <element-variable>)`
+Binds the working memory element most recently added by `make`, `modify`, or `call` to `<element-variable>`. Subsequent actions in the same rule firing can use that element variable to modify, remove, or reference that element:
+```ops5
+(make person ^name "Alice" ^age 30)
+(cbind <p>)
+(modify <p> ^age 31)
+```
+
 #### `(compute <op1> <operator> <op2> ...)`
 Evaluates arithmetic expressions using standard OPS5 left-to-right evaluation:
 - Operators: `+`, `-` (including unary minus), `*`, `/` (or `//`, `\`), and `%` (or `\\`).

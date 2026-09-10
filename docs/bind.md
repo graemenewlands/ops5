@@ -80,7 +80,47 @@ The `(compute ...)` expression is not restricted to `bind`. It can be used anywh
 
 ---
 
-## 5. Complete Workflow Example
+## 5. `cbind` Action (Element Variable Binding)
+
+### Definition & Syntax
+```ops5
+(cbind <element-variable>)
+```
+The action `cbind` is used to bind a working memory element to an element variable. The element bound is the **last element added to the working memory by `make`, `modify`, or `call`**. The action takes one argument, an element variable (e.g. `<p>` or `p`).
+
+### Key Differences: `bind` vs `cbind`
+- **`bind`**: Assigns a scalar literal, variable value, or the result of a `(compute ...)` arithmetic expression to a variable (e.g. `(bind <tax> (compute <p> * 0.05))`).
+- **`cbind`**: Binds an element variable to the most recently asserted or modified WME timetag. Subsequent actions in the same rule firing can use that element variable in `modify`, `remove`, or pass it as an attribute reference.
+
+### Common Use Cases
+
+1. **Modifying a Newly Created WME**:
+   ```ops5
+   (make person ^name "Alice" ^age 30)
+   (cbind <p>)
+   (modify <p> ^age 31)
+   ```
+
+2. **Chaining Multiple Modifications in a Single Rule Firing**:
+   ```ops5
+   ; Modify existing element matched on LHS
+   (modify <item> ^status in-progress)
+   ; Rebind <item> to the newly asserted replacement WME
+   (cbind <item>)
+   ; Safely apply another modification to the new element
+   (modify <item> ^attempts 1)
+   ```
+
+3. **Establishing Relational References Between WMEs**:
+   ```ops5
+   (make order ^id 101 ^total 0)
+   (cbind <ord>)
+   (make log-entry ^order-ref <ord> ^message "Created order")
+   ```
+
+---
+
+## 6. Complete Workflow Example
 
 The following production rule program calculates cart item totals, computes subtotal and sales tax, and generates an invoice:
 
@@ -137,9 +177,12 @@ The following production rule program calculates cart item totals, computes subt
 
 ---
 
-## 6. Implementation References
+## 7. Implementation References
 
-- **Action & Expression Model**: [`pkg/model/action.go`](../pkg/model/action.go) (`BindAction`), [`pkg/model/value.go`](../pkg/model/value.go) (`TypeCompute`, `ComputeExpr`, `ComputeOp`)
-- **Parser**: [`pkg/parser/parser.go`](../pkg/parser/parser.go) (`parseCompute`, `case "bind"`)
-- **Execution**: [`pkg/engine/engine.go`](../pkg/engine/engine.go) (`evaluateCompute`, `resolveValue`, `Step`)
-- **Test Fixtures**: [`tests/fixtures/bind_compute_workflow.ops`](../tests/fixtures/bind_compute_workflow.ops) & [`tests/fixtures/bind_compute_workflow.json`](../tests/fixtures/bind_compute_workflow.json)
+- **Action & Expression Model**: [`pkg/model/action.go`](../pkg/model/action.go) (`BindAction`, `CBindAction`), [`pkg/model/value.go`](../pkg/model/value.go) (`TypeCompute`, `ComputeExpr`, `ComputeOp`)
+- **Parser**: [`pkg/parser/parser.go`](../pkg/parser/parser.go) (`parseCompute`, `case "bind"`, `case "cbind"`)
+- **Execution**: [`pkg/engine/engine.go`](../pkg/engine/engine.go) (`evaluateCompute`, `resolveValue`, `Step`, `lastAddedTimetag`)
+- **Test Fixtures**:
+  - [`tests/fixtures/bind_compute_workflow.ops`](../tests/fixtures/bind_compute_workflow.ops) & [`tests/fixtures/bind_compute_workflow.json`](../tests/fixtures/bind_compute_workflow.json)
+  - [`tests/fixtures/cbind_workflow.ops`](../tests/fixtures/cbind_workflow.ops) & [`tests/fixtures/cbind_workflow.json`](../tests/fixtures/cbind_workflow.json)
+

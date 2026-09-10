@@ -628,6 +628,21 @@ func (p *Parser) parseAction() (model.Action, error) {
 			Value:    val,
 		}, nil
 
+	case "cbind":
+		if p.current.Type != TokenVariable && p.current.Type != TokenSymbol {
+			return nil, fmt.Errorf("expected element variable in cbind action at line %d, got %s", p.current.Line, p.current.Value)
+		}
+		varTok := p.current
+		if err := p.advance(); err != nil {
+			return nil, err
+		}
+		if _, err := p.expect(TokenRParen); err != nil {
+			return nil, fmt.Errorf("expected ')' after element variable in cbind action at line %d: %w", varTok.Line, err)
+		}
+		return model.CBindAction{
+			Variable: varTok.Value,
+		}, nil
+
 	case "halt":
 		if _, err := p.expect(TokenRParen); err != nil {
 			return nil, err

@@ -1,0 +1,27 @@
+; Workflow demonstrating (cbind <element-variable>) action
+(literalize stage name)
+(literalize order id status total)
+(literalize log-entry order-ref message)
+
+(p start-order
+   <st> (stage ^name init)
+   -->
+   (make order ^id 101 ^status created ^total 0)
+   (cbind <ord>)
+   (modify <ord> ^status processing)
+   (cbind <ord2>)
+   (make log-entry ^order-ref <ord2> ^message queued)
+   (modify <st> ^name run)
+)
+
+(p finish-order
+   (stage ^name run)
+   <ord> (order ^status processing ^id <id>)
+   <log> (log-entry ^order-ref <ord>)
+   -->
+   (modify <ord> ^status completed ^total 150)
+   (cbind <final-ord>)
+   (modify <log> ^order-ref <final-ord> ^message done)
+   (write (crlf) "Order" <id> "completed with reference" <final-ord> (crlf))
+   (halt)
+)

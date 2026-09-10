@@ -284,3 +284,79 @@ func TestEngineBindAndCompute(t *testing.T) {
 	}
 }
 
+func TestEngineCBind(t *testing.T) {
+	eng := New()
+
+	// Rule 1: makes person, cbinds <p>, modifies person, cbinds <p2>, makes tracker referencing <p2>
+	r1 := model.NewRule("create-and-track")
+	r1.AddCondition(model.NewPositiveCE("goal").AddEqualTest("status", model.NewSymbol("start")))
+	r1.AddAction(model.MakeAction{
+		Class: "person",
+		Attributes: map[string]model.Value{
+			"name": model.NewString("Alice"),
+			"age":  model.NewInt(30),
+		},
+	})
+	r1.AddAction(model.CBindAction{Variable: "<p>"})
+	r1.AddAction(model.ModifyAction{
+		TargetElementVar: "<p>",
+		Attributes: map[string]model.Value{
+			"age": model.NewInt(31),
+		},
+	})
+	r1.AddAction(model.CBindAction{Variable: "p2"})
+	r1.AddAction(model.MakeAction{
+		Class: "tracker",
+		Attributes: map[string]model.Value{
+			"target": model.NewVariable("<p2>"),
+		},
+	})
+	r1.AddAction(model.HaltAction{})
+	eng.AddRule(r1)
+
+	eng.Make("goal", map[string]model.Value{"status": model.NewSymbol("start")})
+
+	cycles, err := eng.Run(10)
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	if cycles != 1 {
+		t.Fatalf("expected 1 cycle, got %d", cycles)
+	}
+
+	persons := eng.WorkingMemory().FindByClass("person")
+	if len(persons) != 1 {
+		t.Fatalf("expected 1 person, got %d", len(persons))
+	}
+	ageVal, _ := persons[0].Get("age")
+	if !ageVal.Equal(model.NewInt(31)) {
+		t.Fatalf("expected age 31, got %v", ageVal)
+	}
+
+	trackers := eng.WorkingMemory().FindByClass("tracker")
+	if len(trackers) != 1 {
+		t.Fatalf("expected 1 tracker, got %d", len(trackers))
+	}
+	targetVal, _ := trackers[0].Get("target")
+	if !targetVal.Equal(model.NewInt(persons[0].Timetag)) {
+		t.Fatalf("expected tracker target to equal person timetag %d, got %v", persons[0].Timetag, targetVal)
+	}
+}
+
+func TestEngineCBindErrorNoElement(t *testing.T) {
+	eng := New()
+
+	r1 := model.NewRule("fail-cbind")
+	r1.AddCondition(model.NewPositiveCE("goal"))
+	r1.AddAction(model.CBindAction{Variable: "<elem>"})
+	eng.AddRule(r1)
+
+	eng.Make("goal", nil)
+	eng.lastAddedTimetag = 0
+
+	_, err := eng.Step()
+	if err == nil || !strings.Contains(err.Error(), "cbind: no element has been added") {
+		t.Fatalf("expected error mentioning 'cbind: no element has been added', got %v", err)
+	}
+}
+

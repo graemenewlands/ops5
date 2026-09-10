@@ -29,8 +29,9 @@ type Engine struct {
 	cycleCount   int
 	halted       bool
 	outputWriter io.Writer
-	traceEnabled bool
-	currentCol   int
+	traceEnabled     bool
+	currentCol       int
+	lastAddedTimetag int64
 }
 
 // New creates a new Engine instance.
@@ -43,18 +44,19 @@ func New() *Engine {
 	mem.AddListener(net)
 
 	return &Engine{
-		wm:           mem,
-		network:      net,
-		conflictSet:  cs,
-		rules:        make([]*model.Rule, 0),
-		schemas:      make(map[string]*model.ClassSchema),
-		vectorAttrs:  make(map[string]bool),
-		ruleCount:    0,
-		cycleCount:   0,
-		halted:       false,
-		outputWriter: os.Stdout,
-		traceEnabled: false,
-		currentCol:   1,
+		wm:               mem,
+		network:          net,
+		conflictSet:      cs,
+		rules:            make([]*model.Rule, 0),
+		schemas:          make(map[string]*model.ClassSchema),
+		vectorAttrs:      make(map[string]bool),
+		ruleCount:        0,
+		cycleCount:       0,
+		halted:           false,
+		outputWriter:     os.Stdout,
+		traceEnabled:     false,
+		currentCol:       1,
+		lastAddedTimetag: 0,
 	}
 }
 
@@ -175,7 +177,9 @@ func (e *Engine) Schemas() []*model.ClassSchema {
 
 // Make asserts a new WME.
 func (e *Engine) Make(class string, attrs map[string]model.Value) *model.WME {
-	return e.wm.Make(class, attrs)
+	wme := e.wm.Make(class, attrs)
+	e.lastAddedTimetag = wme.Timetag
+	return wme
 }
 
 // Remove retracts a WME by timetag.
@@ -185,7 +189,16 @@ func (e *Engine) Remove(timetag int64) (*model.WME, error) {
 
 // Modify updates an existing WME.
 func (e *Engine) Modify(timetag int64, attrs map[string]model.Value) (*model.WME, error) {
-	return e.wm.Modify(timetag, attrs)
+	wme, err := e.wm.Modify(timetag, attrs)
+	if err == nil && wme != nil {
+		e.lastAddedTimetag = wme.Timetag
+	}
+	return wme, err
+}
+
+// LastAddedTimetag returns the timetag of the last WME added to working memory by make, modify, or call.
+func (e *Engine) LastAddedTimetag() int64 {
+	return e.lastAddedTimetag
 }
 
 // applyArithmeticOp applies an arithmetic operator to two numeric values.
@@ -387,12 +400,20 @@ func (e *Engine) Step() (bool, error) {
 			varName := strings.TrimPrefix(strings.TrimSuffix(act.Variable, ">"), "<")
 			localBindings[varName] = resolved
 
+		case model.CBindAction:
+			if e.lastAddedTimetag == 0 {
+				return true, fmt.Errorf("cbind: no element has been added to working memory")
+			}
+			varName := strings.TrimPrefix(strings.TrimSuffix(act.Variable, ">"), "<")
+			localBindings[varName] = model.NewInt(e.lastAddedTimetag)
+
 		case model.MakeAction:
 			resolvedAttrs := make(map[string]model.Value, len(act.Attributes))
 			for k, v := range act.Attributes {
 				resolvedAttrs[k] = resolveValue(v, localBindings)
 			}
-			e.wm.Make(act.Class, resolvedAttrs)
+			wme := e.wm.Make(act.Class, resolvedAttrs)
+			e.lastAddedTimetag = wme.Timetag
 
 		case model.ModifyAction:
 			targetTimetag, err := resolveTargetTimetag(dominant, act.TargetElementVar, act.TargetIndex, localBindings)
@@ -403,10 +424,11 @@ func (e *Engine) Step() (bool, error) {
 			for k, v := range act.Attributes {
 				resolvedAttrs[k] = resolveValue(v, localBindings)
 			}
-			_, err = e.wm.Modify(targetTimetag, resolvedAttrs)
+			newWme, err := e.wm.Modify(targetTimetag, resolvedAttrs)
 			if err != nil {
 				return true, err
 			}
+			e.lastAddedTimetag = newWme.Timetag
 
 		case model.RemoveAction:
 			targetTimetag, err := resolveTargetTimetag(dominant, act.TargetElementVar, act.TargetIndex, localBindings)
