@@ -305,6 +305,9 @@ Asserts a new WME into working memory with a fresh timetag. Variable references 
 ```
 
 #### `(modify <target> [^<attr> <val> ...])`
+> [!NOTE]
+> For an in-depth architectural breakdown of the two-phase retraction/assertion lifecycle and targeting semantics, see the [OPS5 `modify` Reference](docs/modify.md).
+
 Implements standard OPS5 semantic modification:
 1. Retracts the target WME.
 2. Asserts a replacement WME with a new timetag, merging new attribute values while **preserving all unmodified attributes**.

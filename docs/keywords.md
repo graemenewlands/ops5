@@ -24,7 +24,7 @@ These action verbs execute sequentially when a production rule fires.
 | Action Verb | Syntax Form | Description | Example |
 | :--- | :--- | :--- | :--- |
 | **`make`** | `(make <class> [^<attr> <val> ...])` | Asserts a new WME into working memory with a monotonically increasing timetag. | `(make task ^id <new-id> ^status ready)` |
-| **`modify`** | `(modify <target> [^<attr> <val> ...])` | Modifies an existing WME (retracts and re-asserts with a new timetag, preserving unmodified attributes). `<target>` is an element variable or 1-based CE index. | `(modify <t> ^status complete)`<br>`(modify 1 ^status complete)` |
+| **`modify`** | `(modify <target> [^<attr> <val> ...])` | Modifies an existing WME (retracts and re-asserts with a new timetag, preserving unmodified attributes). See [`modify` Reference](modify.md). | `(modify <t> ^status complete)`<br>`(modify 1 ^status complete)` |
 | **`remove`** | `(remove <target>)` | Retracts an existing WME from working memory. `<target>` is an element variable or 1-based CE index. | `(remove <t>)`<br>`(remove 2)` |
 | **`write`** | `(write <val1> <val2> ...)` | Emits space-separated values, strings, or resolved variables followed by a newline to the output stream. | `(write "Task" <id> "finished successfully")` |
 | **`halt`** | `(halt)` | Halts the inference engine execution loop immediately. Current cycle completes, but no further rules fire. | `(halt)` |
