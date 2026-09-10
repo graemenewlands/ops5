@@ -476,4 +476,97 @@ func TestParseCBind(t *testing.T) {
 	}
 }
 
+func TestLexerVerticalBarSymbol(t *testing.T) {
+	input := `|RuleTrace.ops| |Hello World| |simple|`
+	l := NewLexer(input)
+	tok1, err := l.NextToken()
+	if err != nil || tok1.Type != TokenSymbol || tok1.Value != "RuleTrace.ops" {
+		t.Fatalf("expected RuleTrace.ops symbol, got %v err=%v", tok1, err)
+	}
+	tok2, err := l.NextToken()
+	if err != nil || tok2.Type != TokenSymbol || tok2.Value != "Hello World" {
+		t.Fatalf("expected Hello World symbol, got %v err=%v", tok2, err)
+	}
+	tok3, err := l.NextToken()
+	if err != nil || tok3.Type != TokenSymbol || tok3.Value != "simple" {
+		t.Fatalf("expected simple symbol, got %v err=%v", tok3, err)
+	}
+
+	unterminated := `|unclosed`
+	l2 := NewLexer(unterminated)
+	if _, err := l2.NextToken(); err == nil {
+		t.Fatalf("expected error for unterminated vertical bar symbol")
+	}
+}
+
+func TestParseFileIOAndAccept(t *testing.T) {
+	src := `
+(p file-rule
+   (goal ^status start)
+   -->
+   (openfile ruletrace |RuleTrace.ops| out)
+   (default ruletrace accept)
+   (bind <user-val> (accept))
+   (bind <line-val> (acceptline ruletrace))
+   (write (accept) (crlf))
+   (closefile ruletrace)
+)
+`
+	rules, err := ParseRules(src)
+	if err != nil {
+		t.Fatalf("failed to parse rule: %v", err)
+	}
+	if len(rules) != 1 {
+		t.Fatalf("expected 1 rule, got %d", len(rules))
+	}
+	r := rules[0]
+	if len(r.Actions) != 6 {
+		t.Fatalf("expected 6 actions, got %d", len(r.Actions))
+	}
+
+	// 0: openfile
+	a0, ok := r.Actions[0].(model.OpenFileAction)
+	if !ok || a0.LogicalName != "ruletrace" || a0.Filespec.String() != "RuleTrace.ops" || a0.Mode != "out" {
+		t.Errorf("unexpected a0: %+v", r.Actions[0])
+	}
+
+	// 1: default
+	a1, ok := r.Actions[1].(model.DefaultAction)
+	if !ok || a1.LogicalName != "ruletrace" || a1.Subsystem != "accept" {
+		t.Errorf("unexpected a1: %+v", r.Actions[1])
+	}
+
+	// 2: bind <user-val> (accept)
+	a2, ok := r.Actions[2].(model.BindAction)
+	if !ok || a2.Variable != "user-val" || !a2.Value.IsAccept() {
+		t.Errorf("unexpected a2: %+v", r.Actions[2])
+	}
+	if a2.Value.AcceptExpr().LogicalFile != "" || a2.Value.AcceptExpr().IsLine {
+		t.Errorf("unexpected accept expr: %+v", a2.Value.AcceptExpr())
+	}
+
+	// 3: bind <line-val> (acceptline ruletrace)
+	a3, ok := r.Actions[3].(model.BindAction)
+	if !ok || a3.Variable != "line-val" || !a3.Value.IsAccept() {
+		t.Errorf("unexpected a3: %+v", r.Actions[3])
+	}
+	if a3.Value.AcceptExpr().LogicalFile != "ruletrace" || !a3.Value.AcceptExpr().IsLine {
+		t.Errorf("unexpected acceptline expr: %+v", a3.Value.AcceptExpr())
+	}
+
+	// 4: write (accept) (crlf)
+	a4, ok := r.Actions[4].(model.WriteAction)
+	if !ok || len(a4.Args) != 2 || !a4.Args[0].Value.IsAccept() {
+		t.Errorf("unexpected a4: %+v", r.Actions[4])
+	}
+
+	// 5: closefile
+	a5, ok := r.Actions[5].(model.CloseFileAction)
+	if !ok || a5.LogicalName != "ruletrace" {
+		t.Errorf("unexpected a5: %+v", r.Actions[5])
+	}
+}
+
+
+
 

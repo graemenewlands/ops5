@@ -2,6 +2,9 @@ package cli
 
 import (
 	"bytes"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -112,3 +115,62 @@ func TestREPLVectorAttributeInteractive(t *testing.T) {
 		t.Fatalf("expected rule firing output with extracted coordinates, got:\n%s", output)
 	}
 }
+
+func TestREPLFileIOCommands(t *testing.T) {
+	tmpDir := t.TempDir()
+	traceFile := filepath.Join(tmpDir, "RuleTrace.ops")
+	inFile := filepath.Join(tmpDir, "data.in")
+
+	commands := fmt.Sprintf(`
+	(openfile ruletrace |%s| out)
+	(default ruletrace trace)
+	(default ruletrace write)
+	default
+	(closefile ruletrace)
+	(openfile inlog |%s| in)
+	(default inlog accept)
+	default accept
+	(default nil accept)
+	(closefile inlog)
+	exit
+	`, traceFile, inFile)
+
+	// Create dummy input file
+	if err := os.WriteFile(inFile, []byte("test-data\n"), 0644); err != nil {
+		t.Fatalf("failed creating inFile: %v", err)
+	}
+
+	in := strings.NewReader(commands)
+	var out bytes.Buffer
+
+	repl := NewREPL(in, &out)
+	defer repl.Engine().CloseAllFiles()
+	repl.Start()
+
+	output := out.String()
+	if !strings.Contains(output, "Opened file '"+traceFile+"' as ruletrace (out)") {
+		t.Fatalf("expected openfile confirmation for ruletrace, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Default for trace set to 'ruletrace'") {
+		t.Fatalf("expected default trace confirmation, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Default for write set to 'ruletrace'") {
+		t.Fatalf("expected default write confirmation, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Closed file 'ruletrace'") {
+		t.Fatalf("expected closefile confirmation, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Opened file '"+inFile+"' as inlog (in)") {
+		t.Fatalf("expected openfile inlog confirmation, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Default for accept set to 'inlog'") {
+		t.Fatalf("expected default accept confirmation, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Default for accept set to 'nil'") {
+		t.Fatalf("expected default nil accept confirmation, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Closed file 'inlog'") {
+		t.Fatalf("expected closefile inlog confirmation, got:\n%s", output)
+	}
+}
+

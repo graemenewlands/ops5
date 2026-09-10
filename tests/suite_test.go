@@ -1,6 +1,7 @@
 package tests
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -167,6 +168,10 @@ func TestExternalFileWorkflow(t *testing.T) {
 // TestAllFixtureTestCases discovers and runs all JSON test cases in the fixtures folder
 func TestAllFixtureTestCases(t *testing.T) {
 	runner := harness.NewRunner()
+	defer func() {
+		_ = os.Remove("file_io_test.tmp")
+		_ = os.Remove(filepath.Join("fixtures", "file_io_test.tmp"))
+	}()
 	matches, err := filepath.Glob(filepath.Join("fixtures", "*.json"))
 	if err != nil {
 		t.Fatalf("failed to glob fixtures: %v", err)

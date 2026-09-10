@@ -2,6 +2,8 @@ package engine
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -359,4 +361,238 @@ func TestEngineCBindErrorNoElement(t *testing.T) {
 		t.Fatalf("expected error mentioning 'cbind: no element has been added', got %v", err)
 	}
 }
+
+func TestEngineFileIOAndDefaultWrite(t *testing.T) {
+	tmpDir := t.TempDir()
+	outPath := filepath.Join(tmpDir, "output.txt")
+
+	eng := New()
+	defer eng.CloseAllFiles()
+
+	rule := model.NewRule("write-file-rule")
+	rule.AddCondition(model.NewPositiveCE("start"))
+	rule.AddAction(model.OpenFileAction{
+		LogicalName: "outfile",
+		Filespec:    model.NewSymbol(outPath),
+		Mode:        "out",
+	})
+	rule.AddAction(model.DefaultAction{
+		LogicalName: "outfile",
+		Subsystem:   "write",
+	})
+	rule.AddAction(model.WriteAction{
+		Args: []model.WriteArg{
+			model.WriteValue(model.NewSymbol("FILE")),
+			model.WriteValue(model.NewSymbol("OUTPUT")),
+			model.WriteValue(model.NewInt(42)),
+			model.WriteCRLF(),
+		},
+	})
+	rule.AddAction(model.CloseFileAction{
+		LogicalName: "outfile",
+	})
+	rule.AddAction(model.HaltAction{})
+	eng.AddRule(rule)
+
+	eng.Make("start", nil)
+	cycles, err := eng.Run(10)
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	if cycles != 1 {
+		t.Fatalf("expected 1 cycle, got %d", cycles)
+	}
+
+	content, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("failed reading output file: %v", err)
+	}
+	if !strings.Contains(string(content), "FILE OUTPUT 42\n") {
+		t.Fatalf("unexpected file content: %q", string(content))
+	}
+}
+
+func TestEngineFileIOAndAccept(t *testing.T) {
+	tmpDir := t.TempDir()
+	inPath := filepath.Join(tmpDir, "input.txt")
+	if err := os.WriteFile(inPath, []byte("alpha beta 123\n"), 0644); err != nil {
+		t.Fatalf("failed writing input file: %v", err)
+	}
+
+	eng := New()
+	defer eng.CloseAllFiles()
+
+	rule := model.NewRule("read-file-rule")
+	rule.AddCondition(model.NewPositiveCE("start"))
+	rule.AddAction(model.OpenFileAction{
+		LogicalName: "infile",
+		Filespec:    model.NewSymbol(inPath),
+		Mode:        "in",
+	})
+	rule.AddAction(model.DefaultAction{
+		LogicalName: "infile",
+		Subsystem:   "accept",
+	})
+	rule.AddAction(model.MakeAction{
+		Class: "data",
+		Attributes: map[string]model.Value{
+			"first":  model.NewAccept("", false),
+			"second": model.NewAccept("infile", false),
+			"third":  model.NewAccept("", false),
+		},
+	})
+	rule.AddAction(model.CloseFileAction{
+		LogicalName: "infile",
+	})
+	rule.AddAction(model.HaltAction{})
+	eng.AddRule(rule)
+
+	eng.Make("start", nil)
+	cycles, err := eng.Run(10)
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	if cycles != 1 {
+		t.Fatalf("expected 1 cycle, got %d", cycles)
+	}
+
+	items := eng.WorkingMemory().FindByClass("data")
+	if len(items) != 1 {
+		t.Fatalf("expected 1 data item, got %d", len(items))
+	}
+	fVal, _ := items[0].Get("first")
+	sVal, _ := items[0].Get("second")
+	tVal, _ := items[0].Get("third")
+
+	if !fVal.Equal(model.NewSymbol("alpha")) {
+		t.Fatalf("expected first 'alpha', got %v", fVal)
+	}
+	if !sVal.Equal(model.NewSymbol("beta")) {
+		t.Fatalf("expected second 'beta', got %v", sVal)
+	}
+	if !tVal.Equal(model.NewInt(123)) {
+		t.Fatalf("expected third 123, got %v", tVal)
+	}
+}
+
+func TestEngineAcceptLine(t *testing.T) {
+	tmpDir := t.TempDir()
+	inPath := filepath.Join(tmpDir, "input_line.txt")
+	if err := os.WriteFile(inPath, []byte("10 20 30\n"), 0644); err != nil {
+		t.Fatalf("failed writing input line file: %v", err)
+	}
+
+	eng := New()
+	defer eng.CloseAllFiles()
+
+	rule := model.NewRule("read-line-rule")
+	rule.AddCondition(model.NewPositiveCE("start"))
+	rule.AddAction(model.OpenFileAction{
+		LogicalName: "infile",
+		Filespec:    model.NewSymbol(inPath),
+		Mode:        "in",
+	})
+	rule.AddAction(model.MakeAction{
+		Class: "vecdata",
+		Attributes: map[string]model.Value{
+			"vals": model.NewAccept("infile", true),
+		},
+	})
+	rule.AddAction(model.CloseFileAction{
+		LogicalName: "infile",
+	})
+	rule.AddAction(model.HaltAction{})
+	eng.AddRule(rule)
+
+	eng.Make("start", nil)
+	cycles, err := eng.Run(10)
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	if cycles != 1 {
+		t.Fatalf("expected 1 cycle, got %d", cycles)
+	}
+
+	items := eng.WorkingMemory().FindByClass("vecdata")
+	if len(items) != 1 {
+		t.Fatalf("expected 1 vecdata item, got %d", len(items))
+	}
+	vals, _ := items[0].Get("vals")
+	if !vals.IsVector() {
+		t.Fatalf("expected vector value, got %v", vals)
+	}
+	vec := vals.VectorElements()
+	if len(vec) != 3 || !vec[0].Equal(model.NewInt(10)) || !vec[1].Equal(model.NewInt(20)) || !vec[2].Equal(model.NewInt(30)) {
+		t.Fatalf("unexpected vector: %v", vec)
+	}
+}
+
+func TestEngineTraceToFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	tracePath := filepath.Join(tmpDir, "trace.log")
+
+	eng := New()
+	defer eng.CloseAllFiles()
+
+	if err := eng.OpenFile("ruletrace", tracePath, "out"); err != nil {
+		t.Fatalf("openfile failed: %v", err)
+	}
+	if err := eng.SetDefault("ruletrace", "trace"); err != nil {
+		t.Fatalf("setdefault failed: %v", err)
+	}
+	eng.SetTrace(true)
+
+	rule := model.NewRule("simple-trace-rule")
+	rule.AddCondition(model.NewPositiveCE("goal"))
+	rule.AddAction(model.HaltAction{})
+	eng.AddRule(rule)
+
+	eng.Make("goal", nil)
+	_, err := eng.Step()
+	if err != nil {
+		t.Fatalf("step failed: %v", err)
+	}
+
+	if err := eng.CloseFile("ruletrace"); err != nil {
+		t.Fatalf("closefile failed: %v", err)
+	}
+
+	content, err := os.ReadFile(tracePath)
+	if err != nil {
+		t.Fatalf("failed reading trace file: %v", err)
+	}
+	if !strings.Contains(string(content), "Fired rule 'simple-trace-rule'") {
+		t.Fatalf("expected trace output in file, got %q", string(content))
+	}
+}
+
+func TestEngineAcceptStdinReader(t *testing.T) {
+	eng := New()
+	eng.SetInputReader(strings.NewReader("val1 99.5\n"))
+
+	v1, err := eng.ReadAccept("")
+	if err != nil {
+		t.Fatalf("read accept 1 failed: %v", err)
+	}
+	if !v1.Equal(model.NewSymbol("val1")) {
+		t.Fatalf("expected 'val1', got %v", v1)
+	}
+
+	v2, err := eng.ReadAccept("")
+	if err != nil {
+		t.Fatalf("read accept 2 failed: %v", err)
+	}
+	if !v2.Equal(model.NewFloat(99.5)) {
+		t.Fatalf("expected 99.5, got %v", v2)
+	}
+
+	eofVal, err := eng.ReadAccept("")
+	if err != nil {
+		t.Fatalf("read accept eof failed: %v", err)
+	}
+	if !eofVal.Equal(model.NewSymbol("end-of-file")) {
+		t.Fatalf("expected 'end-of-file', got %v", eofVal)
+	}
+}
+
 

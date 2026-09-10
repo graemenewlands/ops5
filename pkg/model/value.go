@@ -18,6 +18,7 @@ const (
 	TypeVariable
 	TypeVector
 	TypeCompute
+	TypeAccept
 )
 
 func (t ValueType) String() string {
@@ -38,6 +39,8 @@ func (t ValueType) String() string {
 		return "vector"
 	case TypeCompute:
 		return "compute"
+	case TypeAccept:
+		return "accept"
 	default:
 		return "unknown"
 	}
@@ -131,6 +134,36 @@ func NewCompute(operands []Value, operators []ComputeOp) Value {
 			Operators: operators,
 		},
 	}
+}
+
+// AcceptExpr represents an (accept) or (acceptline) function invocation.
+type AcceptExpr struct {
+	LogicalFile string // optional logical file, or empty for default input
+	IsLine      bool   // true for acceptline, false for accept
+}
+
+// NewAccept creates an accept or acceptline expression value.
+func NewAccept(logicalFile string, isLine bool) Value {
+	return Value{
+		typ: TypeAccept,
+		val: &AcceptExpr{
+			LogicalFile: logicalFile,
+			IsLine:      isLine,
+		},
+	}
+}
+
+// IsAccept returns true if this value is an accept or acceptline function call.
+func (v Value) IsAccept() bool {
+	return v.typ == TypeAccept
+}
+
+// AcceptExpr returns the underlying AcceptExpr.
+func (v Value) AcceptExpr() *AcceptExpr {
+	if v.typ == TypeAccept {
+		return v.val.(*AcceptExpr)
+	}
+	return nil
 }
 
 // Type returns the ValueType.
@@ -231,6 +264,16 @@ func (v Value) String() string {
 			}
 		}
 		return "(" + strings.Join(parts, " ") + ")"
+	case TypeAccept:
+		ae := v.val.(*AcceptExpr)
+		name := "accept"
+		if ae.IsLine {
+			name = "acceptline"
+		}
+		if ae.LogicalFile != "" {
+			return "(" + name + " " + ae.LogicalFile + ")"
+		}
+		return "(" + name + ")"
 	default:
 		return fmt.Sprintf("%v", v.val)
 	}
@@ -270,6 +313,11 @@ func (v Value) Equal(o Value) bool {
 				}
 			}
 			return true
+		}
+		if v.typ == TypeAccept {
+			a1 := v.val.(*AcceptExpr)
+			a2 := o.val.(*AcceptExpr)
+			return a1.LogicalFile == a2.LogicalFile && a1.IsLine == a2.IsLine
 		}
 		return v.val == o.val
 	}

@@ -89,6 +89,8 @@ func (r *Runner) Run(tc *TestCase) *Result {
 	var outBuf bytes.Buffer
 	eng.SetOutputWriter(&outBuf)
 
+	defer eng.CloseAllFiles()
+
 	// Set strategy
 	if strings.ToUpper(tc.Strategy) == "MEA" {
 		eng.SetStrategy(conflict.StrategyMEA)
@@ -145,6 +147,34 @@ func (r *Runner) Run(tc *TestCase) *Result {
 			case parser.StmtVectorAttribute:
 				for _, attr := range stmt.VectorAttrs {
 					eng.DeclareVectorAttribute(attr)
+				}
+			case parser.StmtOpenFile:
+				filespec := stmt.OpenFile.Filespec.String()
+				if stmt.OpenFile.Filespec.Type() == model.TypeString {
+					filespec = stmt.OpenFile.Filespec.Raw().(string)
+				}
+				if err := eng.OpenFile(stmt.OpenFile.LogicalName, filespec, stmt.OpenFile.Mode); err != nil {
+					return &Result{
+						TestCaseName: tc.Name,
+						Passed:       false,
+						Error:        err,
+					}
+				}
+			case parser.StmtCloseFile:
+				if err := eng.CloseFile(stmt.CloseFile.LogicalName); err != nil {
+					return &Result{
+						TestCaseName: tc.Name,
+						Passed:       false,
+						Error:        err,
+					}
+				}
+			case parser.StmtDefault:
+				if err := eng.SetDefault(stmt.Default.LogicalName, stmt.Default.Subsystem); err != nil {
+					return &Result{
+						TestCaseName: tc.Name,
+						Passed:       false,
+						Error:        err,
+					}
 				}
 			}
 		}

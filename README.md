@@ -11,6 +11,7 @@ This engine provides a complete, modern execution environment for rule-based sys
 1. [Architectural Overview](#architectural-overview)
 2. [Language & Syntax Specification](#language--syntax-specification)
    - [Keywords & Syntax Quick Reference](docs/keywords.md)
+   - [File I/O, Stream Redirection & Input](docs/file_io.md)
    - [Lexical Elements & Data Types](#lexical-elements--data-types)
    - [Schema & Vector Declarations (`literalize`, `vector-attribute`)](#schema--vector-declarations-literalize-vector-attribute)
    - [Working Memory Elements (WMEs)](#working-memory-elements-wmes)
@@ -362,6 +363,23 @@ Evaluates arithmetic expressions using standard OPS5 left-to-right evaluation:
 #### `(halt)`
 Halts the engine execution immediately. The current cycle completes, but no further rules fire.
 
+#### `(openfile <logical-name> <filespec> <mode>)`
+> [!NOTE]
+> For complete documentation on stream management, file modes, and examples, see the [File I/O, Stream Redirection & Input Reference](docs/file_io.md).
+
+Opens a file and registers it under a logical name. Modes include `in` (read), `out` (create/truncate write), and `append`. Supports vertical bar symbol escaping for filenames with punctuation or spaces (e.g. `|RuleTrace.ops|`).
+
+#### `(closefile <logical-name>)`
+Closes an open file stream. If the closed file was the default stream for `accept`, `write`, or `trace`, that subsystem automatically reverts to standard terminal I/O.
+
+#### `(default <logical-name> <subsystem>)`
+Directs the default I/O stream for `accept`, `write`, or `trace` to `<logical-name>`. Passing `nil` or `terminal` restores the default standard terminal stream.
+
+#### `(accept [<logical-name>])` and `(acceptline [<logical-name>])`
+Reads user input from standard input or a redirected logical file stream:
+- `(accept)`: Reads the next whitespace-delimited atom (symbol, integer, float).
+- `(acceptline)`: Reads an entire line of input into a scalar or vector.
+
 ---
 
 ## Rete Pattern Matching Engine
@@ -575,6 +593,9 @@ Defined rule 'classify-alert' (conditions=1, specificity=3)
 | `make` | `<class> [^<attr> <val> ...]` | Assert a new WME | `make goal ^type batch ^status start` |
 | `modify` | `<timetag> [^<attr> <val> ...]` | Modify an existing WME by timetag | `modify 1 ^status in-progress` |
 | `remove` | `<timetag>` | Retract a WME by its timetag | `remove 1` |
+| `openfile` | `<log-name> <filespec> <mode>` | Open file stream (`in`, `out`, `append`) | `(openfile ruletrace \|RuleTrace.ops\| out)` |
+| `closefile` | `<log-name>` | Close an open file stream | `(closefile ruletrace)` |
+| `default` | `[<log-name> <subsystem>]` | View or set default stream for `accept`, `write`, `trace` | `(default ruletrace accept)` |
 | `wm` | `[class]` | Display active WMEs (optionally filtered by class) | `wm item` |
 | `cs` | *none* | Display conflict set in current salience order (`*` indicates dominant) | `cs` |
 | `step` | *none* | Execute exactly one Match-Resolve-Act cycle | `step` |

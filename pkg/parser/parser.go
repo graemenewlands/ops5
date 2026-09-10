@@ -328,19 +328,19 @@ func (p *Parser) parseCompute() (model.Value, error) {
 		}
 
 		// Parse operand
-		if p.current.Type == TokenLParen && strings.ToLower(p.peek.Value) == "compute" {
-			subComp, err := p.parseCompute()
+		if p.isRHSFunction() {
+			subFn, err := p.parseRHSFunction()
 			if err != nil {
 				return model.NewInt(0), err
 			}
-			operands = append(operands, subComp)
+			operands = append(operands, subFn)
 		} else if p.current.Type == TokenNumber || p.current.Type == TokenVariable || p.current.Type == TokenSymbol {
 			operands = append(operands, TokenToValue(p.current))
 			if err := p.advance(); err != nil {
 				return model.NewInt(0), err
 			}
 		} else {
-			return model.NewInt(0), fmt.Errorf("expected number, variable, or nested compute in compute expression at line %d, got %v", p.current.Line, p.current.Value)
+			return model.NewInt(0), fmt.Errorf("expected number, variable, or function in compute expression at line %d, got %v", p.current.Line, p.current.Value)
 		}
 
 		if p.current.Type == TokenRParen || p.current.Type == TokenEOF {
@@ -367,6 +367,49 @@ func (p *Parser) parseCompute() (model.Value, error) {
 	}
 
 	return model.NewCompute(operands, operators), nil
+}
+
+func (p *Parser) isRHSFunction() bool {
+	if p.current.Type != TokenLParen {
+		return false
+	}
+	sub := strings.ToLower(p.peek.Value)
+	return sub == "compute" || sub == "accept" || sub == "acceptline"
+}
+
+func (p *Parser) parseRHSFunction() (model.Value, error) {
+	sub := strings.ToLower(p.peek.Value)
+	switch sub {
+	case "compute":
+		return p.parseCompute()
+	case "accept":
+		return p.parseAccept(false)
+	case "acceptline":
+		return p.parseAccept(true)
+	default:
+		return model.NewSymbol("nil"), fmt.Errorf("unknown RHS function: %s", sub)
+	}
+}
+
+func (p *Parser) parseAccept(isLine bool) (model.Value, error) {
+	if _, err := p.expect(TokenLParen); err != nil {
+		return model.NewSymbol("nil"), err
+	}
+	verbTok, err := p.expect(TokenSymbol)
+	if err != nil {
+		return model.NewSymbol("nil"), err
+	}
+	logicalFile := ""
+	if p.current.Type != TokenRParen && p.current.Type != TokenEOF {
+		logicalFile = p.current.Value
+		if err := p.advance(); err != nil {
+			return model.NewSymbol("nil"), err
+		}
+	}
+	if _, err := p.expect(TokenRParen); err != nil {
+		return model.NewSymbol("nil"), fmt.Errorf("expected ')' closing %s at line %d: %w", verbTok.Value, verbTok.Line, err)
+	}
+	return model.NewAccept(logicalFile, isLine), nil
 }
 
 func (p *Parser) parseAction() (model.Action, error) {
@@ -397,12 +440,12 @@ func (p *Parser) parseAction() (model.Action, error) {
 				}
 				var vals []model.Value
 				for p.current.Type != TokenAttribute && p.current.Type != TokenRParen && p.current.Type != TokenEOF {
-					if p.current.Type == TokenLParen && strings.ToLower(p.peek.Value) == "compute" {
-						compVal, err := p.parseCompute()
+					if p.isRHSFunction() {
+						fnVal, err := p.parseRHSFunction()
 						if err != nil {
 							return nil, err
 						}
-						vals = append(vals, compVal)
+						vals = append(vals, fnVal)
 					} else {
 						vals = append(vals, TokenToValue(p.current))
 						if err := p.advance(); err != nil {
@@ -420,12 +463,12 @@ func (p *Parser) parseAction() (model.Action, error) {
 				}
 			} else {
 				var val model.Value
-				if p.current.Type == TokenLParen && strings.ToLower(p.peek.Value) == "compute" {
-					compVal, err := p.parseCompute()
+				if p.isRHSFunction() {
+					fnVal, err := p.parseRHSFunction()
 					if err != nil {
 						return nil, err
 					}
-					val = compVal
+					val = fnVal
 				} else {
 					val = TokenToValue(p.current)
 					if err := p.advance(); err != nil {
@@ -479,12 +522,12 @@ func (p *Parser) parseAction() (model.Action, error) {
 			}
 			var vals []model.Value
 			for p.current.Type != TokenAttribute && p.current.Type != TokenRParen && p.current.Type != TokenEOF {
-				if p.current.Type == TokenLParen && strings.ToLower(p.peek.Value) == "compute" {
-					compVal, err := p.parseCompute()
+				if p.isRHSFunction() {
+					fnVal, err := p.parseRHSFunction()
 					if err != nil {
 						return nil, err
 					}
-					vals = append(vals, compVal)
+					vals = append(vals, fnVal)
 				} else {
 					vals = append(vals, TokenToValue(p.current))
 					if err := p.advance(); err != nil {
@@ -537,12 +580,12 @@ func (p *Parser) parseAction() (model.Action, error) {
 			if p.current.Type == TokenLParen {
 				if p.peek.Type == TokenSymbol {
 					subVerb := strings.ToLower(p.peek.Value)
-					if subVerb == "compute" {
-						compVal, err := p.parseCompute()
+					if subVerb == "compute" || subVerb == "accept" || subVerb == "acceptline" {
+						fnVal, err := p.parseRHSFunction()
 						if err != nil {
 							return nil, err
 						}
-						args = append(args, model.WriteValue(compVal))
+						args = append(args, model.WriteValue(fnVal))
 						continue
 					}
 					if subVerb == "crlf" {
@@ -592,8 +635,8 @@ func (p *Parser) parseAction() (model.Action, error) {
 		p.advance()
 
 		var val model.Value
-		if p.current.Type == TokenLParen && strings.ToLower(p.peek.Value) == "compute" {
-			compVal, err := p.parseCompute()
+		if p.isRHSFunction() {
+			compVal, err := p.parseRHSFunction()
 			if err != nil {
 				return nil, err
 			}
@@ -601,8 +644,8 @@ func (p *Parser) parseAction() (model.Action, error) {
 		} else {
 			var vals []model.Value
 			for p.current.Type != TokenRParen && p.current.Type != TokenEOF {
-				if p.current.Type == TokenLParen && strings.ToLower(p.peek.Value) == "compute" {
-					compVal, err := p.parseCompute()
+				if p.isRHSFunction() {
+					compVal, err := p.parseRHSFunction()
 					if err != nil {
 						return nil, err
 					}
@@ -643,6 +686,27 @@ func (p *Parser) parseAction() (model.Action, error) {
 			Variable: varTok.Value,
 		}, nil
 
+	case "openfile":
+		act, err := p.parseOpenFileBody(verbTok.Line)
+		if err != nil {
+			return nil, err
+		}
+		return *act, nil
+
+	case "closefile":
+		act, err := p.parseCloseFileBody(verbTok.Line)
+		if err != nil {
+			return nil, err
+		}
+		return *act, nil
+
+	case "default":
+		act, err := p.parseDefaultBody(verbTok.Line)
+		if err != nil {
+			return nil, err
+		}
+		return *act, nil
+
 	case "halt":
 		if _, err := p.expect(TokenRParen); err != nil {
 			return nil, err
@@ -669,6 +733,9 @@ const (
 	StmtMake
 	StmtLiteralize
 	StmtVectorAttribute
+	StmtOpenFile
+	StmtCloseFile
+	StmtDefault
 )
 
 func (st StatementType) String() string {
@@ -681,6 +748,12 @@ func (st StatementType) String() string {
 		return "literalize"
 	case StmtVectorAttribute:
 		return "vector-attribute"
+	case StmtOpenFile:
+		return "openfile"
+	case StmtCloseFile:
+		return "closefile"
+	case StmtDefault:
+		return "default"
 	default:
 		return "unknown"
 	}
@@ -696,6 +769,9 @@ type Statement struct {
 	LiteralizeAttrs []string
 	VectorAttrs     []string
 	Schema          *model.ClassSchema
+	OpenFile        *model.OpenFileAction
+	CloseFile       *model.CloseFileAction
+	Default         *model.DefaultAction
 }
 
 // ParseMake parses a standalone (make class [^attr val ...] [val1 val2 ...]) statement.
@@ -839,7 +915,102 @@ func (p *Parser) ParseVectorAttribute() ([]string, error) {
 	return attrs, nil
 }
 
-// NextStatement parses the next top-level statement (Rule, Make, Literalize, or VectorAttribute).
+// ParseOpenFile parses a standalone (openfile logical-name filespec mode) statement.
+func (p *Parser) ParseOpenFile() (*model.OpenFileAction, error) {
+	if _, err := p.expect(TokenLParen); err != nil {
+		return nil, err
+	}
+	verbTok, err := p.expect(TokenSymbol)
+	if err != nil || strings.ToLower(verbTok.Value) != "openfile" {
+		return nil, fmt.Errorf("expected 'openfile', got %v", verbTok.Value)
+	}
+	return p.parseOpenFileBody(verbTok.Line)
+}
+
+func (p *Parser) parseOpenFileBody(line int) (*model.OpenFileAction, error) {
+	logTok, err := p.expect(TokenSymbol)
+	if err != nil {
+		return nil, fmt.Errorf("expected logical name in openfile at line %d: %w", line, err)
+	}
+	var filespec model.Value
+	if p.current.Type == TokenSymbol || p.current.Type == TokenString || p.current.Type == TokenVariable {
+		filespec = TokenToValue(p.current)
+		if err := p.advance(); err != nil {
+			return nil, err
+		}
+	} else {
+		return nil, fmt.Errorf("expected filespec in openfile at line %d, got %v", p.current.Line, p.current.Value)
+	}
+	modeTok, err := p.expect(TokenSymbol)
+	if err != nil {
+		return nil, fmt.Errorf("expected mode (in, out, append) in openfile at line %d: %w", p.current.Line, err)
+	}
+	if _, err := p.expect(TokenRParen); err != nil {
+		return nil, fmt.Errorf("expected ')' closing openfile at line %d: %w", modeTok.Line, err)
+	}
+	return &model.OpenFileAction{
+		LogicalName: logTok.Value,
+		Filespec:    filespec,
+		Mode:        modeTok.Value,
+	}, nil
+}
+
+// ParseCloseFile parses a standalone (closefile logical-name) statement.
+func (p *Parser) ParseCloseFile() (*model.CloseFileAction, error) {
+	if _, err := p.expect(TokenLParen); err != nil {
+		return nil, err
+	}
+	verbTok, err := p.expect(TokenSymbol)
+	if err != nil || strings.ToLower(verbTok.Value) != "closefile" {
+		return nil, fmt.Errorf("expected 'closefile', got %v", verbTok.Value)
+	}
+	return p.parseCloseFileBody(verbTok.Line)
+}
+
+func (p *Parser) parseCloseFileBody(line int) (*model.CloseFileAction, error) {
+	logTok, err := p.expect(TokenSymbol)
+	if err != nil {
+		return nil, fmt.Errorf("expected logical name in closefile at line %d: %w", line, err)
+	}
+	if _, err := p.expect(TokenRParen); err != nil {
+		return nil, fmt.Errorf("expected ')' closing closefile at line %d: %w", logTok.Line, err)
+	}
+	return &model.CloseFileAction{
+		LogicalName: logTok.Value,
+	}, nil
+}
+
+// ParseDefault parses a standalone (default logical-name subsystem) statement.
+func (p *Parser) ParseDefault() (*model.DefaultAction, error) {
+	if _, err := p.expect(TokenLParen); err != nil {
+		return nil, err
+	}
+	verbTok, err := p.expect(TokenSymbol)
+	if err != nil || strings.ToLower(verbTok.Value) != "default" {
+		return nil, fmt.Errorf("expected 'default', got %v", verbTok.Value)
+	}
+	return p.parseDefaultBody(verbTok.Line)
+}
+
+func (p *Parser) parseDefaultBody(line int) (*model.DefaultAction, error) {
+	logTok, err := p.expect(TokenSymbol)
+	if err != nil {
+		return nil, fmt.Errorf("expected logical name in default at line %d: %w", line, err)
+	}
+	subTok, err := p.expect(TokenSymbol)
+	if err != nil {
+		return nil, fmt.Errorf("expected subsystem (accept, write, trace) in default at line %d: %w", p.current.Line, err)
+	}
+	if _, err := p.expect(TokenRParen); err != nil {
+		return nil, fmt.Errorf("expected ')' closing default at line %d: %w", subTok.Line, err)
+	}
+	return &model.DefaultAction{
+		LogicalName: logTok.Value,
+		Subsystem:   subTok.Value,
+	}, nil
+}
+
+// NextStatement parses the next top-level statement (Rule, Make, Literalize, VectorAttribute, OpenFile, CloseFile, or Default).
 // Returns (nil, nil) when TokenEOF is reached.
 func (p *Parser) NextStatement() (*Statement, error) {
 	if p.current.Type == TokenEOF {
@@ -888,6 +1059,36 @@ func (p *Parser) NextStatement() (*Statement, error) {
 		return &Statement{
 			Type:        StmtVectorAttribute,
 			VectorAttrs: attrs,
+		}, nil
+
+	case "openfile":
+		act, err := p.ParseOpenFile()
+		if err != nil {
+			return nil, err
+		}
+		return &Statement{
+			Type:     StmtOpenFile,
+			OpenFile: act,
+		}, nil
+
+	case "closefile":
+		act, err := p.ParseCloseFile()
+		if err != nil {
+			return nil, err
+		}
+		return &Statement{
+			Type:      StmtCloseFile,
+			CloseFile: act,
+		}, nil
+
+	case "default":
+		act, err := p.ParseDefault()
+		if err != nil {
+			return nil, err
+		}
+		return &Statement{
+			Type:    StmtDefault,
+			Default: act,
 		}, nil
 
 	default:

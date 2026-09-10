@@ -14,6 +14,9 @@ These keywords appear at the root level of `.ops` source files or directly withi
 | **`literalize`** | `(literalize <class> <attr1> ... <attrN>)` | Declares a class schema and its positional attribute layout. | `(literalize City name location state country population)` |
 | **`vector-attribute`** | `(vector-attribute <attr1> ... <attrN>)` | Designates attributes as multi-valued vectors capable of holding sequences of values. | `(vector-attribute location coords)` |
 | **`make`** | `(make <class> [^<attr> <val> ...] [val1 ...])` | Asserts a working memory element (WME) into initial working memory. | `(make City ^name Boston ^location 42.36 -71.05)` |
+| **`openfile`** | `(openfile <log-name> <filespec> <mode>)` | Opens a file stream for reading, writing, or appending. See [`file_io` Reference](file_io.md). | `(openfile ruletrace \|RuleTrace.ops\| out)` |
+| **`closefile`** | `(closefile <log-name>)` | Closes an open file stream. See [`file_io` Reference](file_io.md). | `(closefile ruletrace)` |
+| **`default`** | `(default <log-name> <subsystem>)` | Redirects default stream for `accept`, `write`, or `trace`. See [`file_io` Reference](file_io.md). | `(default ruletrace accept)` |
 
 ---
 
@@ -32,6 +35,11 @@ These action verbs execute sequentially when a production rule fires.
 | **`bind`** | `(bind <var> <val-or-expr>)` | Evaluates a value or `compute` expression and binds it to a local variable for subsequent actions. See [`bind` Reference](bind.md). | `(bind <total> (compute <subtotal> + <tax>))` |
 | **`cbind`** | `(cbind <elem-var>)` | Binds the last element added to working memory (by `make`, `modify`, or `call`) to an element variable. See [`bind` Reference](bind.md#5-cbind-action-element-variable-binding). | `(make item ^id 1)`<br>`(cbind <it>)`<br>`(modify <it> ^status active)` |
 | **`compute`** | `(compute <op1> <op> <op2> ...)` | Evaluates arithmetic expressions (`+`, `-`, `*`, `/`, `//`, `\`, `%`). Supports nesting and unary minus. See [`bind` Reference](bind.md). | `(compute <price> * <qty>)`<br>`(compute <p> + (compute <p> * <r>))` |
+| **`openfile`** | `(openfile <log-name> <filespec> <mode>)` | Opens a file stream for `in`, `out`, or `append`. See [`file_io` Reference](file_io.md). | `(openfile ruletrace \|RuleTrace.ops\| out)` |
+| **`closefile`** | `(closefile <log-name>)` | Closes an open file stream. See [`file_io` Reference](file_io.md). | `(closefile ruletrace)` |
+| **`default`** | `(default <log-name> <subsystem>)` | Redirects default stream for `accept`, `write`, or `trace`. See [`file_io` Reference](file_io.md). | `(default ruletrace accept)` |
+| **`accept`** | `(accept [<log-name>])` | RHS value function reading the next whitespace-delimited atom from input stream. See [`file_io` Reference](file_io.md). | `(make user ^id (accept))` |
+| **`acceptline`** | `(acceptline [<log-name>])` | RHS value function reading a full line of text into a scalar or vector. See [`file_io` Reference](file_io.md). | `(make data ^tokens (acceptline))` |
 | **`halt`** | `(halt)` | Halts the inference engine execution loop immediately. Current cycle completes, but no further rules fire. | `(halt)` |
 
 ---
@@ -71,6 +79,9 @@ The interactive CLI shell (`ops5`) supports both bare words and paren-enclosed c
 | **`make`** | `<class> [^attr val ...]` | Asserts a new WME from the REPL prompt. |
 | **`modify`** | `<timetag> [^attr val ...]` | Modifies an existing WME by its timetag. |
 | **`remove`** | `<timetag>` | Retracts a WME by its timetag. |
+| **`openfile`** | `<logical-name> <filespec> <mode>` | Opens a file stream (`in`, `out`, `append`). Supports `\|...\|`. |
+| **`closefile`** | `<logical-name>` | Closes an open file stream. |
+| **`default`** | `[<logical-name> <subsystem>]` | Sets or displays default streams for `accept`, `write`, `trace`. |
 | **`literalize`** | `<class> <attr1> ...` | Declares a class schema with positional attribute layout. |
 | **`schemas`** / **`schema`** | `[class]` | Prints registered class schemas and their vector attributes. |
 | **`vector-attribute`** | `<attr1> ...` | Declares attribute(s) as multi-valued vector attributes. |
@@ -92,7 +103,6 @@ For reference and future engine development, the following standard OPS5 constru
 ### RHS Functions & Computations
 - **`substr`**: Extracts a sub-vector or substring from a value, e.g. `(substr <vec> 1 2)`.
 - **`genatom`**: Generates a unique symbol atom (e.g., `atom1`, `atom2`).
-- **`accept`** / **`acceptline`**: Reads user input from standard input on the RHS.
 
 ### LHS Compound Matchers
 - **`{ ... }`**: Conjunction block restricting an attribute to multiple bounds, e.g. `^val { > 0 < 100 }`.

@@ -131,6 +131,24 @@ func (r *REPL) handleCommand(input string) bool {
 		return false
 	}
 
+	// 5. S-expression openfile: (openfile ...)
+	if strings.HasPrefix(strings.ToLower(input), "(openfile ") {
+		r.handleOpenFile(input)
+		return false
+	}
+
+	// 6. S-expression closefile: (closefile ...)
+	if strings.HasPrefix(strings.ToLower(input), "(closefile ") {
+		r.handleCloseFile(input)
+		return false
+	}
+
+	// 7. S-expression default: (default ...)
+	if strings.HasPrefix(strings.ToLower(input), "(default ") {
+		r.handleDefault(input)
+		return false
+	}
+
 	// Strip outer parentheses for command convenience if present: e.g. (wm) -> wm
 	cmd := input
 	if strings.HasPrefix(cmd, "(") && strings.HasSuffix(cmd, ")") && !strings.Contains(cmd, "^") {
@@ -145,6 +163,15 @@ func (r *REPL) handleCommand(input string) bool {
 	switch strings.ToLower(parts[0]) {
 	case "help":
 		r.printHelp()
+
+	case "openfile":
+		r.handleOpenFile(input)
+
+	case "closefile":
+		r.handleCloseFile(input)
+
+	case "default":
+		r.handleDefault(input)
 
 	case "literalize":
 		r.handleLiteralize("(" + input + ")")
@@ -516,6 +543,22 @@ func (r *REPL) LoadFile(path string) error {
 				r.engine.DeclareVectorAttribute(a)
 			}
 			vecCount++
+		case parser.StmtOpenFile:
+			filespec := stmt.OpenFile.Filespec.String()
+			if stmt.OpenFile.Filespec.Type() == model.TypeString {
+				filespec = stmt.OpenFile.Filespec.Raw().(string)
+			}
+			if err := r.engine.OpenFile(stmt.OpenFile.LogicalName, filespec, stmt.OpenFile.Mode); err != nil {
+				return err
+			}
+		case parser.StmtCloseFile:
+			if err := r.engine.CloseFile(stmt.CloseFile.LogicalName); err != nil {
+				return err
+			}
+		case parser.StmtDefault:
+			if err := r.engine.SetDefault(stmt.Default.LogicalName, stmt.Default.Subsystem); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -570,6 +613,9 @@ Commands:
   make <cls> [^a v]         Assert a new Working Memory Element (e.g. make goal ^status active)
   modify <tag> [^a v]       Modify attributes of an existing WME by timetag
   remove <tag>              Retract a WME by its timetag
+  openfile <log> <f> <m>    Open a file stream (modes: in, out, append)
+  closefile <log>           Close an open file stream
+  default <log> <subsys>    Set default stream for accept, write, or trace
   wm [class]                Display current working memory elements
   schemas [class]           Display declared class schemas
   cs                        Display conflict set (pending instantiations in salience order)
@@ -585,3 +631,107 @@ Commands:
 `
 	fmt.Fprint(r.out, helpText)
 }
+
+func (r *REPL) handleOpenFile(input string) {
+	tokens, err := tokenizeLine(input)
+	if err != nil {
+		fmt.Fprintf(r.out, "Parse error: %v\n", err)
+		return
+	}
+	if len(tokens) < 4 {
+		fmt.Fprintln(r.out, "Usage: openfile <logical-name> <filespec> <in|out|append>")
+		return
+	}
+	logicalName := tokens[1]
+	filespec := tokens[2]
+	mode := strings.ToLower(tokens[3])
+
+	if err := r.engine.OpenFile(logicalName, filespec, mode); err != nil {
+		fmt.Fprintf(r.out, "Error: %v\n", err)
+		return
+	}
+	fmt.Fprintf(r.out, "Opened file '%s' as %s (%s)\n", filespec, logicalName, mode)
+}
+
+func (r *REPL) handleCloseFile(input string) {
+	tokens, err := tokenizeLine(input)
+	if err != nil {
+		fmt.Fprintf(r.out, "Parse error: %v\n", err)
+		return
+	}
+	if len(tokens) < 2 {
+		fmt.Fprintln(r.out, "Usage: closefile <logical-name>")
+		return
+	}
+	logicalName := tokens[1]
+
+	if err := r.engine.CloseFile(logicalName); err != nil {
+		fmt.Fprintf(r.out, "Error: %v\n", err)
+		return
+	}
+	fmt.Fprintf(r.out, "Closed file '%s'\n", logicalName)
+}
+
+func (r *REPL) handleDefault(input string) {
+	tokens, err := tokenizeLine(input)
+	if err != nil {
+		fmt.Fprintf(r.out, "Parse error: %v\n", err)
+		return
+	}
+	if len(tokens) == 1 {
+		fmt.Fprintf(r.out, "Default streams: accept=%s write=%s trace=%s\n",
+			r.defaultStreamDisplay("accept"),
+			r.defaultStreamDisplay("write"),
+			r.defaultStreamDisplay("trace"))
+		return
+	}
+	if len(tokens) == 2 {
+		subsystem := strings.ToLower(tokens[1])
+		if subsystem == "accept" || subsystem == "write" || subsystem == "trace" {
+			fmt.Fprintf(r.out, "Default for %s is '%s'\n", subsystem, r.defaultStreamDisplay(subsystem))
+			return
+		}
+		fmt.Fprintln(r.out, "Usage: default <logical-name> <accept|write|trace>")
+		return
+	}
+	logicalName := tokens[1]
+	subsystem := strings.ToLower(tokens[2])
+
+	if err := r.engine.SetDefault(logicalName, subsystem); err != nil {
+		fmt.Fprintf(r.out, "Error: %v\n", err)
+		return
+	}
+	fmt.Fprintf(r.out, "Default for %s set to '%s'\n", subsystem, logicalName)
+}
+
+func (r *REPL) defaultStreamDisplay(subsystem string) string {
+	d := r.engine.DefaultStream(subsystem)
+	if d == "" {
+		return "terminal"
+	}
+	return d
+}
+
+func tokenizeLine(input string) ([]string, error) {
+	trimmed := strings.TrimSpace(input)
+	if strings.HasPrefix(trimmed, "(") && strings.HasSuffix(trimmed, ")") {
+		trimmed = strings.TrimSpace(trimmed[1 : len(trimmed)-1])
+	}
+	l := parser.NewLexer(trimmed)
+	var tokens []string
+	for {
+		tok, err := l.NextToken()
+		if err != nil {
+			return nil, err
+		}
+		if tok.Type == parser.TokenEOF {
+			break
+		}
+		if tok.Type == parser.TokenLParen || tok.Type == parser.TokenRParen {
+			continue
+		}
+		tokens = append(tokens, tok.Value)
+	}
+	return tokens, nil
+}
+

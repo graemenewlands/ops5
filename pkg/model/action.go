@@ -11,6 +11,9 @@ const (
 	ActionHalt
 	ActionBind
 	ActionCBind
+	ActionOpenFile
+	ActionCloseFile
+	ActionDefault
 	ActionCustom
 )
 
@@ -100,6 +103,30 @@ type CBindAction struct {
 }
 
 func (a CBindAction) Type() ActionType { return ActionCBind }
+
+// OpenFileAction opens a file and binds it to a logical name.
+type OpenFileAction struct {
+	LogicalName string
+	Filespec    Value  // string, symbol, or variable
+	Mode        string // "in", "out", "append"
+}
+
+func (a OpenFileAction) Type() ActionType { return ActionOpenFile }
+
+// CloseFileAction closes a file associated with a logical name.
+type CloseFileAction struct {
+	LogicalName string
+}
+
+func (a CloseFileAction) Type() ActionType { return ActionCloseFile }
+
+// DefaultAction directs the default stream for accept, write, or trace.
+type DefaultAction struct {
+	LogicalName string // logical name or "nil"/"terminal" to restore standard I/O
+	Subsystem   string // "accept", "write", or "trace"
+}
+
+func (a DefaultAction) Type() ActionType { return ActionDefault }
 
 // CustomAction executes an arbitrary user function during firing.
 type CustomAction struct {

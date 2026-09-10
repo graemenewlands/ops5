@@ -248,6 +248,23 @@ func (l *Lexer) NextToken() (Token, error) {
 		return Token{Type: TokenString, Value: b.String(), Line: startLine, Col: startCol}, nil
 	}
 
+	// Vertical bar symbol literal |...|
+	if r == '|' {
+		l.next()
+		var b strings.Builder
+		for {
+			c := l.next()
+			if c == 0 {
+				return Token{}, fmt.Errorf("unterminated vertical bar symbol at line %d, col %d", startLine, startCol)
+			}
+			if c == '|' {
+				break
+			}
+			b.WriteRune(c)
+		}
+		return Token{Type: TokenSymbol, Value: b.String(), Line: startLine, Col: startCol}, nil
+	}
+
 	// Atom (number, symbol, or identifier)
 	var b strings.Builder
 	for {

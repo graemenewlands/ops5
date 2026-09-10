@@ -1,0 +1,27 @@
+; Workflow validating openfile, closefile, default, and acceptline
+(literalize stage name)
+(literalize data content)
+
+(p write-file
+   <st> (stage ^name write)
+   -->
+   (openfile outlog |file_io_test.tmp| out)
+   (default outlog write)
+   (write "Hello-OPS5-File-IO" (crlf))
+   (closefile outlog)
+   (default nil write)
+   (modify <st> ^name read)
+)
+
+(p read-file
+   <st> (stage ^name read)
+   -->
+   (openfile inlog |file_io_test.tmp| in)
+   (default inlog accept)
+   (make data ^content (acceptline inlog))
+   (closefile inlog)
+   (default nil accept)
+   (modify <st> ^name done)
+   (write "Finished file workflow" (crlf))
+   (halt)
+)
