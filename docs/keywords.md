@@ -48,7 +48,7 @@ These action verbs execute sequentially when a production rule fires.
 
 ## 3. LHS Condition Elements & Syntactic Operators
 
-These keywords, delimiters, and operators are recognized in rule condition patterns on the Left-Hand Side (LHS) of a production rule.
+These keywords, delimiters, and operators are recognized in rule condition patterns on the Left-Hand Side (LHS) of a production rule. For complete documentation on condition patterns, variable joins, and universal quantification, see the [LHS Pattern Matching Reference](lhs_patterns.md) and [Design Patterns & Idioms](idioms.md).
 
 | Symbol / Keyword | Role / Context | Description | Example |
 | :--- | :--- | :--- | :--- |

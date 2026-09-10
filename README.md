@@ -14,6 +14,8 @@ This engine provides a complete, modern execution environment for rule-based sys
    - [File I/O, Stream Redirection & Input](docs/file_io.md)
    - [Unique Atom Generation (`genatom`)](docs/genatom.md)
    - [Attribute Index Resolution (`litval`)](docs/litval.md)
+   - [LHS Condition Elements & Pattern Matching](docs/lhs_patterns.md)
+   - [Design Patterns & Programming Idioms](docs/idioms.md)
    - [Lexical Elements & Data Types](#lexical-elements--data-types)
    - [Schema & Vector Declarations (`literalize`, `vector-attribute`)](#schema--vector-declarations-literalize-vector-attribute)
    - [Working Memory Elements (WMEs)](#working-memory-elements-wmes)
@@ -249,6 +251,9 @@ A production rule has a name, a Left-Hand Side (LHS) condition elements list, an
 ```
 
 ### Left-Hand Side (LHS) Condition Elements
+
+> [!NOTE]
+> For complete documentation on condition patterns, variable joins, universal quantification, and first-order logic idioms, see the [OPS5 LHS Pattern Matching Reference](docs/lhs_patterns.md) and [OPS5 Design Patterns & Programming Idioms](docs/idioms.md).
 
 #### 1. Positive Condition Elements
 Matches a WME of a specified class whose attributes satisfy all stated constraints:
