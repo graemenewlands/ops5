@@ -1,0 +1,29 @@
+; Grid and table formatting with (crlf) and (tabto N)
+(literalize City id name pop)
+(literalize stage current)
+
+(p print-header
+   <sVar> (stage ^current header)
+   -->
+   (write (crlf) (tabto 5) "ID" (tabto 15) "CITY" (tabto 30) "POPULATION" (crlf)
+          (tabto 5) "--" (tabto 15) "----" (tabto 30) "----------" (crlf))
+   (modify <sVar> ^current data)
+)
+
+(p print-row
+   (stage ^current data)
+   <c> (City ^id <id> ^name <name> ^pop <pop>)
+   -->
+   (write (tabto 5) <id> (tabto 15) <name> (tabto 30) <pop> (crlf))
+   (remove <c>)
+)
+
+(p print-footer
+   <sVar> (stage ^current data)
+   -(City)
+   -->
+   (write (tabto 5) "--" (tabto 15) "----" (tabto 30) "----------" (crlf)
+          (tabto 5) "End of Report" (crlf))
+   (remove <sVar>)
+   (halt)
+)

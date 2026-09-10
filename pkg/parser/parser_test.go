@@ -289,3 +289,65 @@ func TestVectorAttributeWorkflow(t *testing.T) {
 	}
 }
 
+func TestParseWriteFormatting(t *testing.T) {
+	src := `
+	(p format-grid
+	   (item ^id <id> ^name <name> ^score <score>)
+	   -->
+	   (write (crlf) (tabto 5) "ID:" (tabto 12) <id> (tabto 25) <name> (tabto 40) <score> (crlf))
+	   (write crlf "Done" crlf)
+	)
+	`
+	rules, err := ParseRules(src)
+	if err != nil {
+		t.Fatalf("failed to parse rule: %v", err)
+	}
+	if len(rules) != 1 {
+		t.Fatalf("expected 1 rule, got %d", len(rules))
+	}
+	r := rules[0]
+	if len(r.Actions) != 2 {
+		t.Fatalf("expected 2 actions, got %d", len(r.Actions))
+	}
+
+	// Action 1: (write (crlf) (tabto 5) "ID:" (tabto 12) <id> (tabto 25) <name> (tabto 40) <score> (crlf))
+	w1, ok := r.Actions[0].(model.WriteAction)
+	if !ok {
+		t.Fatalf("expected WriteAction, got %T", r.Actions[0])
+	}
+	// Expected args: CRLF, TabTo(5), Value("ID:"), TabTo(12), Value(<id>), TabTo(25), Value(<name>), TabTo(40), Value(<score>), CRLF
+	if len(w1.Args) != 10 {
+		t.Fatalf("expected 10 write args in action 1, got %d", len(w1.Args))
+	}
+	if w1.Args[0].Type != model.WriteArgCRLF {
+		t.Errorf("arg 0 expected CRLF, got %v", w1.Args[0].Type)
+	}
+	if w1.Args[1].Type != model.WriteArgTabTo || !w1.Args[1].Value.Equal(model.NewInt(5)) {
+		t.Errorf("arg 1 expected TabTo(5), got %v", w1.Args[1])
+	}
+	if w1.Args[2].Type != model.WriteArgValue || !w1.Args[2].Value.Equal(model.NewString("ID:")) {
+		t.Errorf("arg 2 expected Value(\"ID:\"), got %v", w1.Args[2])
+	}
+	if w1.Args[3].Type != model.WriteArgTabTo || !w1.Args[3].Value.Equal(model.NewInt(12)) {
+		t.Errorf("arg 3 expected TabTo(12), got %v", w1.Args[3])
+	}
+	if w1.Args[4].Type != model.WriteArgValue || !w1.Args[4].Value.Equal(model.NewVariable("<id>")) {
+		t.Errorf("arg 4 expected Value(<id>), got %v", w1.Args[4])
+	}
+	if w1.Args[9].Type != model.WriteArgCRLF {
+		t.Errorf("arg 9 expected CRLF, got %v", w1.Args[9].Type)
+	}
+
+	// Action 2: (write crlf "Done" crlf)
+	w2, ok := r.Actions[1].(model.WriteAction)
+	if !ok {
+		t.Fatalf("expected WriteAction, got %T", r.Actions[1])
+	}
+	if len(w2.Args) != 3 {
+		t.Fatalf("expected 3 write args in action 2, got %d", len(w2.Args))
+	}
+	if w2.Args[0].Type != model.WriteArgCRLF || w2.Args[1].Type != model.WriteArgValue || w2.Args[2].Type != model.WriteArgCRLF {
+		t.Errorf("unexpected args in action 2: %v", w2.Args)
+	}
+}
+

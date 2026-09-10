@@ -27,7 +27,7 @@ func TestEngineGoalProgression(t *testing.T) {
 		},
 	})
 	rule1.AddAction(model.WriteAction{
-		Items: []model.Value{model.NewSymbol("TRANSITIONED"), model.NewSymbol("TO"), model.NewInt(2)},
+		Args: []model.WriteArg{model.WriteValue(model.NewSymbol("TRANSITIONED")), model.WriteValue(model.NewSymbol("TO")), model.WriteValue(model.NewInt(2))},
 	})
 	eng.AddRule(rule1)
 
@@ -147,5 +147,53 @@ func TestEngineNegatedConditionControl(t *testing.T) {
 	status, _ := tasks[0].Get("status")
 	if !status.Equal(model.NewSymbol("running")) {
 		t.Fatalf("expected task status to be 'running', got %v", status)
+	}
+}
+
+func TestEngineWriteFormattingGrid(t *testing.T) {
+	eng := New()
+	var buf bytes.Buffer
+	eng.SetOutputWriter(&buf)
+
+	// Rule to print a grid table
+	r1 := model.NewRule("print-row")
+	ce := model.NewPositiveCE("city").
+		WithElementVariable("c").
+		AddEqualTest("id", model.NewVariable("<id>")).
+		AddEqualTest("name", model.NewVariable("<name>")).
+		AddEqualTest("pop", model.NewVariable("<pop>"))
+	r1.AddCondition(ce)
+	r1.AddAction(model.WriteAction{
+		Args: []model.WriteArg{
+			model.WriteTabTo(model.NewInt(5)),
+			model.WriteValue(model.NewVariable("<id>")),
+			model.WriteTabTo(model.NewInt(15)),
+			model.WriteValue(model.NewVariable("<name>")),
+			model.WriteTabTo(model.NewInt(28)),
+			model.WriteValue(model.NewVariable("<pop>")),
+			model.WriteCRLF(),
+		},
+	})
+	r1.AddAction(model.RemoveAction{TargetElementVar: "c"})
+	eng.AddRule(r1)
+
+	eng.Make("city", map[string]model.Value{
+		"id":   model.NewInt(101),
+		"name": model.NewString("Boston"),
+		"pop":  model.NewInt(675000),
+	})
+
+	cycles, err := eng.Run(10)
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	if cycles != 1 {
+		t.Fatalf("expected 1 cycle, got %d", cycles)
+	}
+
+	expected := "    101       Boston       675000\n"
+	got := buf.String()
+	if got != expected {
+		t.Fatalf("grid formatting mismatch:\ngot:\n%q\nwant:\n%q", got, expected)
 	}
 }

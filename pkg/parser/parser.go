@@ -418,15 +418,49 @@ func (p *Parser) parseAction() (model.Action, error) {
 		}, nil
 
 	case "write":
-		var items []model.Value
+		var args []model.WriteArg
 		for p.current.Type != TokenRParen && p.current.Type != TokenEOF {
-			items = append(items, TokenToValue(p.current))
-			p.advance()
+			if p.current.Type == TokenLParen {
+				if p.peek.Type == TokenSymbol {
+					subVerb := strings.ToLower(p.peek.Value)
+					if subVerb == "crlf" {
+						p.advance() // past '('
+						p.advance() // past 'crlf'
+						if _, err := p.expect(TokenRParen); err != nil {
+							return nil, fmt.Errorf("expected ')' closing (crlf): %w", err)
+						}
+						args = append(args, model.WriteCRLF())
+						continue
+					}
+					if subVerb == "tabto" {
+						p.advance() // past '('
+						p.advance() // past 'tabto'
+						if p.current.Type == TokenRParen || p.current.Type == TokenEOF {
+							return nil, fmt.Errorf("expected column argument in (tabto <col>) at line %d", p.current.Line)
+						}
+						colVal := TokenToValue(p.current)
+						p.advance() // past colVal
+						if _, err := p.expect(TokenRParen); err != nil {
+							return nil, fmt.Errorf("expected ')' closing (tabto <col>): %w", err)
+						}
+						args = append(args, model.WriteTabTo(colVal))
+						continue
+					}
+				}
+				args = append(args, model.WriteValue(model.NewSymbol(p.current.Value)))
+				p.advance()
+			} else if p.current.Type == TokenSymbol && strings.ToLower(p.current.Value) == "crlf" {
+				args = append(args, model.WriteCRLF())
+				p.advance()
+			} else {
+				args = append(args, model.WriteValue(TokenToValue(p.current)))
+				p.advance()
+			}
 		}
 		if _, err := p.expect(TokenRParen); err != nil {
 			return nil, err
 		}
-		return model.WriteAction{Items: items}, nil
+		return model.WriteAction{Args: args}, nil
 
 	case "halt":
 		if _, err := p.expect(TokenRParen); err != nil {

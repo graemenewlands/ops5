@@ -28,6 +28,7 @@ type Engine struct {
 	halted       bool
 	outputWriter io.Writer
 	traceEnabled bool
+	currentCol   int
 }
 
 // New creates a new Engine instance.
@@ -51,6 +52,7 @@ func New() *Engine {
 		halted:       false,
 		outputWriter: os.Stdout,
 		traceEnabled: false,
+		currentCol:   1,
 	}
 }
 
@@ -283,16 +285,74 @@ func (e *Engine) Step() (bool, error) {
 
 		case model.WriteAction:
 			if e.outputWriter != nil {
-				var parts []string
-				for _, item := range act.Items {
-					resolved := resolveValue(item, dominant.Token.Bindings)
-					if resolved.Type() == model.TypeString {
-						parts = append(parts, resolved.Raw().(string))
-					} else {
-						parts = append(parts, resolved.String())
+				hasCRLF := false
+				for _, arg := range act.Args {
+					if arg.Type == model.WriteArgCRLF {
+						hasCRLF = true
+						break
 					}
 				}
-				fmt.Fprintln(e.outputWriter, strings.Join(parts, " "))
+
+				lastWasSpaceOrTab := (e.currentCol == 1)
+				for _, arg := range act.Args {
+					switch arg.Type {
+					case model.WriteArgCRLF:
+						fmt.Fprint(e.outputWriter, "\n")
+						e.currentCol = 1
+						lastWasSpaceOrTab = true
+
+					case model.WriteArgTabTo:
+						targetCol := 1
+						resolvedCol := resolveValue(arg.Value, dominant.Token.Bindings)
+						if resolvedCol.Type() == model.TypeInteger {
+							targetCol = int(resolvedCol.Raw().(int64))
+						} else if resolvedCol.Type() == model.TypeFloat {
+							targetCol = int(resolvedCol.Raw().(float64))
+						}
+						if targetCol < 1 {
+							targetCol = 1
+						}
+
+						if targetCol > e.currentCol {
+							spaces := strings.Repeat(" ", targetCol-e.currentCol)
+							fmt.Fprint(e.outputWriter, spaces)
+							e.currentCol = targetCol
+						} else {
+							fmt.Fprint(e.outputWriter, " ")
+							e.currentCol++
+						}
+						lastWasSpaceOrTab = true
+
+					case model.WriteArgValue:
+						resolved := resolveValue(arg.Value, dominant.Token.Bindings)
+						var text string
+						if resolved.Type() == model.TypeString {
+							text = resolved.Raw().(string)
+						} else {
+							text = resolved.String()
+						}
+
+						if !lastWasSpaceOrTab {
+							fmt.Fprint(e.outputWriter, " ")
+							e.currentCol++
+						}
+
+						fmt.Fprint(e.outputWriter, text)
+						for _, r := range text {
+							if r == '\n' {
+								e.currentCol = 1
+							} else {
+								e.currentCol++
+							}
+						}
+						lastWasSpaceOrTab = false
+					}
+				}
+
+				if !hasCRLF {
+					fmt.Fprint(e.outputWriter, "\n")
+					e.currentCol = 1
+				}
 			}
 
 		case model.HaltAction:

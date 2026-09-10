@@ -1,0 +1,39 @@
+{
+  "name": "grid_formatting_test",
+  "description": "Validates write action with (crlf) and (tabto N) for formatted table and grid output",
+  "strategy": "LEX",
+  "source_file": "fixtures/grid_formatting.ops",
+  "initial_wm": [
+    {
+      "class": "stage",
+      "attributes": {
+        "current": "header"
+      }
+    },
+    {
+      "class": "City",
+      "attributes": {
+        "id": "101",
+        "name": "Boston",
+        "pop": "675000"
+      }
+    },
+    {
+      "class": "City",
+      "attributes": {
+        "id": "102",
+        "name": "Cambridge",
+        "pop": "118000"
+      }
+    }
+  ],
+  "max_cycles": 10,
+  "expected_cycles": 4,
+  "expected_outputs": [
+    "    ID        CITY           POPULATION",
+    "    --        ----           ----------",
+    "    102       Cambridge      118000",
+    "    101       Boston         675000",
+    "    End of Report"
+  ]
+}

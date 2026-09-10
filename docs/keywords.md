@@ -26,7 +26,9 @@ These action verbs execute sequentially when a production rule fires.
 | **`make`** | `(make <class> [^<attr> <val> ...])` | Asserts a new WME into working memory with a monotonically increasing timetag. | `(make task ^id <new-id> ^status ready)` |
 | **`modify`** | `(modify <target> [^<attr> <val> ...])` | Modifies an existing WME (retracts and re-asserts with a new timetag, preserving unmodified attributes). See [`modify` Reference](modify.md). | `(modify <t> ^status complete)`<br>`(modify 1 ^status complete)` |
 | **`remove`** | `(remove <target>)` | Retracts an existing WME from working memory. `<target>` is an element variable or 1-based CE index. | `(remove <t>)`<br>`(remove 2)` |
-| **`write`** | `(write <val1> <val2> ...)` | Emits space-separated values, strings, or resolved variables followed by a newline to the output stream. | `(write "Task" <id> "finished successfully")` |
+| **`write`** | `(write <val1> ...)` | Emits values, strings, or resolved variables to output. Supports `(crlf)` and `(tabto N)`. See [`write` Reference](write.md). | `(write (crlf) (tabto 5) <id> (tabto 20) <name> (crlf))` |
+| **`crlf`** | `(crlf)` or `crlf` | Directs `(write ...)` to emit a newline and reset horizontal column counter to 1. | `(write (crlf) "Start")` |
+| **`tabto`** | `(tabto <col>)` | Directs `(write ...)` to pad output with spaces until column `<col>` is reached. | `(write (tabto 15) "Column 2")` |
 | **`halt`** | `(halt)` | Halts the inference engine execution loop immediately. Current cycle completes, but no further rules fire. | `(halt)` |
 
 ---
@@ -89,7 +91,6 @@ For reference and future engine development, the following standard OPS5 constru
 - **`bind`**: Assigns the result of an expression to a local variable, e.g. `(bind <new-val> (compute <x> * 2))`.
 - **`substr`**: Extracts a sub-vector or substring from a value, e.g. `(substr <vec> 1 2)`.
 - **`genatom`**: Generates a unique symbol atom (e.g., `atom1`, `atom2`).
-- **`crlf`**: Emits a newline in `(write ...)` actions.
 - **`accept`** / **`acceptline`**: Reads user input from standard input on the RHS.
 
 ### LHS Compound Matchers

@@ -320,10 +320,17 @@ The `<target>` can be specified by:
 Retracts the targeted WME from working memory. The `<target>` can be an element variable (e.g., `(remove <it>)`) or a 1-based CE index (e.g., `(remove 2)`).
 
 #### `(write <arg1> <arg2> ...)`
-Emits symbols, numbers, strings, and resolved variables to the engine's configured output writer (delimited by spaces and followed by a newline):
-```ops5
-(write "Processed item:" <id> "with status:" <status>)
-```
+> [!NOTE]
+> For report generation and table/grid formatting instructions, see the [OPS5 `write`, `(crlf)`, and `(tabto N)` Reference](docs/write.md).
+
+Emits symbols, numbers, strings, and resolved variables to the engine's configured output writer.
+- Supports **`(crlf)`** to output newlines and reset the horizontal column position.
+- Supports **`(tabto <column>)`** to move the cursor forward to a 1-based column position by padding spaces, enabling aligned tabular grids and reports:
+  ```ops5
+  (write (crlf) (tabto 5) "ID" (tabto 20) "STATUS" (tabto 35) "VALUE" (crlf))
+  (write (tabto 5) <id> (tabto 20) <status> (tabto 35) <val> (crlf))
+  ```
+- If no `(crlf)` is present in the `write` action, a trailing newline is appended automatically.
 
 #### `(halt)`
 Halts the engine execution immediately. The current cycle completes, but no further rules fire.

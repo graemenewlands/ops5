@@ -42,9 +42,39 @@ type RemoveAction struct {
 
 func (a RemoveAction) Type() ActionType { return ActionRemove }
 
-// WriteAction writes values/strings/variable bindings to engine output.
+// WriteArgType represents the type of argument to a write action.
+type WriteArgType int
+
+const (
+	WriteArgValue WriteArgType = iota
+	WriteArgCRLF
+	WriteArgTabTo
+)
+
+// WriteArg represents an element within a (write ...) action.
+type WriteArg struct {
+	Type  WriteArgType
+	Value Value // value to emit, or column target for tabto
+}
+
+// WriteValue creates a WriteArg for a value/literal/variable.
+func WriteValue(v Value) WriteArg {
+	return WriteArg{Type: WriteArgValue, Value: v}
+}
+
+// WriteCRLF creates a WriteArg representing a (crlf) newline directive.
+func WriteCRLF() WriteArg {
+	return WriteArg{Type: WriteArgCRLF}
+}
+
+// WriteTabTo creates a WriteArg representing a (tabto N) column alignment directive.
+func WriteTabTo(col Value) WriteArg {
+	return WriteArg{Type: WriteArgTabTo, Value: col}
+}
+
+// WriteAction writes values/strings/variable bindings and formatting directives to engine output.
 type WriteAction struct {
-	Items []Value
+	Args []WriteArg
 }
 
 func (a WriteAction) Type() ActionType { return ActionWrite }
