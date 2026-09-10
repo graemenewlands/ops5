@@ -67,25 +67,55 @@ func (am *AlphaMemory) Activation(wme *model.WME, tag PropagationTag) {
 
 // ConstantTestNode evaluates a constant constraint on a single attribute.
 type ConstantTestNode struct {
-	Attribute  string
-	Op         model.Operator
-	Value      model.Value
-	successors []AlphaNode
+	Attribute   string
+	Op          model.Operator
+	Value       model.Value
+	VectorIndex int // -1 for scalar/membership test, >= 0 for positional element test
+	successors  []AlphaNode
 }
 
 // NewConstantTestNode creates a new test node.
 func NewConstantTestNode(attr string, op model.Operator, val model.Value) *ConstantTestNode {
+	return NewIndexedConstantTestNode(attr, op, val, -1)
+}
+
+// NewIndexedConstantTestNode creates a new test node with an explicit vector element index.
+func NewIndexedConstantTestNode(attr string, op model.Operator, val model.Value, vecIdx int) *ConstantTestNode {
 	return &ConstantTestNode{
-		Attribute:  model.NormalizeAttribute(attr),
-		Op:         op,
-		Value:      val,
-		successors: make([]AlphaNode, 0),
+		Attribute:   model.NormalizeAttribute(attr),
+		Op:          op,
+		Value:       val,
+		VectorIndex: vecIdx,
+		successors:  make([]AlphaNode, 0),
 	}
 }
 
 // AddSuccessor adds a child alpha node or alpha memory.
 func (ct *ConstantTestNode) AddSuccessor(succ AlphaNode) {
 	ct.successors = append(ct.successors, succ)
+}
+
+func evalOp(val model.Value, op model.Operator, target model.Value) bool {
+	switch op {
+	case model.OpEqual:
+		return val.Equal(target)
+	case model.OpNotEqual:
+		return !val.Equal(target)
+	case model.OpLess:
+		cmp, err := val.Compare(target)
+		return err == nil && cmp < 0
+	case model.OpLessEqual:
+		cmp, err := val.Compare(target)
+		return err == nil && cmp <= 0
+	case model.OpGreater:
+		cmp, err := val.Compare(target)
+		return err == nil && cmp > 0
+	case model.OpGreaterEqual:
+		cmp, err := val.Compare(target)
+		return err == nil && cmp >= 0
+	default:
+		return false
+	}
 }
 
 // Test evaluates the constraint against the WME.
@@ -99,26 +129,27 @@ func (ct *ConstantTestNode) Test(wme *model.WME) bool {
 		return false
 	}
 
-	switch ct.Op {
-	case model.OpEqual:
-		return val.Equal(ct.Value)
-	case model.OpNotEqual:
-		return !val.Equal(ct.Value)
-	case model.OpLess:
-		cmp, err := val.Compare(ct.Value)
-		return err == nil && cmp < 0
-	case model.OpLessEqual:
-		cmp, err := val.Compare(ct.Value)
-		return err == nil && cmp <= 0
-	case model.OpGreater:
-		cmp, err := val.Compare(ct.Value)
-		return err == nil && cmp > 0
-	case model.OpGreaterEqual:
-		cmp, err := val.Compare(ct.Value)
-		return err == nil && cmp >= 0
-	default:
+	if val.IsVector() {
+		elems := val.VectorElements()
+		if ct.Value.IsVector() {
+			return evalOp(val, ct.Op, ct.Value)
+		}
+		if ct.VectorIndex >= 0 {
+			if ct.VectorIndex < len(elems) {
+				return evalOp(elems[ct.VectorIndex], ct.Op, ct.Value)
+			}
+			return false
+		}
+		// Membership test (VectorIndex == -1):
+		for _, elem := range elems {
+			if evalOp(elem, ct.Op, ct.Value) {
+				return true
+			}
+		}
 		return false
 	}
+
+	return evalOp(val, ct.Op, ct.Value)
 }
 
 // Activation evaluates the test and propagates to successors if satisfied.

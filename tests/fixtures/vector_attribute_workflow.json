@@ -1,0 +1,35 @@
+{
+  "name": "vector_attribute_workflow_test",
+  "description": "Validates literalize and vector-attribute directives with multi-valued attribute matching and modification",
+  "strategy": "LEX",
+  "source_file": "fixtures/vector_attribute_workflow.ops",
+  "initial_wm": [
+    {
+      "class": "City",
+      "attributes": {
+        "name": "Boston",
+        "location": "42.36 -71.05",
+        "state": "MA",
+        "country": "USA",
+        "population": "675000"
+      }
+    }
+  ],
+  "max_cycles": 5,
+  "expected_cycles": 1,
+  "expected_wm": [
+    {
+      "class": "City",
+      "attributes": {
+        "name": "Boston",
+        "location": "42.36 -71.05",
+        "state": "MA",
+        "country": "USA",
+        "population": "680000"
+      }
+    }
+  ],
+  "expected_outputs": [
+    "City Boston located at latitude 42.36 and longitude -71.05"
+  ]
+}

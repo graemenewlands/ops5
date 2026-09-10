@@ -10,18 +10,20 @@ import (
 
 // Parser parses OPS5 productions and commands into model objects.
 type Parser struct {
-	lexer   *Lexer
-	current Token
-	peek    Token
-	schemas map[string]*model.ClassSchema
+	lexer       *Lexer
+	current     Token
+	peek        Token
+	schemas     map[string]*model.ClassSchema
+	vectorAttrs map[string]bool
 }
 
 // NewParser creates a new Parser for the input string.
 func NewParser(input string) (*Parser, error) {
 	l := NewLexer(input)
 	p := &Parser{
-		lexer:   l,
-		schemas: make(map[string]*model.ClassSchema),
+		lexer:       l,
+		schemas:     make(map[string]*model.ClassSchema),
+		vectorAttrs: make(map[string]bool),
 	}
 
 	tok1, err := l.NextToken()
@@ -37,9 +39,42 @@ func NewParser(input string) (*Parser, error) {
 	return p, nil
 }
 
+// RegisterVectorAttribute declares an attribute name as a vector-attribute.
+func (p *Parser) RegisterVectorAttribute(attr string) {
+	norm := model.NormalizeAttribute(attr)
+	if norm == "" {
+		return
+	}
+	p.vectorAttrs[norm] = true
+	for _, s := range p.schemas {
+		if s.HasAttribute(norm) {
+			s.SetVectorAttribute(norm, true)
+		}
+	}
+}
+
+// IsVectorAttribute returns true if the attribute is declared as a vector-attribute.
+func (p *Parser) IsVectorAttribute(attr string) bool {
+	return p.vectorAttrs[model.NormalizeAttribute(attr)]
+}
+
+// VectorAttributes returns a copy of declared vector attribute names.
+func (p *Parser) VectorAttributes() []string {
+	var res []string
+	for a := range p.vectorAttrs {
+		res = append(res, a)
+	}
+	return res
+}
+
 // RegisterSchema registers a class schema with the parser for positional attribute resolution.
 func (p *Parser) RegisterSchema(schema *model.ClassSchema) {
 	if schema != nil {
+		for a := range p.vectorAttrs {
+			if schema.HasAttribute(a) {
+				schema.SetVectorAttribute(a, true)
+			}
+		}
 		p.schemas[schema.Class] = schema
 	}
 }
@@ -262,11 +297,21 @@ func (p *Parser) parseAction() (model.Action, error) {
 				if err := p.advance(); err != nil {
 					return nil, err
 				}
-				val := TokenToValue(p.current)
-				if err := p.advance(); err != nil {
-					return nil, err
+				var vals []model.Value
+				for p.current.Type != TokenAttribute && p.current.Type != TokenRParen && p.current.Type != TokenEOF {
+					vals = append(vals, TokenToValue(p.current))
+					if err := p.advance(); err != nil {
+						return nil, err
+					}
 				}
-				attrs[attrName] = val
+				isVec := p.IsVectorAttribute(attrName) || (schema != nil && schema.IsVectorAttribute(attrName))
+				if len(vals) > 1 || isVec {
+					attrs[attrName] = model.NewVector(vals)
+				} else if len(vals) == 1 {
+					attrs[attrName] = vals[0]
+				} else {
+					attrs[attrName] = model.NewSymbol("nil")
+				}
 			} else {
 				val := TokenToValue(p.current)
 				if err := p.advance(); err != nil {
@@ -276,8 +321,20 @@ func (p *Parser) parseAction() (model.Action, error) {
 				if schema != nil && posIndex < len(schema.Attributes) {
 					attrName = schema.Attributes[posIndex]
 				}
-				posIndex++
-				attrs[attrName] = val
+				isVec := p.IsVectorAttribute(attrName) || (schema != nil && schema.IsVectorAttribute(attrName))
+				if isVec {
+					if existing, ok := attrs[attrName]; ok && existing.IsVector() {
+						attrs[attrName] = model.NewVector(append(existing.VectorElements(), val))
+					} else {
+						attrs[attrName] = model.NewVector([]model.Value{val})
+					}
+					if schema == nil || posIndex != len(schema.Attributes)-1 {
+						posIndex++
+					}
+				} else {
+					posIndex++
+					attrs[attrName] = val
+				}
 			}
 		}
 		if _, err := p.expect(TokenRParen); err != nil {
@@ -301,15 +358,25 @@ func (p *Parser) parseAction() (model.Action, error) {
 
 		attrs := make(map[string]model.Value)
 		for p.current.Type == TokenAttribute {
-			attrName := p.current.Value
+			attrName := model.NormalizeAttribute(p.current.Value)
 			if err := p.advance(); err != nil {
 				return nil, err
 			}
-			val := TokenToValue(p.current)
-			if err := p.advance(); err != nil {
-				return nil, err
+			var vals []model.Value
+			for p.current.Type != TokenAttribute && p.current.Type != TokenRParen && p.current.Type != TokenEOF {
+				vals = append(vals, TokenToValue(p.current))
+				if err := p.advance(); err != nil {
+					return nil, err
+				}
 			}
-			attrs[attrName] = val
+			isVec := p.IsVectorAttribute(attrName)
+			if len(vals) > 1 || isVec {
+				attrs[attrName] = model.NewVector(vals)
+			} else if len(vals) == 1 {
+				attrs[attrName] = vals[0]
+			} else {
+				attrs[attrName] = model.NewSymbol("nil")
+			}
 		}
 		if _, err := p.expect(TokenRParen); err != nil {
 			return nil, err
@@ -377,6 +444,7 @@ const (
 	StmtRule StatementType = iota
 	StmtMake
 	StmtLiteralize
+	StmtVectorAttribute
 )
 
 func (st StatementType) String() string {
@@ -387,6 +455,8 @@ func (st StatementType) String() string {
 		return "make"
 	case StmtLiteralize:
 		return "literalize"
+	case StmtVectorAttribute:
+		return "vector-attribute"
 	default:
 		return "unknown"
 	}
@@ -400,6 +470,7 @@ type Statement struct {
 	MakeAttributes  map[string]model.Value
 	LiteralizeClass string
 	LiteralizeAttrs []string
+	VectorAttrs     []string
 	Schema          *model.ClassSchema
 }
 
@@ -428,11 +499,21 @@ func (p *Parser) ParseMake() (string, map[string]model.Value, error) {
 			if err := p.advance(); err != nil {
 				return "", nil, err
 			}
-			val := TokenToValue(p.current)
-			if err := p.advance(); err != nil {
-				return "", nil, err
+			var vals []model.Value
+			for p.current.Type != TokenAttribute && p.current.Type != TokenRParen && p.current.Type != TokenEOF {
+				vals = append(vals, TokenToValue(p.current))
+				if err := p.advance(); err != nil {
+					return "", nil, err
+				}
 			}
-			attrs[attrName] = val
+			isVec := p.IsVectorAttribute(attrName) || (schema != nil && schema.IsVectorAttribute(attrName))
+			if len(vals) > 1 || isVec {
+				attrs[attrName] = model.NewVector(vals)
+			} else if len(vals) == 1 {
+				attrs[attrName] = vals[0]
+			} else {
+				attrs[attrName] = model.NewSymbol("nil")
+			}
 		} else {
 			val := TokenToValue(p.current)
 			if err := p.advance(); err != nil {
@@ -442,8 +523,20 @@ func (p *Parser) ParseMake() (string, map[string]model.Value, error) {
 			if schema != nil && posIndex < len(schema.Attributes) {
 				attrName = schema.Attributes[posIndex]
 			}
-			posIndex++
-			attrs[attrName] = val
+			isVec := p.IsVectorAttribute(attrName) || (schema != nil && schema.IsVectorAttribute(attrName))
+			if isVec {
+				if existing, ok := attrs[attrName]; ok && existing.IsVector() {
+					attrs[attrName] = model.NewVector(append(existing.VectorElements(), val))
+				} else {
+					attrs[attrName] = model.NewVector([]model.Value{val})
+				}
+				if schema == nil || posIndex != len(schema.Attributes)-1 {
+					posIndex++
+				}
+			} else {
+				posIndex++
+				attrs[attrName] = val
+			}
 		}
 	}
 
@@ -491,7 +584,38 @@ func (p *Parser) ParseLiteralize() (string, []string, error) {
 	return classTok.Value, attrs, nil
 }
 
-// NextStatement parses the next top-level statement (Rule, Make, or Literalize).
+// ParseVectorAttribute parses a (vector-attribute attr1 attr2 ...) directive.
+func (p *Parser) ParseVectorAttribute() ([]string, error) {
+	if _, err := p.expect(TokenLParen); err != nil {
+		return nil, err
+	}
+	verbTok, err := p.expect(TokenSymbol)
+	if err != nil || strings.ToLower(verbTok.Value) != "vector-attribute" {
+		return nil, fmt.Errorf("expected 'vector-attribute', got %v", verbTok.Value)
+	}
+
+	var attrs []string
+	for p.current.Type != TokenRParen && p.current.Type != TokenEOF {
+		if p.current.Type == TokenSymbol || p.current.Type == TokenAttribute {
+			norm := model.NormalizeAttribute(p.current.Value)
+			attrs = append(attrs, norm)
+			p.RegisterVectorAttribute(norm)
+			if err := p.advance(); err != nil {
+				return nil, err
+			}
+		} else {
+			return nil, fmt.Errorf("expected attribute name at line %d, got %s", p.current.Line, p.current.Value)
+		}
+	}
+
+	if _, err := p.expect(TokenRParen); err != nil {
+		return nil, err
+	}
+
+	return attrs, nil
+}
+
+// NextStatement parses the next top-level statement (Rule, Make, Literalize, or VectorAttribute).
 // Returns (nil, nil) when TokenEOF is reached.
 func (p *Parser) NextStatement() (*Statement, error) {
 	if p.current.Type == TokenEOF {
@@ -530,6 +654,16 @@ func (p *Parser) NextStatement() (*Statement, error) {
 			LiteralizeClass: class,
 			LiteralizeAttrs: attrs,
 			Schema:          schema,
+		}, nil
+
+	case "vector-attribute":
+		attrs, err := p.ParseVectorAttribute()
+		if err != nil {
+			return nil, err
+		}
+		return &Statement{
+			Type:        StmtVectorAttribute,
+			VectorAttrs: attrs,
 		}, nil
 
 	default:

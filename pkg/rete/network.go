@@ -41,9 +41,14 @@ func (net *Network) OnRetract(wme *model.WME) {
 func getAlphaKey(ce *model.ConditionElement) string {
 	key := ce.Class
 	for _, at := range ce.Tests {
-		for _, c := range at.Constraints {
+		isMulti := len(at.Constraints) > 1
+		for idx, c := range at.Constraints {
 			if !c.Value.IsVariable() {
-				key += fmt.Sprintf("|%s%s%s", at.Attribute, c.Op.String(), c.Value.String())
+				if isMulti {
+					key += fmt.Sprintf("|%s[%d]%s%s", at.Attribute, idx, c.Op.String(), c.Value.String())
+				} else {
+					key += fmt.Sprintf("|%s%s%s", at.Attribute, c.Op.String(), c.Value.String())
+				}
 			}
 		}
 	}
@@ -55,9 +60,14 @@ func matchesCEConstants(ce *model.ConditionElement, wme *model.WME) bool {
 		return false
 	}
 	for _, at := range ce.Tests {
-		for _, c := range at.Constraints {
+		isMulti := len(at.Constraints) > 1
+		for idx, c := range at.Constraints {
 			if !c.Value.IsVariable() {
-				ct := NewConstantTestNode(at.Attribute, c.Op, c.Value)
+				vecIdx := -1
+				if isMulti {
+					vecIdx = idx
+				}
+				ct := NewIndexedConstantTestNode(at.Attribute, c.Op, c.Value, vecIdx)
 				if !ct.Test(wme) {
 					return false
 				}
@@ -78,9 +88,14 @@ func (net *Network) buildAlphaMemory(ce *model.ConditionElement, existingWMEs []
 
 	// Chain constant test nodes
 	for _, at := range ce.Tests {
-		for _, c := range at.Constraints {
+		isMulti := len(at.Constraints) > 1
+		for idx, c := range at.Constraints {
 			if !c.Value.IsVariable() {
-				testNode := NewConstantTestNode(at.Attribute, c.Op, c.Value)
+				vecIdx := -1
+				if isMulti {
+					vecIdx = idx
+				}
+				testNode := NewIndexedConstantTestNode(at.Attribute, c.Op, c.Value, vecIdx)
 				switch p := currNode.(type) {
 				case *TypeNode:
 					p.AddSuccessor(testNode)
@@ -135,14 +150,20 @@ func (net *Network) AddRuleWithWMEs(rule *model.Rule, listener ConflictSetListen
 		// Determine join tests: compare right WME attributes against variables already bound in previous CEs
 		var joinTests []JoinTest
 		for _, at := range ce.Tests {
-			for _, c := range at.Constraints {
+			isMulti := len(at.Constraints) > 1
+			for idx, c := range at.Constraints {
 				if c.Value.IsVariable() {
 					varName := c.Value.VariableName()
 					if boundVariables[varName] {
+						vecIdx := -1
+						if isMulti {
+							vecIdx = idx
+						}
 						joinTests = append(joinTests, JoinTest{
-							Attribute: at.Attribute,
-							Op:        c.Op,
-							Variable:  varName,
+							Attribute:   at.Attribute,
+							Op:          c.Op,
+							Variable:    varName,
+							VectorIndex: vecIdx,
 						})
 					}
 				}

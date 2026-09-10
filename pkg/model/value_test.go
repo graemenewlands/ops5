@@ -85,3 +85,28 @@ func TestAutoValue(t *testing.T) {
 		})
 	}
 }
+
+func TestVectorValue(t *testing.T) {
+	v1 := NewVector([]Value{NewFloat(42.36), NewFloat(-71.05)})
+	v2 := NewVector([]Value{NewFloat(42.36), NewFloat(-71.05)})
+	v3 := NewVector([]Value{NewFloat(42.36), NewFloat(-70.00)})
+
+	if !v1.IsVector() {
+		t.Fatalf("expected v1 to be vector")
+	}
+	if v1.Type() != TypeVector {
+		t.Fatalf("expected v1.Type() == TypeVector, got %v", v1.Type())
+	}
+	if !v1.Equal(v2) {
+		t.Fatalf("expected v1 equal v2")
+	}
+	if v1.Equal(v3) {
+		t.Fatalf("expected v1 not equal v3")
+	}
+	if v1.String() != "42.36 -71.05" {
+		t.Fatalf("expected '42.36 -71.05', got %q", v1.String())
+	}
+	if len(v1.VectorElements()) != 2 {
+		t.Fatalf("expected 2 elements, got %d", len(v1.VectorElements()))
+	}
+}

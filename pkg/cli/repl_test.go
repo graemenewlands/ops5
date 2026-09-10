@@ -71,3 +71,44 @@ func TestREPLStrategySwitch(t *testing.T) {
 		t.Fatalf("expected LEX strategy confirmation, got:\n%s", output)
 	}
 }
+
+func TestREPLVectorAttributeInteractive(t *testing.T) {
+	commands := `
+	(literalize City name location state country population)
+	(vector-attribute location)
+	vector-attributes
+	schemas City
+	make City ^name Boston ^location 42.36 -71.05 ^state MA ^country USA ^population 675000
+	(p locate-city
+	   (City ^name <c> ^location <lat> <long> ^state MA)
+	   -->
+	   (write "Located" <c> "at" <lat> <long>)
+	   (halt)
+	)
+	step
+	exit
+	`
+
+	in := strings.NewReader(commands)
+	var out bytes.Buffer
+
+	repl := NewREPL(in, &out)
+	repl.Start()
+
+	output := out.String()
+	if !strings.Contains(output, "Declared vector attribute(s): [location]") {
+		t.Fatalf("expected vector attribute confirmation, got:\n%s", output)
+	}
+	if !strings.Contains(output, "^location") {
+		t.Fatalf("expected ^location in vector-attributes listing, got:\n%s", output)
+	}
+	if !strings.Contains(output, "vector: [location]") {
+		t.Fatalf("expected vector: [location] in schemas output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Asserted: (1: City ^country USA ^location 42.36 -71.05 ^name Boston ^population 675000 ^state MA)") {
+		t.Fatalf("expected WME assertion with location vector, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Located Boston at 42.36 -71.05") {
+		t.Fatalf("expected rule firing output with extracted coordinates, got:\n%s", output)
+	}
+}

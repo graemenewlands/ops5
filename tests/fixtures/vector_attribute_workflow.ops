@@ -1,0 +1,11 @@
+; OPS5 Workflow with vector-attribute and literalize
+(literalize City name location state country population)
+(vector-attribute location)
+
+(p report-city
+   <c> (City ^name <name> ^location <lat> <long> ^state MA)
+   -->
+   (modify <c> ^population 680000)
+   (write "City" <name> "located at latitude" <lat> "and longitude" <long>)
+   (halt)
+)

@@ -120,8 +120,14 @@ func (r *REPL) handleCommand(input string) bool {
 	}
 
 	// 3. S-expression literalize: (literalize ...)
-	if strings.HasPrefix(input, "(literalize ") || strings.HasPrefix(input, "(LITERALIZE ") {
+	if strings.HasPrefix(strings.ToLower(input), "(literalize ") {
 		r.handleLiteralize(input)
+		return false
+	}
+
+	// 4. S-expression vector-attribute: (vector-attribute ...)
+	if strings.HasPrefix(strings.ToLower(input), "(vector-attribute ") {
+		r.handleVectorAttribute(input)
 		return false
 	}
 
@@ -142,6 +148,12 @@ func (r *REPL) handleCommand(input string) bool {
 
 	case "literalize":
 		r.handleLiteralize("(" + input + ")")
+
+	case "vector-attribute":
+		r.handleVectorAttribute("(" + input + ")")
+
+	case "vector-attributes":
+		r.printVectorAttributes()
 
 	case "schemas", "schema":
 		classFilter := ""
@@ -258,6 +270,9 @@ func (r *REPL) handleDefineRule(src string) {
 		fmt.Fprintf(r.out, "Parse error: %v\n", err)
 		return
 	}
+	for _, va := range r.engine.VectorAttributes() {
+		p.RegisterVectorAttribute(va)
+	}
 	for _, s := range r.engine.Schemas() {
 		p.RegisterSchema(s)
 	}
@@ -275,6 +290,9 @@ func (r *REPL) handleMake(src string) {
 	if err != nil {
 		fmt.Fprintf(r.out, "Parse error: %v\n", err)
 		return
+	}
+	for _, va := range r.engine.VectorAttributes() {
+		p.RegisterVectorAttribute(va)
 	}
 	for _, s := range r.engine.Schemas() {
 		p.RegisterSchema(s)
@@ -298,14 +316,56 @@ func (r *REPL) handleLiteralize(src string) {
 		fmt.Fprintf(r.out, "Parse error: %v\n", err)
 		return
 	}
+	for _, va := range r.engine.VectorAttributes() {
+		p.RegisterVectorAttribute(va)
+	}
 	class, attrs, err := p.ParseLiteralize()
 	if err != nil {
 		fmt.Fprintf(r.out, "Literalize syntax error: %v\n", err)
 		return
 	}
 	schema := r.engine.DeclareClass(class, attrs)
-	fmt.Fprintf(r.out, "Declared class schema '%s' with %d attributes: %v\n",
-		schema.Class, len(schema.Attributes), schema.Attributes)
+	vecs := schema.VectorAttributeNames()
+	if len(vecs) > 0 {
+		fmt.Fprintf(r.out, "Declared class schema '%s' with %d attributes: %v (vector: %v)\n",
+			schema.Class, len(schema.Attributes), schema.Attributes, vecs)
+	} else {
+		fmt.Fprintf(r.out, "Declared class schema '%s' with %d attributes: %v\n",
+			schema.Class, len(schema.Attributes), schema.Attributes)
+	}
+}
+
+func (r *REPL) handleVectorAttribute(src string) {
+	trimmed := strings.TrimSpace(src)
+	if !strings.HasPrefix(trimmed, "(") {
+		trimmed = "(" + trimmed + ")"
+	}
+	p, err := parser.NewParser(trimmed)
+	if err != nil {
+		fmt.Fprintf(r.out, "Parse error: %v\n", err)
+		return
+	}
+	attrs, err := p.ParseVectorAttribute()
+	if err != nil {
+		fmt.Fprintf(r.out, "vector-attribute syntax error: %v\n", err)
+		return
+	}
+	for _, a := range attrs {
+		r.engine.DeclareVectorAttribute(a)
+	}
+	fmt.Fprintf(r.out, "Declared vector attribute(s): %v\n", attrs)
+}
+
+func (r *REPL) printVectorAttributes() {
+	attrs := r.engine.VectorAttributes()
+	if len(attrs) == 0 {
+		fmt.Fprintln(r.out, "No vector attributes declared.")
+		return
+	}
+	fmt.Fprintf(r.out, "Declared Vector Attributes (%d):\n", len(attrs))
+	for _, a := range attrs {
+		fmt.Fprintf(r.out, "  ^%s\n", a)
+	}
 }
 
 func (r *REPL) printSchemas(classFilter string) {
@@ -322,7 +382,12 @@ func (r *REPL) printSchemas(classFilter string) {
 			if count == 0 {
 				fmt.Fprintln(r.out, "Class Schemas:")
 			}
-			fmt.Fprintf(r.out, "  %s: %v\n", s.Class, s.Attributes)
+			vecs := s.VectorAttributeNames()
+			if len(vecs) > 0 {
+				fmt.Fprintf(r.out, "  %s: %v (vector: %v)\n", s.Class, s.Attributes, vecs)
+			} else {
+				fmt.Fprintf(r.out, "  %s: %v\n", s.Class, s.Attributes)
+			}
 			count++
 		}
 	}
@@ -414,7 +479,10 @@ func (r *REPL) LoadFile(path string) error {
 		return err
 	}
 
-	// Register any existing schemas from the engine into the parser
+	// Register any existing schemas and vector attributes from the engine into the parser
+	for _, va := range r.engine.VectorAttributes() {
+		p.RegisterVectorAttribute(va)
+	}
 	for _, s := range r.engine.Schemas() {
 		p.RegisterSchema(s)
 	}
@@ -422,6 +490,7 @@ func (r *REPL) LoadFile(path string) error {
 	rulesCount := 0
 	makesCount := 0
 	litCount := 0
+	vecCount := 0
 
 	for {
 		stmt, err := p.NextStatement()
@@ -442,16 +511,24 @@ func (r *REPL) LoadFile(path string) error {
 		case parser.StmtLiteralize:
 			r.engine.DeclareClass(stmt.LiteralizeClass, stmt.LiteralizeAttrs)
 			litCount++
+		case parser.StmtVectorAttribute:
+			for _, a := range stmt.VectorAttrs {
+				r.engine.DeclareVectorAttribute(a)
+			}
+			vecCount++
 		}
 	}
 
+	var parts []string
+	parts = append(parts, fmt.Sprintf("added %d rules", rulesCount))
+	parts = append(parts, fmt.Sprintf("asserted %d WMEs", makesCount))
 	if litCount > 0 {
-		fmt.Fprintf(r.out, "Loaded %s: added %d rules, asserted %d WMEs, declared %d schemas.\n",
-			path, rulesCount, makesCount, litCount)
-	} else {
-		fmt.Fprintf(r.out, "Loaded %s: added %d rules, asserted %d WMEs.\n",
-			path, rulesCount, makesCount)
+		parts = append(parts, fmt.Sprintf("declared %d schemas", litCount))
 	}
+	if vecCount > 0 {
+		parts = append(parts, fmt.Sprintf("declared %d vector-attributes", vecCount))
+	}
+	fmt.Fprintf(r.out, "Loaded %s: %s.\n", path, strings.Join(parts, ", "))
 	return nil
 }
 
@@ -486,23 +563,25 @@ func (r *REPL) runTestCase(path string) {
 func (r *REPL) printHelp() {
 	helpText := `
 Commands:
-  (p <name> ...)        Define a production rule (multiline supported)
-  (literalize <c> ...)  Declare an element class schema with attributes
-  make <cls> [^a v]     Assert a new Working Memory Element (e.g. make goal ^status active)
-  modify <tag> [^a v]   Modify attributes of an existing WME by timetag
-  remove <tag>          Retract a WME by its timetag
-  wm [class]            Display current working memory elements
-  schemas [class]       Display declared class schemas
-  cs                    Display conflict set (pending instantiations in salience order)
-  step                  Execute one Match-Resolve-Act cycle
-  run [N]               Run until quiescence, halt, or N cycles
-  strategy [lex|mea]    View or switch conflict resolution strategy
-  trace on|off          Toggle cycle execution tracing
-  load <file.ops>       Load and compile rules and makes from an OPS5 source file
-  test <file.json>      Execute an external test case file
-  reset                 Reset working memory and conflict set
-  help                  Show this help text
-  exit / quit           Exit the REPL
+  (p <name> ...)            Define a production rule (multiline supported)
+  (literalize <c> ...)      Declare an element class schema with attributes
+  (vector-attribute <a...>) Declare attribute(s) as multi-valued vector attributes
+  vector-attributes         Display declared vector attributes
+  make <cls> [^a v]         Assert a new Working Memory Element (e.g. make goal ^status active)
+  modify <tag> [^a v]       Modify attributes of an existing WME by timetag
+  remove <tag>              Retract a WME by its timetag
+  wm [class]                Display current working memory elements
+  schemas [class]           Display declared class schemas
+  cs                        Display conflict set (pending instantiations in salience order)
+  step                      Execute one Match-Resolve-Act cycle
+  run [N]                   Run until quiescence, halt, or N cycles
+  strategy [lex|mea]        View or switch conflict resolution strategy
+  trace on|off              Toggle cycle execution tracing
+  load <file.ops>           Load and compile rules and makes from an OPS5 source file
+  test <file.json>          Execute an external test case file
+  reset                     Reset working memory and conflict set
+  help                      Show this help text
+  exit / quit               Exit the REPL
 `
 	fmt.Fprint(r.out, helpText)
 }

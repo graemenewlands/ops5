@@ -142,6 +142,10 @@ func (r *Runner) Run(tc *TestCase) *Result {
 				eng.Make(stmt.MakeClass, stmt.MakeAttributes)
 			case parser.StmtLiteralize:
 				eng.DeclareClass(stmt.LiteralizeClass, stmt.LiteralizeAttrs)
+			case parser.StmtVectorAttribute:
+				for _, attr := range stmt.VectorAttrs {
+					eng.DeclareVectorAttribute(attr)
+				}
 			}
 		}
 	}
@@ -150,7 +154,16 @@ func (r *Runner) Run(tc *TestCase) *Result {
 	for _, w := range tc.InitialWM {
 		attrs := make(map[string]model.Value, len(w.Attributes))
 		for k, v := range w.Attributes {
-			attrs[k] = model.AutoValue(v)
+			if eng.IsVectorAttribute(k) {
+				fields := strings.Fields(v)
+				vec := make([]model.Value, len(fields))
+				for fi, f := range fields {
+					vec[fi] = model.AutoValue(f)
+				}
+				attrs[k] = model.NewVector(vec)
+			} else {
+				attrs[k] = model.AutoValue(v)
+			}
 		}
 		eng.Make(w.Class, attrs)
 	}
@@ -195,7 +208,7 @@ func (r *Runner) Run(tc *TestCase) *Result {
 			match := true
 			for k, expectedValStr := range exp.Attributes {
 				actualVal, ok := w.Get(k)
-				if !ok || !actualVal.Equal(model.AutoValue(expectedValStr)) {
+				if !ok || !matchAttributeValue(actualVal, expectedValStr) {
 					match = false
 					break
 				}
@@ -225,7 +238,7 @@ func (r *Runner) Run(tc *TestCase) *Result {
 			match := true
 			for k, expectedValStr := range forb.Attributes {
 				actualVal, ok := w.Get(k)
-				if !ok || !actualVal.Equal(model.AutoValue(expectedValStr)) {
+				if !ok || !matchAttributeValue(actualVal, expectedValStr) {
 					match = false
 					break
 				}
@@ -262,4 +275,30 @@ func (r *Runner) Run(tc *TestCase) *Result {
 		Output:       outStr,
 		Error:        nil,
 	}
+}
+
+func matchAttributeValue(actual model.Value, expectedStr string) bool {
+	if actual.Equal(model.AutoValue(expectedStr)) {
+		return true
+	}
+	if actual.IsVector() {
+		if actual.String() == expectedStr {
+			return true
+		}
+		fields := strings.Fields(expectedStr)
+		elems := actual.VectorElements()
+		if len(fields) == len(elems) {
+			match := true
+			for i, f := range fields {
+				if !elems[i].Equal(model.AutoValue(f)) {
+					match = false
+					break
+				}
+			}
+			if match {
+				return true
+			}
+		}
+	}
+	return false
 }

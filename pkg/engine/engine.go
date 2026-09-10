@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 
@@ -21,6 +22,7 @@ type Engine struct {
 	conflictSet  *conflict.Set
 	rules        []*model.Rule
 	schemas      map[string]*model.ClassSchema
+	vectorAttrs  map[string]bool
 	ruleCount    int
 	cycleCount   int
 	halted       bool
@@ -43,6 +45,7 @@ func New() *Engine {
 		conflictSet:  cs,
 		rules:        make([]*model.Rule, 0),
 		schemas:      make(map[string]*model.ClassSchema),
+		vectorAttrs:  make(map[string]bool),
 		ruleCount:    0,
 		cycleCount:   0,
 		halted:       false,
@@ -92,12 +95,55 @@ func (e *Engine) AddRule(rule *model.Rule) {
 	e.network.AddRuleWithWMEs(rule, e.conflictSet, existingWMEs)
 }
 
+// DeclareVectorAttribute registers an attribute name as a vector-attribute.
+func (e *Engine) DeclareVectorAttribute(attr string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	norm := model.NormalizeAttribute(attr)
+	if norm == "" {
+		return
+	}
+	e.vectorAttrs[norm] = true
+	for _, s := range e.schemas {
+		if s.HasAttribute(norm) {
+			s.SetVectorAttribute(norm, true)
+		}
+	}
+}
+
+// IsVectorAttribute checks if an attribute is declared as a vector-attribute.
+func (e *Engine) IsVectorAttribute(attr string) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	return e.vectorAttrs[model.NormalizeAttribute(attr)]
+}
+
+// VectorAttributes returns a list of all declared vector attributes.
+func (e *Engine) VectorAttributes() []string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	res := make([]string, 0, len(e.vectorAttrs))
+	for a := range e.vectorAttrs {
+		res = append(res, a)
+	}
+	sort.Strings(res)
+	return res
+}
+
 // DeclareClass registers a schema for a class name from a literalize directive.
 func (e *Engine) DeclareClass(class string, attributes []string) *model.ClassSchema {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
 	schema := model.NewClassSchema(class, attributes)
+	for a := range e.vectorAttrs {
+		if schema.HasAttribute(a) {
+			schema.SetVectorAttribute(a, true)
+		}
+	}
 	e.schemas[schema.Class] = schema
 	return schema
 }
@@ -138,13 +184,21 @@ func (e *Engine) Modify(timetag int64, attrs map[string]model.Value) (*model.WME
 	return e.wm.Modify(timetag, attrs)
 }
 
-// ResolveValue substitutes variable placeholders using token bindings.
+// resolveValue substitutes variable placeholders using token bindings.
 func resolveValue(val model.Value, bindings map[string]model.Value) model.Value {
 	if val.IsVariable() {
 		vName := val.VariableName()
 		if bound, ok := bindings[vName]; ok {
 			return bound
 		}
+	}
+	if val.IsVector() {
+		elems := val.VectorElements()
+		resolved := make([]model.Value, len(elems))
+		for i, el := range elems {
+			resolved[i] = resolveValue(el, bindings)
+		}
+		return model.NewVector(resolved)
 	}
 	return val
 }

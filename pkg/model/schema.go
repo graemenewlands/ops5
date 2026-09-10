@@ -4,9 +4,10 @@ import "strings"
 
 // ClassSchema represents an OPS5 element class definition declared via (literalize ...).
 type ClassSchema struct {
-	Class      string         // Normalized class name (lowercase)
-	Attributes []string       // Ordered list of normalized attribute names
-	attrMap    map[string]int // Attribute name -> 0-based index
+	Class            string          // Normalized class name (lowercase)
+	Attributes       []string        // Ordered list of normalized attribute names
+	VectorAttributes map[string]bool // Attribute name -> true if declared as vector-attribute
+	attrMap          map[string]int  // Attribute name -> 0-based index
 }
 
 // NewClassSchema creates a new ClassSchema.
@@ -21,16 +22,16 @@ func NewClassSchema(class string, attributes []string) *ClassSchema {
 			continue
 		}
 		if _, exists := attrMap[norm]; !exists {
-			attrMap[norm] = len(normAttrs)
 			normAttrs = append(normAttrs, norm)
 			attrMap[norm] = len(normAttrs) - 1
 		}
 	}
 
 	return &ClassSchema{
-		Class:      normClass,
-		Attributes: normAttrs,
-		attrMap:    attrMap,
+		Class:            normClass,
+		Attributes:       normAttrs,
+		VectorAttributes: make(map[string]bool),
+		attrMap:          attrMap,
 	}
 }
 
@@ -52,4 +53,36 @@ func (s *ClassSchema) AttributeAt(index int) (string, bool) {
 func (s *ClassSchema) IndexOf(attr string) (int, bool) {
 	idx, ok := s.attrMap[NormalizeAttribute(attr)]
 	return idx, ok
+}
+
+// IsVectorAttribute returns true if the attribute is declared as a vector-attribute.
+func (s *ClassSchema) IsVectorAttribute(attr string) bool {
+	if s.VectorAttributes == nil {
+		return false
+	}
+	return s.VectorAttributes[NormalizeAttribute(attr)]
+}
+
+// SetVectorAttribute marks or unmarks an attribute as a vector-attribute.
+func (s *ClassSchema) SetVectorAttribute(attr string, isVector bool) {
+	if s.VectorAttributes == nil {
+		s.VectorAttributes = make(map[string]bool)
+	}
+	norm := NormalizeAttribute(attr)
+	if isVector {
+		s.VectorAttributes[norm] = true
+	} else {
+		delete(s.VectorAttributes, norm)
+	}
+}
+
+// VectorAttributeNames returns a list of attribute names designated as vector attributes.
+func (s *ClassSchema) VectorAttributeNames() []string {
+	var res []string
+	for _, a := range s.Attributes {
+		if s.VectorAttributes[a] {
+			res = append(res, a)
+		}
+	}
+	return res
 }

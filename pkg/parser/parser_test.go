@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"strings"
 	"testing"
 
 	"ops5/pkg/model"
@@ -193,6 +194,98 @@ func TestLiteralizePositionalMapping(t *testing.T) {
 	}
 	if !tests["z"].Equal(model.NewInt(30)) {
 		t.Fatalf("expected z to match 30, got %v", tests["z"])
+	}
+}
+
+func TestParseVectorAttribute(t *testing.T) {
+	src := `(vector-attribute location airlines-flown ^hotels-stayed)`
+	p, err := NewParser(src)
+	if err != nil {
+		t.Fatalf("failed to create parser: %v", err)
+	}
+
+	attrs, err := p.ParseVectorAttribute()
+	if err != nil {
+		t.Fatalf("failed to parse vector-attribute: %v", err)
+	}
+
+	expected := []string{"location", "airlines-flown", "hotels-stayed"}
+	if len(attrs) != len(expected) {
+		t.Fatalf("expected %d attributes, got %d", len(expected), len(attrs))
+	}
+	for i, exp := range expected {
+		if attrs[i] != exp {
+			t.Fatalf("expected attrs[%d] == %s, got %s", i, exp, attrs[i])
+		}
+		if !p.IsVectorAttribute(exp) {
+			t.Fatalf("expected p.IsVectorAttribute(%s) == true", exp)
+		}
+	}
+}
+
+func TestVectorAttributeWorkflow(t *testing.T) {
+	src := `
+	(literalize City name location state country population)
+	(vector-attribute location)
+	(make City ^name Boston ^location 42.36 -71.05 ^state MA ^country USA ^population 675000)
+	(p find-boston
+	   (City ^name <name> ^location <lat> <long> ^state MA)
+	   -->
+	   (write "City:" <name> "at" <lat> <long>)
+	)
+	`
+	stmts, err := ParseProgram(src)
+	if err != nil {
+		t.Fatalf("failed to parse program: %v", err)
+	}
+
+	if len(stmts) != 4 {
+		t.Fatalf("expected 4 statements, got %d", len(stmts))
+	}
+
+	// 1. Literalize
+	if stmts[0].Type != StmtLiteralize || strings.ToLower(stmts[0].LiteralizeClass) != "city" {
+		t.Fatalf("expected stmt 0 literalize city, got %v", stmts[0])
+	}
+
+	// 2. VectorAttribute
+	if stmts[1].Type != StmtVectorAttribute || len(stmts[1].VectorAttrs) != 1 || stmts[1].VectorAttrs[0] != "location" {
+		t.Fatalf("expected stmt 1 vector-attribute location, got %v", stmts[1])
+	}
+
+	// 3. Make
+	if stmts[2].Type != StmtMake || stmts[2].MakeClass != "City" {
+		t.Fatalf("expected stmt 2 make City, got %v", stmts[2])
+	}
+	mAttrs := stmts[2].MakeAttributes
+	locVal, ok := mAttrs["location"]
+	if !ok || !locVal.IsVector() {
+		t.Fatalf("expected location to be vector value, got %v", locVal)
+	}
+	elems := locVal.VectorElements()
+	if len(elems) != 2 || !elems[0].Equal(model.NewFloat(42.36)) || !elems[1].Equal(model.NewFloat(-71.05)) {
+		t.Fatalf("expected location [42.36, -71.05], got %v", elems)
+	}
+
+	// 4. Rule with vector constraints
+	rule := stmts[3].Rule
+	cond := rule.Conditions[0]
+	var locTest *model.AttributeTest
+	for i := range cond.Tests {
+		if cond.Tests[i].Attribute == "location" {
+			locTest = &cond.Tests[i]
+			break
+		}
+	}
+	if locTest == nil {
+		t.Fatalf("expected condition to have location test")
+	}
+	if len(locTest.Constraints) != 2 {
+		t.Fatalf("expected 2 constraints on location, got %d", len(locTest.Constraints))
+	}
+	if !locTest.Constraints[0].Value.Equal(model.NewVariable("<lat>")) ||
+		!locTest.Constraints[1].Value.Equal(model.NewVariable("<long>")) {
+		t.Fatalf("expected constraints <lat> and <long>, got %v", locTest.Constraints)
 	}
 }
 

@@ -37,3 +37,25 @@ func TestClassSchema(t *testing.T) {
 		t.Fatalf("expected AttributeAt(99) to return false")
 	}
 }
+
+func TestClassSchemaVectorAttribute(t *testing.T) {
+	schema := NewClassSchema("City", []string{"name", "location", "state", "country", "population"})
+	schema.SetVectorAttribute("location", true)
+
+	if !schema.IsVectorAttribute("location") || !schema.IsVectorAttribute("^location") {
+		t.Fatalf("expected location to be vector attribute")
+	}
+	if schema.IsVectorAttribute("name") {
+		t.Fatalf("expected name to not be vector attribute")
+	}
+
+	names := schema.VectorAttributeNames()
+	if len(names) != 1 || names[0] != "location" {
+		t.Fatalf("expected ['location'], got %v", names)
+	}
+
+	schema.SetVectorAttribute("location", false)
+	if schema.IsVectorAttribute("location") {
+		t.Fatalf("expected location to no longer be vector attribute")
+	}
+}

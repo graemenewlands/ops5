@@ -11,7 +11,7 @@ This engine provides a complete, modern execution environment for rule-based sys
 1. [Architectural Overview](#architectural-overview)
 2. [Language & Syntax Specification](#language--syntax-specification)
    - [Lexical Elements & Data Types](#lexical-elements--data-types)
-   - [Schema Declarations (`literalize`)](#schema-declarations-literalize)
+   - [Schema & Vector Declarations (`literalize`, `vector-attribute`)](#schema--vector-declarations-literalize-vector-attribute)
    - [Working Memory Elements (WMEs)](#working-memory-elements-wmes)
    - [Production Rules (`(p ... )`)](#production-rules-p--)
    - [Left-Hand Side (LHS) Condition Elements](#left-hand-side-lhs-condition-elements)
@@ -124,7 +124,9 @@ The engine supports five first-class data types:
 | **String** | Double-quoted text | `model.TypeString` (`string`) | `"Hello World"`, `"Batch complete"` |
 | **Variable** | Delimited by angle brackets `<...>` | `model.TypeVariable` (`string`) | `<x>`, `<id>`, `<goal-ptr>`, `<val>` |
 
-### Schema Declarations (`(literalize ...)`)
+### Schema & Vector Declarations (`literalize`, `vector-attribute`)
+
+#### Class Schema Declarations (`(literalize ...)`)
 
 OPS5 programs can declare class schemas using the top-level `(literalize ...)` directive:
 
@@ -138,7 +140,7 @@ Attribute names can be declared as bare symbols or prefixed with a caret `^`:
 (literalize point ^x ^y)
 ```
 
-#### Positional Attribute Mapping
+##### Positional Attribute Mapping
 Declaring a schema activates classic OPS5 positional attribute mapping. In classic OPS5, WMEs were represented internally as fixed-width vectors based on their `literalize` declaration. With a registered schema:
 - **Positional `make` actions**: Values provided without an explicit attribute name are mapped sequentially to the declared attribute slots:
   ```ops5
@@ -159,6 +161,54 @@ Declaring a schema activates classic OPS5 positional attribute mapping. In class
   ; Positional 1.0 -> ^x, ^z -> 3.0, positional 2.0 -> ^y
   ```
 - If no schema is declared for a class, attributes default to purely dynamic key-value pairs (`^<attr> <val>`).
+
+#### Multi-Valued Attributes (`(vector-attribute ...)`)
+
+In standard OPS5, attributes are single-valued by default. The `(vector-attribute ...)` directive designates one or more attributes as multi-valued vector attributes capable of holding sequences of values:
+
+```ops5
+(vector-attribute <attr-1> <attr-2> ... <attr-n>)
+```
+
+##### Example
+```ops5
+(literalize City name location state country population)
+(vector-attribute location)
+
+(make City ^name Boston ^location 42.36 -71.05 ^state MA ^country USA ^population 675000)
+```
+
+##### Vector Pattern Matching & Variable Binding
+- **Positional segment extraction**: When multiple constraints or variables follow a vector attribute, they bind sequentially to the elements of the vector:
+  ```ops5
+  (p locate-city
+     (City ^name <name> ^location <lat> <long> ^state MA)
+     -->
+     (write <name> "latitude:" <lat> "longitude:" <long>)
+  )
+  ; Binds <lat> to 42.36 and <long> to -71.05
+  ```
+- **Membership testing**: When a single scalar or constraint follows a vector attribute, it matches if ANY element in the vector satisfies the condition:
+  ```ops5
+  (p find-by-coord
+     (City ^name <name> ^location 42.36)
+     -->
+     (write "Matched city by coordinate:" <name>)
+  )
+  ```
+- **Whole-vector capture**: Binding a single variable to a vector attribute captures the entire sequence:
+  ```ops5
+  (p copy-location
+     (City ^name <name> ^location <loc>)
+     -->
+     (write <name> "full location:" <loc>)
+  )
+  ; <loc> contains 42.36 -71.05
+  ```
+- **Vector modifications**: RHS `modify` and REPL `modify` update vector attributes with new value sequences:
+  ```ops5
+  (modify <c> ^location 42.0 -71.0)
+  ```
 
 ### Working Memory Elements (WMEs)
 
@@ -475,6 +525,8 @@ Defined rule 'classify-alert' (conditions=1, specificity=3)
 | Command | Arguments | Description | Example |
 | :--- | :--- | :--- | :--- |
 | `(literalize ...)` / `literalize` | `<class> <attrs...>` | Declare attribute schema for positional mapping | `literalize point x y` |
+| `(vector-attribute ...)` / `vector-attribute` | `<attrs...>` | Declare multi-valued vector attributes | `vector-attribute location` |
+| `vector-attributes` | *none* | Display declared vector attributes | `vector-attributes` |
 | `schemas` | `[class]` | Display registered schemas (all or specific class) | `schemas point` |
 | `(p ...)` | `<rule-definition>` | Compile a production rule into the active Rete network | `(p r1 (goal ^status active) --> (halt))` |
 | `make` | `<class> [^<attr> <val> ...]` | Assert a new WME | `make goal ^type batch ^status start` |

@@ -80,9 +80,10 @@ func (bm *BetaMemory) LeftActivation(token *Token, tag PropagationTag) {
 
 // JoinTest specifies a relational test between a WME attribute and a variable bound in earlier tokens.
 type JoinTest struct {
-	Attribute string
-	Op        model.Operator
-	Variable  string
+	Attribute   string
+	Op          model.Operator
+	Variable    string
+	VectorIndex int // -1 for scalar/membership, >= 0 for positional element in vector
 }
 
 // JoinNode joins left tokens with right WMEs from an AlphaMemory.
@@ -123,51 +124,72 @@ func (jn *JoinNode) AddSuccessor(node LeftActivatable) {
 	jn.successors = append(jn.successors, node)
 }
 
-// matches evaluates join tests between token bindings and right WME.
-func (jn *JoinNode) matches(token *Token, wme *model.WME) bool {
-	for _, jt := range jn.joinTests {
+func evalJoinTest(jt JoinTest, boundVal model.Value, wmeVal model.Value) bool {
+	if wmeVal.IsVector() {
+		elems := wmeVal.VectorElements()
+		if boundVal.IsVector() {
+			return evalOp(wmeVal, jt.Op, boundVal)
+		}
+		if jt.VectorIndex >= 0 {
+			if jt.VectorIndex < len(elems) {
+				return evalOp(elems[jt.VectorIndex], jt.Op, boundVal)
+			}
+			return false
+		}
+		// Membership test (VectorIndex == -1):
+		for _, elem := range elems {
+			if evalOp(elem, jt.Op, boundVal) {
+				return true
+			}
+		}
+		return false
+	}
+	return evalOp(wmeVal, jt.Op, boundVal)
+}
+
+func matchesJoinTests(tests []JoinTest, token *Token, wme *model.WME) bool {
+	for _, jt := range tests {
 		boundVal, exists := token.Bindings[jt.Variable]
 		if !exists {
-			// Variable not bound in parent token, test cannot pass
 			return false
 		}
 		wmeVal, ok := wme.Get(jt.Attribute)
 		if !ok {
 			return false
 		}
-
-		switch jt.Op {
-		case model.OpEqual:
-			if !wmeVal.Equal(boundVal) {
-				return false
-			}
-		case model.OpNotEqual:
-			if wmeVal.Equal(boundVal) {
-				return false
-			}
-		case model.OpLess:
-			cmp, err := wmeVal.Compare(boundVal)
-			if err != nil || cmp >= 0 {
-				return false
-			}
-		case model.OpLessEqual:
-			cmp, err := wmeVal.Compare(boundVal)
-			if err != nil || cmp > 0 {
-				return false
-			}
-		case model.OpGreater:
-			cmp, err := wmeVal.Compare(boundVal)
-			if err != nil || cmp <= 0 {
-				return false
-			}
-		case model.OpGreaterEqual:
-			cmp, err := wmeVal.Compare(boundVal)
-			if err != nil || cmp < 0 {
-				return false
-			}
+		if !evalJoinTest(jt, boundVal, wmeVal) {
+			return false
 		}
 	}
 	return true
+}
+
+// matches evaluates join tests between token bindings and right WME.
+func (jn *JoinNode) matches(token *Token, wme *model.WME) bool {
+	return matchesJoinTests(jn.joinTests, token, wme)
+}
+
+func matchValueOrVector(targetVal, existing model.Value) bool {
+	if targetVal.Equal(existing) {
+		return true
+	}
+	if targetVal.IsVector() && !existing.IsVector() {
+		for _, el := range targetVal.VectorElements() {
+			if el.Equal(existing) {
+				return true
+			}
+		}
+		return false
+	}
+	if !targetVal.IsVector() && existing.IsVector() {
+		for _, el := range existing.VectorElements() {
+			if el.Equal(targetVal) {
+				return true
+			}
+		}
+		return false
+	}
+	return false
 }
 
 // extractBindings extracts new variable bindings introduced by this condition element on wme.
@@ -181,23 +203,42 @@ func (jn *JoinNode) extractBindings(token *Token, wme *model.WME) (map[string]mo
 
 		for _, at := range jn.ce.Tests {
 			wmeVal, hasVal := wme.Get(at.Attribute)
-			for _, c := range at.Constraints {
+			isMulti := len(at.Constraints) > 1
+			for idx, c := range at.Constraints {
 				if c.Value.IsVariable() {
 					vName := c.Value.VariableName()
 					if c.Op == model.OpEqual {
+						var targetVal model.Value
+						if hasVal {
+							if wmeVal.IsVector() {
+								elems := wmeVal.VectorElements()
+								if isMulti {
+									if idx < len(elems) {
+										targetVal = elems[idx]
+									} else {
+										return nil, false
+									}
+								} else {
+									targetVal = wmeVal
+								}
+							} else {
+								targetVal = wmeVal
+							}
+						}
+
 						// Check if already bound in parent token
 						if existing, ok := token.Bindings[vName]; ok {
-							if !hasVal || !wmeVal.Equal(existing) {
+							if !hasVal || !matchValueOrVector(targetVal, existing) {
 								return nil, false
 							}
 						} else if intraVal, ok := newBindings[vName]; ok {
 							// Check intra-condition consistency
-							if !hasVal || !wmeVal.Equal(intraVal) {
+							if !hasVal || !matchValueOrVector(targetVal, intraVal) {
 								return nil, false
 							}
 						} else {
 							if hasVal {
-								newBindings[vName] = wmeVal
+								newBindings[vName] = targetVal
 							}
 						}
 					}
@@ -300,47 +341,7 @@ func (njn *NegativeJoinNode) AddSuccessor(node LeftActivatable) {
 }
 
 func (njn *NegativeJoinNode) match(token *Token, wme *model.WME) bool {
-	for _, jt := range njn.joinTests {
-		boundVal, exists := token.Bindings[jt.Variable]
-		if !exists {
-			return false
-		}
-		wmeVal, ok := wme.Get(jt.Attribute)
-		if !ok {
-			return false
-		}
-		switch jt.Op {
-		case model.OpEqual:
-			if !wmeVal.Equal(boundVal) {
-				return false
-			}
-		case model.OpNotEqual:
-			if wmeVal.Equal(boundVal) {
-				return false
-			}
-		case model.OpLess:
-			cmp, err := wmeVal.Compare(boundVal)
-			if err != nil || cmp >= 0 {
-				return false
-			}
-		case model.OpLessEqual:
-			cmp, err := wmeVal.Compare(boundVal)
-			if err != nil || cmp > 0 {
-				return false
-			}
-		case model.OpGreater:
-			cmp, err := wmeVal.Compare(boundVal)
-			if err != nil || cmp <= 0 {
-				return false
-			}
-		case model.OpGreaterEqual:
-			cmp, err := wmeVal.Compare(boundVal)
-			if err != nil || cmp < 0 {
-				return false
-			}
-		}
-	}
-	return true
+	return matchesJoinTests(njn.joinTests, token, wme)
 }
 
 // LeftActivation handles an incoming token.

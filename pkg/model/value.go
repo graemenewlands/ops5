@@ -15,6 +15,7 @@ const (
 	TypeFloat
 	TypeString
 	TypeVariable
+	TypeVector
 )
 
 func (t ValueType) String() string {
@@ -29,6 +30,8 @@ func (t ValueType) String() string {
 		return "string"
 	case TypeVariable:
 		return "variable"
+	case TypeVector:
+		return "vector"
 	default:
 		return "unknown"
 	}
@@ -67,6 +70,13 @@ func NewVariable(name string) Value {
 	return Value{typ: TypeVariable, val: trimmed}
 }
 
+// NewVector creates a new vector value representing a sequence of Values.
+func NewVector(elements []Value) Value {
+	copied := make([]Value, len(elements))
+	copy(copied, elements)
+	return Value{typ: TypeVector, val: copied}
+}
+
 // Type returns the ValueType.
 func (v Value) Type() ValueType {
 	return v.typ
@@ -80,6 +90,19 @@ func (v Value) Raw() any {
 // IsVariable returns true if this value is a variable reference.
 func (v Value) IsVariable() bool {
 	return v.typ == TypeVariable
+}
+
+// IsVector returns true if this value is a vector of values.
+func (v Value) IsVector() bool {
+	return v.typ == TypeVector
+}
+
+// VectorElements returns the underlying elements if this value is a vector.
+func (v Value) VectorElements() []Value {
+	if v.typ == TypeVector {
+		return v.val.([]Value)
+	}
+	return nil
 }
 
 // VariableName returns the variable identifier without enclosing brackets.
@@ -103,6 +126,13 @@ func (v Value) String() string {
 		return strconv.Quote(v.val.(string))
 	case TypeVariable:
 		return "<" + v.val.(string) + ">"
+	case TypeVector:
+		elems := v.val.([]Value)
+		var parts []string
+		for _, el := range elems {
+			parts = append(parts, el.String())
+		}
+		return strings.Join(parts, " ")
 	default:
 		return fmt.Sprintf("%v", v.val)
 	}
@@ -112,6 +142,19 @@ func (v Value) String() string {
 // Supports numeric cross-equality between integer and float if values match.
 func (v Value) Equal(o Value) bool {
 	if v.typ == o.typ {
+		if v.typ == TypeVector {
+			v1 := v.val.([]Value)
+			v2 := o.val.([]Value)
+			if len(v1) != len(v2) {
+				return false
+			}
+			for i := range v1 {
+				if !v1[i].Equal(v2[i]) {
+					return false
+				}
+			}
+			return true
+		}
 		return v.val == o.val
 	}
 	// Numeric cross-comparison
