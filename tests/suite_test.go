@@ -680,3 +680,82 @@ func TestExciseRuleIntegration(t *testing.T) {
 		}
 	})
 }
+
+// TestPMCommandIntegration verifies the (pm ...) directive and REPL command for printing production rules.
+func TestPMCommandIntegration(t *testing.T) {
+	t.Run("source_directive_pm", func(t *testing.T) {
+		opsSrc := `
+		(p FindAncestors
+			(Request ^type ancestor ^target <p>)
+			(Person ^name <p> ^father <f>)
+			-->
+			(make Request ^type ancestor ^target <f>)
+			(write (crlf) <f> "is an ancestor")
+		)
+		(pm FindAncestors)
+		`
+		var outBuf bytes.Buffer
+		repl := cli.NewREPL(strings.NewReader(""), &outBuf)
+
+		p, err := parser.NewParser(opsSrc)
+		if err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+
+		var pmOutput []string
+		for {
+			stmt, err := p.NextStatement()
+			if err != nil {
+				t.Fatalf("next statement error: %v", err)
+			}
+			if stmt == nil {
+				break
+			}
+			switch stmt.Type {
+			case parser.StmtRule:
+				repl.Engine().AddRule(stmt.Rule)
+			case parser.StmtPM:
+				pmOutput = append(pmOutput, repl.Engine().PrintRules(stmt.PMRules...)...)
+			}
+		}
+
+		if len(pmOutput) != 1 {
+			t.Fatalf("expected 1 printed rule from (pm FindAncestors), got %d", len(pmOutput))
+		}
+		if !strings.Contains(pmOutput[0], "(p FindAncestors") {
+			t.Errorf("expected FindAncestors in pm output, got:\n%s", pmOutput[0])
+		}
+		if !strings.Contains(pmOutput[0], "(Request ^type ancestor ^target <p>)") {
+			t.Errorf("expected Request CE in pm output, got:\n%s", pmOutput[0])
+		}
+		if !strings.Contains(pmOutput[0], "(Person ^name <p> ^father <f>)") {
+			t.Errorf("expected Person CE in pm output, got:\n%s", pmOutput[0])
+		}
+		if !strings.Contains(pmOutput[0], `(write (crlf) <f> "is an ancestor")`) {
+			t.Errorf("expected write action in pm output, got:\n%s", pmOutput[0])
+		}
+	})
+
+	t.Run("repl_pm_wildcard", func(t *testing.T) {
+		replInput := `
+		(p rule-1 (item ^id 1) --> (halt))
+		(p rule-2 (item ^id 2) --> (halt))
+		(pm FindAncestors)
+		pm *
+		(pm rule-1)
+		exit
+		`
+		var outBuf bytes.Buffer
+		repl := cli.NewREPL(strings.NewReader(replInput), &outBuf)
+		repl.Start()
+
+		out := outBuf.String()
+		if !strings.Contains(out, "Rule 'FindAncestors' not found") {
+			t.Errorf("expected not found message for missing rule, got:\n%s", out)
+		}
+		if !strings.Contains(out, "(p rule-1") || !strings.Contains(out, "(p rule-2") {
+			t.Errorf("expected rules in pm * output, got:\n%s", out)
+		}
+	})
+}
+

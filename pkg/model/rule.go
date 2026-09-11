@@ -63,7 +63,7 @@ func (r *Rule) String() string {
 	}
 	b.WriteString("   -->\n")
 	for _, act := range r.Actions {
-		b.WriteString(fmt.Sprintf("   %v\n", act))
+		b.WriteString(fmt.Sprintf("   %s\n", act.String()))
 	}
 	b.WriteString(")")
 	return b.String()

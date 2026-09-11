@@ -168,6 +168,12 @@ func (r *REPL) handleCommand(input string) bool {
 		return false
 	}
 
+	// 10. S-expression pm: (pm ...)
+	if strings.HasPrefix(strings.ToLower(input), "(pm ") || strings.ToLower(strings.TrimSpace(input)) == "(pm)" || strings.ToLower(strings.TrimSpace(input)) == "(pm*)" || strings.HasPrefix(strings.ToLower(input), "(pm*") {
+		r.handlePM(input)
+		return false
+	}
+
 	// Strip outer parentheses for command convenience if present: e.g. (wm) -> wm
 	cmd := input
 	if strings.HasPrefix(cmd, "(") && strings.HasSuffix(cmd, ")") && !strings.Contains(cmd, "^") {
@@ -256,6 +262,9 @@ func (r *REPL) handleCommand(input string) bool {
 
 	case "excise":
 		r.handleExcise(input)
+
+	case "pm":
+		r.handlePM(input)
 
 	case "strategy":
 		if len(parts) == 1 {
@@ -654,6 +663,20 @@ func (r *REPL) LoadFile(path string) error {
 			for _, name := range stmt.ExciseRules {
 				r.engine.ExciseRule(name)
 			}
+		case parser.StmtPM:
+			if len(stmt.PMRules) == 0 || (len(stmt.PMRules) == 1 && stmt.PMRules[0] == "*") {
+				for _, rule := range r.engine.Rules() {
+					fmt.Fprintln(r.out, rule.String())
+				}
+			} else {
+				for _, name := range stmt.PMRules {
+					if rule := r.engine.Rule(name); rule != nil {
+						fmt.Fprintln(r.out, rule.String())
+					} else {
+						fmt.Fprintf(r.out, "Rule '%s' not found\n", name)
+					}
+				}
+			}
 		}
 	}
 
@@ -709,6 +732,7 @@ Commands:
   modify <tag> [^a v]       Modify attributes of an existing WME by timetag
   remove <tag>              Retract a WME by its timetag
   excise <rule...>          Evict production rules from memory and conflict set
+  pm [<rule...> | *]        Print production rules in memory
   openfile <log> <f> <m>    Open a file stream (modes: in, out, append)
   closefile <log>           Close an open file stream
   default <log> <subsys>    Set default stream for accept, write, or trace
@@ -744,6 +768,34 @@ func (r *REPL) handleExcise(input string) {
 	for _, name := range tokens[1:] {
 		if r.engine.ExciseRule(name) {
 			fmt.Fprintf(r.out, "Excised rule '%s'\n", name)
+		} else {
+			fmt.Fprintf(r.out, "Rule '%s' not found\n", name)
+		}
+	}
+}
+
+func (r *REPL) handlePM(input string) {
+	tokens, err := tokenizeLine(input)
+	if err != nil {
+		fmt.Fprintf(r.out, "Parse error: %v\n", err)
+		return
+	}
+	ruleNames := tokens[1:]
+	if len(ruleNames) == 0 || (len(ruleNames) == 1 && ruleNames[0] == "*") {
+		rules := r.engine.Rules()
+		if len(rules) == 0 {
+			fmt.Fprintln(r.out, "No production rules in memory.")
+			return
+		}
+		for _, rule := range rules {
+			fmt.Fprintln(r.out, rule.String())
+		}
+		return
+	}
+
+	for _, name := range ruleNames {
+		if rule := r.engine.Rule(name); rule != nil {
+			fmt.Fprintln(r.out, rule.String())
 		} else {
 			fmt.Fprintf(r.out, "Rule '%s' not found\n", name)
 		}

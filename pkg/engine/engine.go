@@ -202,6 +202,38 @@ func (e *Engine) Rule(name string) *model.Rule {
 	return nil
 }
 
+// PrintRule returns the pretty-printed OPS5 source text of a production rule by name.
+// Returns (text, true) if the rule exists, or ("", false) if not found.
+func (e *Engine) PrintRule(name string) (string, bool) {
+	r := e.Rule(name)
+	if r == nil {
+		return "", false
+	}
+	return r.String(), true
+}
+
+// PrintRules returns the pretty-printed OPS5 source text of the specified rules.
+// If names is empty or contains "*", all production rules currently in production memory are returned.
+func (e *Engine) PrintRules(names ...string) []string {
+	if len(names) == 0 || (len(names) == 1 && names[0] == "*") {
+		rules := e.Rules()
+		res := make([]string, 0, len(rules))
+		for _, r := range rules {
+			res = append(res, r.String())
+		}
+		return res
+	}
+
+	var res []string
+	for _, name := range names {
+		if text, ok := e.PrintRule(name); ok {
+			res = append(res, text)
+		}
+	}
+	return res
+}
+
+
 // DeclareVectorAttribute registers an attribute name as a vector-attribute.
 func (e *Engine) DeclareVectorAttribute(attr string) {
 	e.mu.Lock()

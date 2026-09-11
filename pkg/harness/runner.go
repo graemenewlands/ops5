@@ -185,6 +185,20 @@ func (r *Runner) Run(tc *TestCase) *Result {
 				for _, name := range stmt.ExciseRules {
 					eng.ExciseRule(name)
 				}
+			case parser.StmtPM:
+				if len(stmt.PMRules) == 0 || (len(stmt.PMRules) == 1 && stmt.PMRules[0] == "*") {
+					for _, rule := range eng.Rules() {
+						fmt.Fprintln(&outBuf, rule.String())
+					}
+				} else {
+					for _, name := range stmt.PMRules {
+						if rule := eng.Rule(name); rule != nil {
+							fmt.Fprintln(&outBuf, rule.String())
+						} else {
+							fmt.Fprintf(&outBuf, "Rule '%s' not found\n", name)
+						}
+					}
+				}
 			}
 		}
 	}

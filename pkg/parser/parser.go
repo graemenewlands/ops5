@@ -850,6 +850,7 @@ const (
 	StmtCloseFile
 	StmtDefault
 	StmtExcise
+	StmtPM
 )
 
 func (st StatementType) String() string {
@@ -870,6 +871,8 @@ func (st StatementType) String() string {
 		return "default"
 	case StmtExcise:
 		return "excise"
+	case StmtPM:
+		return "pm"
 	default:
 		return "unknown"
 	}
@@ -889,6 +892,7 @@ type Statement struct {
 	CloseFile       *model.CloseFileAction
 	Default         *model.DefaultAction
 	ExciseRules     []string
+	PMRules         []string
 }
 
 func (p *Parser) parseMakeBody(classTok Token) (string, map[string]model.Value, error) {
@@ -1195,7 +1199,38 @@ func (p *Parser) ParseExcise() ([]string, error) {
 	return names, nil
 }
 
-// NextStatement parses the next top-level statement (Rule, Make, Literalize, VectorAttribute, OpenFile, CloseFile, Default, or Excise).
+// ParsePM parses a standalone (pm [rule-name-1 ... | *]) statement.
+func (p *Parser) ParsePM() ([]string, error) {
+	if _, err := p.expect(TokenLParen); err != nil {
+		return nil, err
+	}
+	verbTok, err := p.expect(TokenSymbol)
+	if err != nil || strings.ToLower(verbTok.Value) != "pm" {
+		return nil, fmt.Errorf("expected 'pm', got %v", verbTok.Value)
+	}
+	var names []string
+	for p.current.Type != TokenRParen && p.current.Type != TokenEOF {
+		if p.current.Type == TokenOperator && p.current.Value == "*" {
+			names = append(names, "*")
+			if err := p.advance(); err != nil {
+				return nil, err
+			}
+		} else if p.current.Type == TokenSymbol {
+			names = append(names, p.current.Value)
+			if err := p.advance(); err != nil {
+				return nil, err
+			}
+		} else {
+			return nil, fmt.Errorf("expected rule name or '*' in pm statement, got %s (%q)", p.current.Type, p.current.Value)
+		}
+	}
+	if _, err := p.expect(TokenRParen); err != nil {
+		return nil, fmt.Errorf("expected ')' closing pm statement: %w", err)
+	}
+	return names, nil
+}
+
+// NextStatement parses the next top-level statement (Rule, Make, Literalize, VectorAttribute, OpenFile, CloseFile, Default, Excise, or PM).
 // Returns (nil, nil) when TokenEOF is reached.
 func (p *Parser) NextStatement() (*Statement, error) {
 	if p.current.Type == TokenEOF {
@@ -1284,6 +1319,16 @@ func (p *Parser) NextStatement() (*Statement, error) {
 		return &Statement{
 			Type:        StmtExcise,
 			ExciseRules: rules,
+		}, nil
+
+	case "pm":
+		rules, err := p.ParsePM()
+		if err != nil {
+			return nil, err
+		}
+		return &Statement{
+			Type:    StmtPM,
+			PMRules: rules,
 		}, nil
 
 	default:

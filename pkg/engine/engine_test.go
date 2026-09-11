@@ -957,6 +957,43 @@ func TestEngineExciseMultipleAndRedefine(t *testing.T) {
 	}
 }
 
+func TestEnginePrintRuleAndRules(t *testing.T) {
+	eng := New()
+
+	rule := model.NewRule("FindAncestors")
+	rule.AddCondition(model.NewPositiveCE("Request").
+		AddEqualTest("type", model.NewSymbol("ancestor")).
+		AddEqualTest("target", model.NewVariable("<p>")))
+	rule.AddAction(model.WriteAction{
+		Args: []model.WriteArg{model.WriteCRLF(), model.WriteValue(model.NewString("Found ancestor"))},
+	})
+	eng.AddRule(rule)
+
+	text, ok := eng.PrintRule("FindAncestors")
+	if !ok {
+		t.Fatalf("expected FindAncestors to be found")
+	}
+	if !strings.Contains(text, "(p FindAncestors") || !strings.Contains(text, "(write (crlf) \"Found ancestor\")") {
+		t.Errorf("unexpected PrintRule output:\n%s", text)
+	}
+
+	_, ok = eng.PrintRule("nonexistent")
+	if ok {
+		t.Errorf("expected nonexistent rule to return false")
+	}
+
+	all := eng.PrintRules()
+	if len(all) != 1 {
+		t.Fatalf("expected 1 rule in PrintRules(), got %d", len(all))
+	}
+
+	star := eng.PrintRules("*")
+	if len(star) != 1 {
+		t.Fatalf("expected 1 rule in PrintRules('*'), got %d", len(star))
+	}
+}
+
+
 
 
 

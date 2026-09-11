@@ -402,6 +402,62 @@ func TestREPLExciseCommand(t *testing.T) {
 	}
 }
 
+func TestREPLPMCommand(t *testing.T) {
+	commands := `
+	(p FindAncestors
+		(Request ^type ancestor ^target <p>)
+		(Person ^name <p> ^father <f>)
+		-->
+		(make Request ^type ancestor ^target <f>)
+		(write (crlf) <f> "is an ancestor")
+	)
+	(p DetectLeaf
+		(Person ^name <n>)
+		-(Person ^father <n>)
+		-->
+		(write (crlf) <n> "is a leaf")
+	)
+	pm FindAncestors
+	(pm DetectLeaf)
+	pm *
+	(pm *)
+	pm unknown-rule
+	exit
+	`
+	in := strings.NewReader(commands)
+	var out bytes.Buffer
+	repl := NewREPL(in, &out)
+	repl.Start()
+
+	output := out.String()
+	if !strings.Contains(output, "(p FindAncestors") {
+		t.Errorf("expected FindAncestors rule text in output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "(p DetectLeaf") {
+		t.Errorf("expected DetectLeaf rule text in output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Rule 'unknown-rule' not found") {
+		t.Errorf("expected unknown-rule not found warning, got:\n%s", output)
+	}
+	if !strings.Contains(output, "(make Request ^target <f> ^type ancestor)") {
+		t.Errorf("expected formatted make action in pm output, got:\n%s", output)
+	}
+	if !strings.Contains(output, `(write (crlf) <f> "is an ancestor")`) {
+		t.Errorf("expected formatted write action in pm output, got:\n%s", output)
+	}
+
+	// Test empty rules in memory
+	emptyIn := strings.NewReader("pm\npm *\nexit\n")
+	var emptyOut bytes.Buffer
+	emptyRepl := NewREPL(emptyIn, &emptyOut)
+	emptyRepl.Start()
+	emptyOutput := emptyOut.String()
+	if !strings.Contains(emptyOutput, "No production rules in memory.") {
+		t.Errorf("expected 'No production rules in memory.' message, got:\n%s", emptyOutput)
+	}
+}
+
+
 
 
 

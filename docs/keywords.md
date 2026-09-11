@@ -18,6 +18,7 @@ These keywords appear at the root level of `.ops` source files or directly withi
 | **`closefile`** | `(closefile <log-name>)` | Closes an open file stream. See [`file_io` Reference](file_io.md). | `(closefile ruletrace)` |
 | **`default`** | `(default <log-name> <subsystem>)` | Redirects default stream for `accept`, `write`, or `trace`. See [`file_io` Reference](file_io.md). | `(default ruletrace accept)` |
 | **`excise`** | `(excise <rule1> ... <ruleN>)` | Evicts production rules from production memory, detaches their terminal nodes from the Rete network, and purges all pending activations and refraction history from the conflict set. Existing WMEs are preserved. See [`excise` Reference](excise.md). | `(excise detect-item cleanup-task)` |
+| **`pm`** | `(pm [<rule1> ... <ruleN> \| *])` | Pretty-prints the source text of specified production rule(s) or all rules (`*`) currently held in production memory. See [`pm` Reference](pm.md). | `(pm FindAncestors)`<br>`(pm *)` |
 
 ---
 
@@ -95,6 +96,7 @@ The interactive CLI shell (`ops5`) supports both bare words and paren-enclosed c
 | **`trace`** | `on\|off` | Toggles rule firing execution traces. |
 | **`load`** | `<file.ops>` | Loads and parses an external OPS5 source file. |
 | **`excise`** | `<rule1> [rule2 ...]` | Evicts production rule(s) by name from production memory, detaches terminal nodes from Rete network, and purges pending activations from the conflict set. See [`excise` Reference](excise.md). |
+| **`pm`** | `[<rule1> ... \| *]` | Pretty-prints the source text of specified production rule(s) or all rules (`*`). See [`pm` Reference](pm.md). |
 | **`test`** | `<file.json>` | Executes a JSON test harness case. |
 | **`reset`** | _none_ | Clears working memory, network state, and conflict set. |
 | **`help`** | _none_ | Displays interactive REPL help. |
@@ -116,5 +118,4 @@ For reference and future engine development, the following standard OPS5 constru
 ### Control & Diagnostic Directives
 - **`watch`**: Configures fine-grained tracing levels (e.g. `(watch 0)`, `(watch 1)`, `(watch 2)`).
 - **`matches`**: Displays partial Rete matches for a specific rule.
-- **`pm`**: Prints productions matching a pattern.
 - **`pbreak`**: Sets a breakpoint on a production rule.

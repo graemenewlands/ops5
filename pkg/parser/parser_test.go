@@ -1205,3 +1205,42 @@ func TestParseExcise(t *testing.T) {
 		t.Fatalf("expected error for empty (excise), got nil")
 	}
 }
+
+func TestParsePM(t *testing.T) {
+	src := `(pm FindAncestors CheckGoal)`
+	p, err := NewParser(src)
+	if err != nil {
+		t.Fatalf("failed to create parser: %v", err)
+	}
+	stmt, err := p.NextStatement()
+	if err != nil {
+		t.Fatalf("failed to parse pm statement: %v", err)
+	}
+	if stmt.Type != StmtPM {
+		t.Fatalf("expected StmtPM, got %v", stmt.Type)
+	}
+	if len(stmt.PMRules) != 2 || stmt.PMRules[0] != "FindAncestors" || stmt.PMRules[1] != "CheckGoal" {
+		t.Fatalf("unexpected PMRules: %v", stmt.PMRules)
+	}
+
+	// Test wildcard (pm *)
+	pStar, _ := NewParser(`(pm *)`)
+	stmtStar, err := pStar.NextStatement()
+	if err != nil {
+		t.Fatalf("failed to parse (pm *): %v", err)
+	}
+	if stmtStar.Type != StmtPM || len(stmtStar.PMRules) != 1 || stmtStar.PMRules[0] != "*" {
+		t.Fatalf("unexpected PMRules for wildcard: %v", stmtStar.PMRules)
+	}
+
+	// Test empty (pm)
+	pEmpty, _ := NewParser(`(pm)`)
+	stmtEmpty, err := pEmpty.NextStatement()
+	if err != nil {
+		t.Fatalf("failed to parse empty (pm): %v", err)
+	}
+	if stmtEmpty.Type != StmtPM || len(stmtEmpty.PMRules) != 0 {
+		t.Fatalf("expected empty PMRules for (pm), got %v", stmtEmpty.PMRules)
+	}
+}
+

@@ -643,6 +643,7 @@ Defined rule 'classify-alert' (conditions=1, specificity=3)
 | `trace` | `on \| off` | Toggle cycle execution tracing | `trace on` |
 | `load` | `<file.ops>` | Load and compile rules and makes from an external file | `load rules.ops` |
 | `excise` / `(excise ...)` | `<rule-name...>` | Evict rule(s) from production memory and detach from Rete | `excise rule-1 rule-2` |
+| `pm` / `(pm ...)` | `[<rule-name...> \| *]` | Pretty-print production rule source definitions | `pm FindAncestors` |
 | `test` | `<file.json>` | Execute an external JSON test suite case | `test fixture.json` |
 | `reset` | *none* | Clear working memory and conflict set | `reset` |
 | `help` | *none* | Display interactive help menu | `help` |
@@ -654,6 +655,7 @@ Defined rule 'classify-alert' (conditions=1, specificity=3)
 > - **[Working Memory Initialization & Parameterized Test Harness (Section 2.5)](docs/tutorial_2_5_testing.md)**
 > - **[Program Termination & Halting Reference](docs/program_termination.md)**
 > - **[Rule Excision Reference](docs/excise.md)**
+> - **[Print Production Memory Reference (`pm`)](docs/pm.md)**
 
 ### Execution Tracing
 
