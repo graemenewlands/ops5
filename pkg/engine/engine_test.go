@@ -773,6 +773,49 @@ func TestEngineLitval(t *testing.T) {
 	}
 }
 
+func TestEngineEnsureNewline(t *testing.T) {
+	eng := New()
+	var outBuf bytes.Buffer
+	eng.SetOutputWriter(&outBuf)
+
+	if eng.CurrentCol() != 1 {
+		t.Errorf("expected initial currentCol 1, got %d", eng.CurrentCol())
+	}
+	eng.EnsureNewline()
+	if outBuf.Len() != 0 {
+		t.Errorf("EnsureNewline should do nothing when currentCol == 1")
+	}
+
+	rule := model.NewRule("write-partial")
+	rule.AddCondition(model.NewPositiveCE("start"))
+	rule.AddAction(model.WriteAction{
+		Args: []model.WriteArg{
+			model.WriteCRLF(),
+			model.WriteValue(model.NewSymbol("hello")),
+		},
+	})
+	eng.AddRule(rule)
+	eng.Make("start", nil)
+
+	_, err := eng.Run(10)
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+
+	if eng.CurrentCol() <= 1 {
+		t.Errorf("expected currentCol > 1 after writing without trailing newline, got %d", eng.CurrentCol())
+	}
+
+	eng.EnsureNewline()
+	if eng.CurrentCol() != 1 {
+		t.Errorf("expected currentCol to be reset to 1, got %d", eng.CurrentCol())
+	}
+	if !strings.HasSuffix(outBuf.String(), "hello\n") {
+		t.Errorf("expected output to end with newline, got %q", outBuf.String())
+	}
+}
+
+
 
 
 

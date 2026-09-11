@@ -252,5 +252,28 @@ exit
 	}
 }
 
+func TestREPLQuiescenceFormattingOnOwnLine(t *testing.T) {
+	commands := `
+	(p test-write-no-trailing-newline
+		(start)
+		-->
+		(write (crlf) hello world)
+	)
+	make start
+	run
+	exit
+	`
+	in := strings.NewReader(commands)
+	var out bytes.Buffer
+	repl := NewREPL(in, &out)
+	repl.Start()
+
+	output := out.String()
+	if !strings.Contains(output, "hello world\nReached quiescence after 1 cycles.\n") {
+		t.Errorf("expected quiescence message on its own line after output, got:\n%s", output)
+	}
+}
+
+
 
 

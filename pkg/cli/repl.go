@@ -542,6 +542,7 @@ func (r *REPL) stepCycle() {
 		return
 	}
 	if fired {
+		r.engine.EnsureNewline()
 		fmt.Fprintf(r.out, "Fired: %s with WMEs %v (Cycle %d)\n", ruleName, timetags, r.engine.CycleCount())
 	}
 }
@@ -552,6 +553,7 @@ func (r *REPL) runCycles(maxCycles int) {
 	if err != nil {
 		fmt.Fprintf(r.out, "Execution error: %v\n", err)
 	}
+	r.engine.EnsureNewline()
 	if r.engine.IsHalted() {
 		fmt.Fprintf(r.out, "Execution halted by rule action after %d cycles.\n", cycles)
 	} else {

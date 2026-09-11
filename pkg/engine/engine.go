@@ -1139,4 +1139,30 @@ func (e *Engine) ResetGenatom() {
 	e.genatomCounter = 0
 }
 
+// CurrentCol returns the current output column position (1-indexed, where 1 means at start of line).
+func (e *Engine) CurrentCol() int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.currentCol
+}
+
+// EnsureNewline outputs a newline to the current output stream if the column cursor is not at 1.
+func (e *Engine) EnsureNewline() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.currentCol > 1 {
+		ww := e.outputWriter
+		if e.defaultWriteStream != "" {
+			if entry, ok := e.openFiles[e.defaultWriteStream]; ok && entry.writer != nil {
+				ww = entry.writer
+			}
+		}
+		if ww != nil {
+			fmt.Fprint(ww, "\n")
+		}
+		e.currentCol = 1
+	}
+}
+
+
 

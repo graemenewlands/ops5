@@ -80,6 +80,7 @@ func main() {
 				fmt.Fprintf(os.Stderr, "Execution error: %v\n", err)
 				os.Exit(1)
 			}
+			repl.Engine().EnsureNewline()
 			if repl.Engine().IsHalted() {
 				fmt.Printf("Halted after %d cycles.\n", cycles)
 			} else {
