@@ -4,21 +4,22 @@ This tutorial provides a complete walkthrough for loading, running, and debuggin
 
 - [`tests/integration/2_4_3_a.ops5`](../tests/integration/2_4_3_a.ops5): Interactive input prompt with a single recursive rule (`PrintAncestors`).
 - [`tests/integration/2_4_3_b.ops5`](../tests/integration/2_4_3_b.ops5): Interactive input prompt with a two-rule decomposition (`FindAncestors` and `FindAncestors::Print`) governed by specificity conflict resolution and refraction.
+- [`tests/integration/2_4_3_c.ops5`](../tests/integration/2_4_3_c.ops5): Introduces `FindAncestors::Stop`, using a negative condition element (`- (Request ...)`) to halt search once all true ancestors are found and prevent reporting the root target.
 
 ---
 
 ## 1. Overview and Architectural Comparison
 
-Section 2.4.3 demonstrates two distinct rule-based programming paradigms in OPS5 to solve the same problem—finding all ancestors of a person within a hierarchical family tree.
+Section 2.4.3 demonstrates three progressive rule-based programming paradigms in OPS5 to solve the problem of finding all ancestors in a hierarchical family tree.
 
-| Aspect | Part A (`2_4_3_a.ops5`) | Part B (`2_4_3_b.ops5`) |
-| :--- | :--- | :--- |
-| **Rule Strategy** | Single recursive rule (`PrintAncestors`) + init rule | Two rules: Generator (`FindAncestors`) vs Reporter (`FindAncestors::Print`) + init rule |
-| **Conflict Resolution** | Sequential activation (1 match per cycle) | Specificity competition: Specificity 8 dominates Specificity 4 |
-| **Sequencing Control** | Immediate retraction of current request | Refraction prevents loops; reporter fires after generator refracts |
-| **User Input** | Interactive terminal prompt via `(accept)` on `(Start)` | Interactive terminal prompt via `(accept)` on `(Start)` (or direct `Request` assertion) |
-| **Cycles to Quiescence**| 7 cycles (1 init + 6 recursive firings) | 17 cycles (1 init + 16 ancestor firings) |
-| **Output Format** | Parent pairs: `<mother> and <father> are ancestors via <child>` | Individual ancestors: `<name> is an ancestor` |
+| Aspect | Part A (`2_4_3_a.ops5`) | Part B (`2_4_3_b.ops5`) | Part C (`2_4_3_c.ops5`) |
+| :--- | :--- | :--- | :--- |
+| **Rule Strategy** | Single recursive rule (`PrintAncestors`) + init rule | Generator (`FindAncestors`) vs Reporter (`FindAncestors::Print`) + init rule | Generator + Reporter + Terminator (`FindAncestors::Stop`) + init rule |
+| **Conflict Resolution** | Sequential activation (1 match per cycle) | Specificity competition: Specificity 8 dominates Specificity 4 | Specificity: `FindAncestors` (8) > `Print` (4); `Stop` (8) > `Print` (4) |
+| **Sequencing Control** | Immediate retraction of current request | Refraction prevents loops; reporter fires after generator refracts | Negative CE matches when only root request remains; fires `(halt)` |
+| **User Input** | Interactive terminal prompt via `(accept)` on `(Start)` | Interactive terminal prompt via `(accept)` on `(Start)` | Interactive terminal prompt via `(accept)` on `(Start)` |
+| **Cycles to Termination**| 7 cycles (quiescence) | 17 cycles (quiescence) | 17 cycles (halted by `FindAncestors::Stop`) |
+| **Output Format** | Parent pairs: `<mother> and <father> are ancestors via <child>` | All 10 individuals (including Penelope): `<name> is an ancestor` | All 9 true ancestors + `No More Ancestors` (Penelope omitted) |
 
 ---
 
@@ -250,7 +251,87 @@ Key observations from the conflict set after Cycle 2:
 
 ---
 
-## 4. Execution Tracing
+## 4. Part C: Negative Working Memory Assertion & Clean Termination (`2_4_3_c.ops5`)
+
+### Program Structure & The Negative Condition Element
+
+In Part B, the program reaches quiescence only after printing `Penelope is an ancestor` on cycle 17. However, Penelope is the root person whose ancestors were requested—she is not her own ancestor!
+
+Part C introduces a termination rule with a **negative condition element** (`- (...)`):
+
+```ops5
+(p FindAncestors::Stop
+        (Request ^type ancestor ^target {<name1> <> nil})
+        - (Request ^type ancestor ^target {<> <name1> <> nil})
+    -->
+        (write (crlf) No More Ancestors (crlf))
+        (halt)
+)
+```
+
+```mermaid
+flowchart TD
+    State["Working Memory State"] --> Check{"How many non-nil Requests remain in WM?"}
+    Check -- ">= 2 Requests" --> Active["Negative condition NOT satisfied: Stop cannot fire"]
+    Active --> Normal["FindAncestors or FindAncestors::Print fires normally"]
+    Check -- "Exactly 1 Request (Penelope)" --> Solo["Negative condition IS satisfied!"]
+    Solo --> Compete["Both FindAncestors::Stop and FindAncestors::Print match Penelope"]
+    Compete --> Spec["FindAncestors::Stop wins on Specificity (8 > 4)"]
+    Spec --> Halt["Prints 'No More Ancestors' & halts cleanly\n(Penelope is never printed)"]
+```
+
+### Why `FindAncestors::Stop` Succeeds
+
+1. **Negative Condition Semantics**:
+   - Condition 1: `(Request ^type ancestor ^target {<name1> <> nil})` binds `<name1>` to any active request.
+   - Condition 2: `- (Request ^type ancestor ^target {<> <name1> <> nil})` asserts that **no other** non-nil request exists in working memory.
+2. **Suppression During Recursion**:
+   - As long as ancestor exploration is ongoing, multiple `Request` WMEs reside in working memory simultaneously (e.g. Jessica and Jeremy).
+   - Thus, the negative condition fails, and `FindAncestors::Stop` never enters the conflict set during search.
+3. **Specificity Preemption**:
+   - When all ancestors have been printed and retracted, only the initial request (`Penelope`, timetag `[8]`) remains in working memory.
+   - Now, the negative condition is satisfied, so `FindAncestors::Stop` enters the conflict set with WME `[8]`.
+   - `FindAncestors::Print` also matches WME `[8]`.
+   - Under LEX conflict resolution:
+     - `FindAncestors::Stop` tests 2 condition elements (specificity: **8**).
+     - `FindAncestors::Print` tests 1 condition element (specificity: **4**).
+     - `FindAncestors::Stop` dominates and fires!
+4. **Clean Halting**:
+   - The action `(write (crlf) No More Ancestors (crlf))` prints the termination banner, and `(halt)` immediately stops the engine without executing `FindAncestors::Print` for Penelope.
+
+### Running Part C in the REPL
+
+```bash
+go run ./cmd/ops5 -i tests/integration/2_4_3_c.ops5
+```
+
+```ops5
+ops5> (make Start)
+Asserted: (7: Start)
+
+ops5> run
+Running (max cycles: 0)...
+
+Please type the first name of a person
+whose ancestors you would like to find:
+Penelope
+
+Jason is an ancestor
+Loree is an ancestor
+Steven is an ancestor
+Jenny is an ancestor
+Jeremy is an ancestor
+Stephanie is an ancestor
+Homer is an ancestor
+Mary-Elizabeth is an ancestor
+Jessica is an ancestor
+No More Ancestors
+Execution halted by rule action after 17 cycles.
+```
+
+---
+
+## 5. Execution Tracing
 
 To inspect the full timetag firing trace, enable tracing before running:
 
@@ -263,28 +344,33 @@ Asserted: (7: Start)
 
 ops5> run
 Running (max cycles: 0)...
-[TRACE] Cycle 1: Fired rule 'FindAncestors::Initialize' with WMEs [7]
+[Cycle 1] Fired rule 'FindAncestors::Initialize' with WMEs [7]
 
 Please type the first name of a person
 whose ancestors you would like to find:
 Penelope
-[TRACE] Cycle 2: Fired rule 'FindAncestors' with WMEs [8 1]
-[TRACE] Cycle 3: Fired rule 'FindAncestors' with WMEs [10 3]
-[TRACE] Cycle 4: Fired rule 'FindAncestors' with WMEs [12 4]
-[TRACE] Cycle 5: Fired rule 'FindAncestors' with WMEs [14 5]
-[TRACE] Cycle 6: Fired rule 'FindAncestors::Print' with WMEs [15]
+[Cycle 2] Fired rule 'FindAncestors' with WMEs [8 1]
+[Cycle 3] Fired rule 'FindAncestors' with WMEs [10 3]
+[Cycle 4] Fired rule 'FindAncestors' with WMEs [12 4]
+[Cycle 5] Fired rule 'FindAncestors' with WMEs [13 5]
+[Cycle 6] Fired rule 'FindAncestors::Print' with WMEs [16]
+
 Jason is an ancestor
-[TRACE] Cycle 7: Fired rule 'FindAncestors::Print' with WMEs [14]
-Loree is an ancestor
 ...
-Reached quiescence after 17 cycles.
+[Cycle 16] Fired rule 'FindAncestors::Print' with WMEs [9]
+
+Jessica is an ancestor
+[Cycle 17] Fired rule 'FindAncestors::Stop' with WMEs [8]
+
+No More Ancestors
+Execution halted by rule action after 17 cycles.
 ```
 
 ---
 
-## 5. Automated Script & Pipeline Execution
+## 6. Automated Script & Pipeline Execution
 
-You can run both integration tests in non-interactive batch or pipeline environments:
+You can run all three integration tests in non-interactive batch or pipeline environments:
 
 ### Part A Non-Interactive Run
 ```bash
@@ -296,23 +382,25 @@ printf "(make Start)\nrun\nPenelope\nrun\nexit\n" | go run ./cmd/ops5 -i tests/i
 printf "(make Start)\nrun\nPenelope\nrun\nexit\n" | go run ./cmd/ops5 -i tests/integration/2_4_3_b.ops5
 ```
 
-Alternatively, you can bypass interactive input by directly asserting the `Request` goal:
+### Part C Non-Interactive Run
 ```bash
-printf "(make Request ^type ancestor ^target Penelope)\nrun\nexit\n" | go run ./cmd/ops5 -i tests/integration/2_4_3_b.ops5
+printf "(make Start)\nrun\nPenelope\nrun\nexit\n" | go run ./cmd/ops5 -i tests/integration/2_4_3_c.ops5
 ```
 
 ---
 
-## 6. Automated Go Test Suite
+## 7. Automated Go Test Suite
 
-Both implementations are verified in the automated Go test suite:
+All three implementations are verified in the automated Go test suite:
 
 - [`tests/suite_test.go`](../tests/suite_test.go):
   - `TestIntegration2_4_3_a`: Verifies Part A produces 7 cycles and correct ancestor pair strings.
   - `TestIntegration2_4_3_b`: Verifies Part B executes 17 cycles and outputs all 10 individual ancestors.
+  - `TestIntegration2_4_3_c`: Verifies Part C executes 17 cycles, fires `FindAncestors::Stop` with negative condition, outputs "No More Ancestors", and halts without reporting Penelope.
 - [`pkg/parser/parser_test.go`](../pkg/parser/parser_test.go):
   - `TestParseIntegration2_4_3_aFile`: Validates AST generation for Part A rules (2) and initial facts (6).
   - `TestParseIntegration2_4_3_bFile`: Validates AST generation for Part B rules (3) and initial facts (6).
+  - `TestParseIntegration2_4_3_cFile`: Validates AST generation for Part C rules (4 including negative CE) and initial facts (6).
 
 Run the test suite with:
 

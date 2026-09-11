@@ -287,3 +287,276 @@ func TestIntegration2_4_3_b(t *testing.T) {
 	}
 }
 
+// TestIntegration2_4_3_c verifies Section 2.4.3 Part C integration test using FindAncestors::Stop with negative condition.
+func TestIntegration2_4_3_c(t *testing.T) {
+	var outBuf bytes.Buffer
+	inBuf := strings.NewReader("Penelope\n")
+	repl := cli.NewREPL(inBuf, &outBuf)
+
+	err := repl.LoadFile(filepath.Join("integration", "2_4_3_c.ops5"))
+	if err != nil {
+		t.Fatalf("failed to load 2_4_3_c.ops5: %v", err)
+	}
+
+	// Assert Start to trigger initialization
+	repl.Engine().Make("Start", nil)
+
+	cycles, err := repl.Engine().Run(30)
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+
+	if cycles != 17 {
+		t.Errorf("expected 17 cycles, got %d", cycles)
+	}
+
+	out := outBuf.String()
+	expectedAncestors := []string{
+		"Jason is an ancestor",
+		"Loree is an ancestor",
+		"Steven is an ancestor",
+		"Jenny is an ancestor",
+		"Jeremy is an ancestor",
+		"Stephanie is an ancestor",
+		"Homer is an ancestor",
+		"Mary-Elizabeth is an ancestor",
+		"Jessica is an ancestor",
+		"No More Ancestors",
+	}
+
+	for _, exp := range expectedAncestors {
+		if !strings.Contains(out, exp) {
+			t.Errorf("expected output to contain %q, but got:\n%s", exp, out)
+		}
+	}
+
+	// In Part C, Penelope is the root request and should NOT be printed as an ancestor
+	if strings.Contains(out, "Penelope is an ancestor") {
+		t.Errorf("did not expect Penelope to be printed as an ancestor, but got:\n%s", out)
+	}
+}
+
+// TestIntegration2_5_1_a verifies Section 2.5.1 Part A integration test using Initialize production rule to populate working memory.
+func TestIntegration2_5_1_a(t *testing.T) {
+	var outBuf bytes.Buffer
+	inBuf := strings.NewReader("Penelope\n")
+	repl := cli.NewREPL(inBuf, &outBuf)
+
+	err := repl.LoadFile(filepath.Join("integration", "2_5_1_a.ops5"))
+	if err != nil {
+		t.Fatalf("failed to load 2_5_1_a.ops5: %v", err)
+	}
+
+	// Verify working memory is initially empty (no static load-time assertions)
+	if count := repl.Engine().WorkingMemory().Count(); count != 0 {
+		t.Errorf("expected empty working memory on load, got %d elements", count)
+	}
+
+	// Phase 1: Assert InitWM to trigger the Initialize production rule
+	repl.Engine().Make("InitWM", nil)
+
+	initCycles, err := repl.Engine().Run(10)
+	if err != nil {
+		t.Fatalf("initialization run failed: %v", err)
+	}
+	if initCycles != 1 {
+		t.Errorf("expected 1 initialization cycle, got %d", initCycles)
+	}
+
+	// Verify that working memory now contains all 6 Person facts asserted by Initialize
+	personWMEs := repl.Engine().WorkingMemory().FindByClass("Person")
+	if len(personWMEs) != 6 {
+		t.Errorf("expected 6 Person WMEs asserted by Initialize, got %d", len(personWMEs))
+	}
+
+	// Verify (InitWM) was consumed and removed by Initialize
+	initWMEs := repl.Engine().WorkingMemory().FindByClass("InitWM")
+	if len(initWMEs) != 0 {
+		t.Errorf("expected InitWM token to be removed by Initialize, got %d", len(initWMEs))
+	}
+
+	// Phase 2: Assert Start to trigger interactive search via FindAncestors::Initialize
+	repl.Engine().Make("Start", nil)
+
+	searchCycles, err := repl.Engine().Run(30)
+	if err != nil {
+		t.Fatalf("search run failed: %v", err)
+	}
+	if searchCycles != 17 {
+		t.Errorf("expected 17 search cycles (1 init prompt + 16 search), got %d", searchCycles)
+	}
+
+	// Verify (Start) was consumed and removed by FindAncestors::Initialize
+	startWMEs := repl.Engine().WorkingMemory().FindByClass("Start")
+	if len(startWMEs) != 0 {
+		t.Errorf("expected Start token to be removed, got %d", len(startWMEs))
+	}
+
+	out := outBuf.String()
+	expectedAncestors := []string{
+		"Jason is an ancestor",
+		"Loree is an ancestor",
+		"Steven is an ancestor",
+		"Jenny is an ancestor",
+		"Jeremy is an ancestor",
+		"Stephanie is an ancestor",
+		"Homer is an ancestor",
+		"Mary-Elizabeth is an ancestor",
+		"Jessica is an ancestor",
+		"No More Ancestors",
+	}
+
+	for _, exp := range expectedAncestors {
+		if !strings.Contains(out, exp) {
+			t.Errorf("expected output to contain %q, but got:\n%s", exp, out)
+		}
+	}
+
+	if strings.Contains(out, "Penelope is an ancestor") {
+		t.Errorf("did not expect Penelope to be printed as an ancestor, but got:\n%s", out)
+	}
+}
+
+// TestIntegration2_5_2 verifies Section 2.5.2 parameterized test cases using TestCase WMEs.
+func TestIntegration2_5_2(t *testing.T) {
+	t.Run("ancestornull", func(t *testing.T) {
+		var outBuf bytes.Buffer
+		inBuf := strings.NewReader("Penelope\n")
+		repl := cli.NewREPL(inBuf, &outBuf)
+
+		err := repl.LoadFile(filepath.Join("integration", "2_5_2.ops5"))
+		if err != nil {
+			t.Fatalf("failed to load 2_5_2.ops5: %v", err)
+		}
+
+		if count := repl.Engine().WorkingMemory().Count(); count != 0 {
+			t.Errorf("expected 0 WMEs on load, got %d", count)
+		}
+
+		repl.Engine().Make("TestCase", map[string]model.Value{
+			"type": model.NewSymbol("nulldb"),
+			"name": model.NewSymbol("ancestornull"),
+		})
+
+		cycles, err := repl.Engine().Run(20)
+		if err != nil {
+			t.Fatalf("run failed: %v", err)
+		}
+		if cycles != 3 {
+			t.Errorf("expected 3 cycles for ancestornull, got %d", cycles)
+		}
+
+		out := outBuf.String()
+		if !strings.Contains(out, "Please type the first name of a person") {
+			t.Errorf("expected prompt in output, got:\n%s", out)
+		}
+		if !strings.Contains(out, "No More Ancestors") {
+			t.Errorf("expected 'No More Ancestors' in output, got:\n%s", out)
+		}
+		if strings.Contains(out, "Penelope is an ancestor") {
+			t.Errorf("did not expect Penelope to be printed as ancestor, got:\n%s", out)
+		}
+		if len(repl.Engine().WorkingMemory().FindByClass("TestCase")) != 0 {
+			t.Errorf("expected TestCase to be consumed and removed")
+		}
+		if len(repl.Engine().WorkingMemory().FindByClass("Start")) != 0 {
+			t.Errorf("expected Start to be consumed and removed")
+		}
+	})
+
+	t.Run("ancestorsingle", func(t *testing.T) {
+		var outBuf bytes.Buffer
+		repl := cli.NewREPL(strings.NewReader(""), &outBuf)
+
+		err := repl.LoadFile(filepath.Join("integration", "2_5_2.ops5"))
+		if err != nil {
+			t.Fatalf("failed to load 2_5_2.ops5: %v", err)
+		}
+
+		repl.Engine().Make("TestCase", map[string]model.Value{
+			"type": model.NewSymbol("singledb"),
+			"name": model.NewSymbol("ancestorsingle"),
+		})
+
+		cycles, err := repl.Engine().Run(20)
+		if err != nil {
+			t.Fatalf("run failed: %v", err)
+		}
+		if cycles != 3 {
+			t.Errorf("expected 3 cycles for ancestorsingle, got %d", cycles)
+		}
+
+		out := outBuf.String()
+		if !strings.Contains(out, "No More Ancestors") {
+			t.Errorf("expected 'No More Ancestors' in output, got:\n%s", out)
+		}
+		if strings.Contains(out, "Orphan is an ancestor") {
+			t.Errorf("did not expect Orphan to be printed as ancestor, got:\n%s", out)
+		}
+		if strings.Contains(out, "is an ancestor") {
+			t.Errorf("expected no ancestors to be printed, got:\n%s", out)
+		}
+		if len(repl.Engine().WorkingMemory().FindByClass("TestCase")) != 0 {
+			t.Errorf("expected TestCase to be consumed and removed")
+		}
+		if len(repl.Engine().WorkingMemory().FindByClass("Person")) != 1 {
+			t.Errorf("expected 1 Person WME (Orphan), got %d", len(repl.Engine().WorkingMemory().FindByClass("Person")))
+		}
+	})
+
+	t.Run("ancestorgeneral", func(t *testing.T) {
+		var outBuf bytes.Buffer
+		repl := cli.NewREPL(strings.NewReader(""), &outBuf)
+
+		err := repl.LoadFile(filepath.Join("integration", "2_5_2.ops5"))
+		if err != nil {
+			t.Fatalf("failed to load 2_5_2.ops5: %v", err)
+		}
+
+		repl.Engine().Make("TestCase", map[string]model.Value{
+			"type": model.NewSymbol("generaldb"),
+			"name": model.NewSymbol("ancestorgeneral"),
+		})
+
+		cycles, err := repl.Engine().Run(30)
+		if err != nil {
+			t.Fatalf("run failed: %v", err)
+		}
+		if cycles != 11 {
+			t.Errorf("expected 11 cycles for ancestorgeneral, got %d", cycles)
+		}
+
+		out := outBuf.String()
+		expectedAncestors := []string{
+			"Steven is an ancestor",
+			"Jenny is an ancestor",
+			"Jeremy is an ancestor",
+			"Homer is an ancestor",
+			"Mary-Elizabeth is an ancestor",
+			"Jessica is an ancestor",
+			"No More Ancestors",
+		}
+		for _, exp := range expectedAncestors {
+			if !strings.Contains(out, exp) {
+				t.Errorf("expected output to contain %q, but got:\n%s", exp, out)
+			}
+		}
+
+		if strings.Contains(out, "Penelope is an ancestor") {
+			t.Errorf("did not expect Penelope to be printed as ancestor, but got:\n%s", out)
+		}
+		// Stephanie and Jason should NOT be printed because they are not in this generaldb subset
+		if strings.Contains(out, "Stephanie is an ancestor") {
+			t.Errorf("did not expect Stephanie to be in generaldb subset")
+		}
+		if strings.Contains(out, "Jason is an ancestor") {
+			t.Errorf("did not expect Jason to be in generaldb subset")
+		}
+		if len(repl.Engine().WorkingMemory().FindByClass("TestCase")) != 0 {
+			t.Errorf("expected TestCase to be consumed and removed")
+		}
+	})
+}
+
+
+

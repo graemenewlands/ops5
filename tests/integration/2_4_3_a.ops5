@@ -1,3 +1,17 @@
+;;; ============================================================================
+;;; Section 2.4.3 Part A: Ancestor Search (Single Recursive Rule)
+;;;
+;;; Problem: Find all ancestors of a designated person in a family tree.
+;;; Strategy: Single recursive rule (PrintAncestors) that matches a request,
+;;; prints both parents as a pair, retracts the request, and generates two
+;;; sub-requests for the parents.
+;;; ============================================================================
+
+;; ----------------------------------------------------------------------------
+;; Rule 1: FindAncestors::Initialize
+;; Matches the initial (Start) token, prompts the user interactively via (accept),
+;; and creates the root ancestor request.
+;; ----------------------------------------------------------------------------
 (p FindAncestors::Initialize
         {(Start) <initialize>}
     -->
@@ -8,6 +22,13 @@
         (make Request ^type ancestor ^target (accept))
 )
 
+;; ----------------------------------------------------------------------------
+;; Rule 2: PrintAncestors
+;; Matches an active Request and the corresponding Person entry.
+;; Retracts the current request, prints both mother and father, and asserts
+;; new requests for both parents. The {<myparents> <> nil} constraint prevents
+;; recursion on unknown ancestors.
+;; ----------------------------------------------------------------------------
 (p PrintAncestors
         {(Request ^type ancestor
             ^target {<myparents> <> nil}) <request1>}
@@ -22,6 +43,9 @@
         (make Request ^type ancestor ^target <father-name>)    
 )
 
+;;; ============================================================================
+;;; Initial Working Memory: Family Tree (Genealogy Database)
+;;; ============================================================================
 (Person ^name Penelope ^mother Jessica ^father Jeremy)
 (Person ^name Jessica mother Mary-Elizabeth ^father Homer)
 (Person ^name Jeremy ^mother Jenny ^father Steven)

@@ -1,12 +1,14 @@
 ;;; ============================================================================
-;;; Section 2.4.3 Part B: Ancestor Search (Two-Rule Specificity Decomposition)
+;;; Section 2.4.3 Part C: Ancestor Search with Negative Assertion Termination
 ;;;
-;;; Problem: Find all ancestors and report each individual ancestor separately.
-;;; Strategy: Two-rule decomposition with conflict resolution via specificity:
-;;; - FindAncestors (Generator, specificity 8) dominates FindAncestors::Print
-;;; - Refraction prevents FindAncestors from infinite looping on the same WMEs
-;;; - FindAncestors::Print (Reporter, specificity 4) fires after refraction
-;;;   to print the individual ancestor and retract the request
+;;; Problem: Clean termination of ancestor search preventing the initial target
+;;; person from being reported as their own ancestor.
+;;; Strategy: Introduces FindAncestors::Stop with a negative condition element:
+;;; - (Request ^type ancestor ^target {<> <name1> <> nil})
+;;; This matches only when no other non-nil requests exist in working memory.
+;;; When only the root request remains, FindAncestors::Stop (specificity 8)
+;;; dominates FindAncestors::Print (specificity 4), prints "No More Ancestors",
+;;; and calls (halt).
 ;;; ============================================================================
 
 ;; ----------------------------------------------------------------------------
@@ -50,6 +52,26 @@
     -->
         (write (crlf) <name> is an ancestor)
         (remove <request1>)
+)
+
+;; ----------------------------------------------------------------------------
+;; Rule 4: FindAncestors::Stop (Terminator)
+;; Negative working memory assertion:
+;; Matches when there is an active Request (<name1>), but NO OTHER non-nil
+;; Request exists in working memory.
+;;
+;; During recursive traversal, multiple requests always coexist in WM.
+;; Only when all true ancestors have been printed and retracted does the
+;; root request remain alone in WM.
+;; With specificity = 8, this rule dominates FindAncestors::Print (specificity 4),
+;; printing "No More Ancestors" and halting cleanly without reporting the root person.
+;; ----------------------------------------------------------------------------
+(p FindAncestors::Stop
+        (Request ^type ancestor ^target {<name1> <> nil})
+        - (Request ^type ancestor ^target {<> <name1> <> nil})
+    -->
+        (write (crlf) No More Ancestors (crlf))
+        (halt)
 )
 
 ;;; ============================================================================

@@ -103,6 +103,11 @@ func (r *REPL) Start() {
 
 // handleCommand returns true if the REPL should exit.
 func (r *REPL) handleCommand(input string) bool {
+	trimmed := strings.TrimSpace(input)
+	if strings.HasPrefix(trimmed, ";") {
+		return false
+	}
+
 	lower := strings.ToLower(input)
 	if lower == "exit" || lower == "quit" || lower == "(exit)" || lower == "(quit)" {
 		fmt.Fprintln(r.out, "Goodbye!")

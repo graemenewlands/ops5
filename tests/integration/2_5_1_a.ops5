@@ -1,0 +1,96 @@
+;;; ============================================================================
+;;; Section 2.5.1 Part A: Working Memory Initialization via Production (InitWM)
+;;;
+;;; Problem: Initializing domain working memory data dynamically using a production
+;;; rule rather than declaring static facts at file load time.
+;;; Strategy:
+;;; 1. Rule 'Initialize' matches the bootstrap token (InitWM), asserts the initial
+;;;    Person records into working memory, and removes (InitWM) to prevent re-firing.
+;;; 2. Rule 'FindAncestors::Initialize' matches (Start) separately, prompting the user
+;;;    interactively via (accept) to create the root ancestor Request.
+;;; 3. Separating the initialization trigger (InitWM) from the query trigger (Start)
+;;;    eliminates conflict resolution ambiguity between populating working memory
+;;;    and starting the search.
+;;; 4. The search proceeds with generator (FindAncestors), reporter (FindAncestors::Print),
+;;;    and terminator (FindAncestors::Stop).
+;;; ============================================================================
+
+;; ----------------------------------------------------------------------------
+;; Rule 1: FindAncestors::Initialize
+;; Matches the initial (Start) token, prompts the user interactively via (accept),
+;; and creates the root ancestor request.
+;; ----------------------------------------------------------------------------
+(p FindAncestors::Initialize
+        {(Start) <initialize>}
+    -->
+        (remove <initialize>)
+        (write (crlf) |Please type the first name of a person|
+            (crlf) |whose ancestors you would like to find:|
+            (crlf))
+        (make Request ^type ancestor ^target (accept))
+)
+
+;; ----------------------------------------------------------------------------
+;; Rule 2: FindAncestors (Generator)
+;; Matches an active Request for a person who has parents in the database.
+;; Asserts two child requests for mother and father without retracting current request.
+;; Specificity = 8 (2 condition elements), dominating FindAncestors::Print.
+;; ----------------------------------------------------------------------------
+(p FindAncestors
+        (Request ^type ancestor ^target {<name> <> nil})
+        (Person ^name <name> ^mother <mother-name> 
+            ^father <father-name>)
+    -->
+        (make Request ^type ancestor ^target <mother-name>)
+        (make Request ^type ancestor ^target <father-name>)    
+)
+
+;; ----------------------------------------------------------------------------
+;; Rule 3: FindAncestors::Print (Reporter)
+;; Matches an active Request. Fires after FindAncestors refracts for that request,
+;; or immediately for leaf ancestors with no parent entries in WM.
+;; Prints '<name> is an ancestor' and removes the request. Specificity = 4.
+;; ----------------------------------------------------------------------------
+(p FindAncestors::Print
+        {(Request ^type ancestor ^target {<name> <> nil}) <request1>}
+    -->
+        (write (crlf) <name> is an ancestor)
+        (remove <request1>)
+)
+
+;; ----------------------------------------------------------------------------
+;; Rule 4: FindAncestors::Stop (Terminator)
+;; Negative working memory assertion:
+;; Matches when there is an active Request (<name1>), but NO OTHER non-nil
+;; Request exists in working memory.
+;;
+;; During recursive traversal, multiple requests always coexist in WM.
+;; Only when all true ancestors have been printed and retracted does the
+;; root request remain alone in WM.
+;; With specificity = 8, this rule dominates FindAncestors::Print (specificity 4),
+;; printing "No More Ancestors" and halting cleanly without reporting the root person.
+;; ----------------------------------------------------------------------------
+(p FindAncestors::Stop
+        (Request ^type ancestor ^target {<name1> <> nil})
+        - (Request ^type ancestor ^target {<> <name1> <> nil})
+    -->
+        (write (crlf) No More Ancestors (crlf))
+        (halt)
+)
+
+;; ----------------------------------------------------------------------------
+;; Rule 5: Initialize (Working Memory Bootstrap)
+;; Matches the bootstrap token (InitWM), populates working memory with the
+;; initial genealogy database (Person records), and retracts (InitWM).
+;; ----------------------------------------------------------------------------
+(p Initialize
+        {(InitWM) <initialize>}
+    -->
+        (make Person ^name Penelope ^mother Jessica ^father Jeremy)
+        (make Person ^name Jessica mother Mary-Elizabeth ^father Homer)
+        (make Person ^name Jeremy ^mother Jenny ^father Steven)
+        (make Person ^name Steven ^mother Loree)
+        (make Person ^name Loree ^father Jason)
+        (make Person ^name Homer ^mother Stephanie)
+        (remove <initialize>)
+)

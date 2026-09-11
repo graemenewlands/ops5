@@ -818,6 +818,15 @@ func (p *Parser) parseAction() (model.Action, error) {
 		return model.HaltAction{}, nil
 
 	default:
+		// Check for bare make action: (ClassName ^attr val ...) or (ClassName attr val ...)
+		if p.current.Type == TokenAttribute || p.isAttributeToken(p.current, p.getSchema(verbTok.Value)) || p.getSchema(verbTok.Value) != nil {
+			class, attrs, err := p.parseMakeBody(verbTok)
+			if err != nil {
+				return nil, err
+			}
+			return model.MakeAction{Class: class, Attributes: attrs}, nil
+		}
+
 		// Drain remaining tokens in unknown action
 		for p.current.Type != TokenRParen && p.current.Type != TokenEOF {
 			p.advance()

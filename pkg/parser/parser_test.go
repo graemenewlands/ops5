@@ -880,3 +880,289 @@ func TestParseIntegration2_4_3_bFile(t *testing.T) {
 	}
 }
 
+func TestParseIntegration2_4_3_cFile(t *testing.T) {
+	stmts, err := ParseProgram(`
+(p FindAncestors::Initialize
+        {(Start) <initialize>}
+    -->
+        (remove <initialize>)
+        (write (crlf) |Please type the first name of a person|
+            (crlf) |whose ancestors you would like to find:|
+            (crlf))
+        (make Request ^type ancestor ^target (accept))
+)
+
+(p FindAncestors
+        (Request ^type ancestor ^target {<name> <> nil})
+        (Person ^name <name> ^mother <mother-name> 
+            ^father <father-name>)
+    -->
+        (make Request ^type ancestor ^target <mother-name>)
+        (make Request ^type ancestor ^target <father-name>)    
+)
+
+(p FindAncestors::Print
+        {(Request ^type ancestor ^target {<name> <> nil}) <request1>}
+    -->
+        (write (crlf) <name> is an ancestor)
+        (remove <request1>)
+)
+
+(p FindAncestors::Stop
+        (Request ^type ancestor ^target {<name1> <> nil})
+        - (Request ^type ancestor ^target {<> <name1> <> nil})
+    -->
+        (write (crlf) No More Ancestors (crlf))
+        (halt)
+)
+
+(Person ^name Penelope ^mother Jessica ^father Jeremy)
+(Person ^name Jessica mother Mary-Elizabeth ^father Homer)
+(Person ^name Jeremy ^mother Jenny ^father Steven)
+(Person ^name Steven ^mother Loree)
+(Person ^name Loree ^father Jason)
+(Person ^name Homer ^mother Stephanie)
+`)
+	if err != nil {
+		t.Fatalf("failed to parse 2_4_3_c.ops5: %v", err)
+	}
+
+	rulesCount := 0
+	makesCount := 0
+	var stopRule *model.Rule
+	for _, s := range stmts {
+		if s.Type == StmtRule {
+			rulesCount++
+			if s.Rule.Name == "FindAncestors::Stop" {
+				stopRule = s.Rule
+			}
+		} else if s.Type == StmtMake {
+			makesCount++
+		}
+	}
+
+	if rulesCount != 4 {
+		t.Errorf("expected 4 rules, got %d", rulesCount)
+	}
+	if makesCount != 6 {
+		t.Errorf("expected 6 makes, got %d", makesCount)
+	}
+	if stopRule == nil {
+		t.Fatalf("expected FindAncestors::Stop rule to be parsed")
+	}
+	if len(stopRule.Conditions) != 2 {
+		t.Fatalf("expected 2 conditions in FindAncestors::Stop, got %d", len(stopRule.Conditions))
+	}
+	if stopRule.Conditions[0].IsNegative {
+		t.Errorf("expected condition 1 to be positive")
+	}
+	if !stopRule.Conditions[1].IsNegative {
+		t.Errorf("expected condition 2 to be negative")
+	}
+}
+
+func TestParseIntegration2_5_1_aFile(t *testing.T) {
+	stmts, err := ParseProgram(`
+(p FindAncestors::Initialize
+        {(Start) <initialize>}
+    -->
+        (remove <initialize>)
+        (write (crlf) |Please type the first name of a person|
+            (crlf) |whose ancestors you would like to find:|
+            (crlf))
+        (make Request ^type ancestor ^target (accept))
+)
+
+(p FindAncestors
+        (Request ^type ancestor ^target {<name> <> nil})
+        (Person ^name <name> ^mother <mother-name> 
+            ^father <father-name>)
+    -->
+        (make Request ^type ancestor ^target <mother-name>)
+        (make Request ^type ancestor ^target <father-name>)    
+)
+
+(p FindAncestors::Print
+        {(Request ^type ancestor ^target {<name> <> nil}) <request1>}
+    -->
+        (write (crlf) <name> is an ancestor)
+        (remove <request1>)
+)
+
+(p FindAncestors::Stop
+        (Request ^type ancestor ^target {<name1> <> nil})
+        - (Request ^type ancestor ^target {<> <name1> <> nil})
+    -->
+        (write (crlf) No More Ancestors (crlf))
+        (halt)
+)
+
+(p Initialize
+        {(InitWM) <initialize>}
+    -->
+        (make Person ^name Penelope ^mother Jessica ^father Jeremy)
+        (make Person ^name Jessica mother Mary-Elizabeth ^father Homer)
+        (make Person ^name Jeremy ^mother Jenny ^father Steven)
+        (make Person ^name Steven ^mother Loree)
+        (make Person ^name Loree ^father Jason)
+        (make Person ^name Homer ^mother Stephanie)
+        (remove <initialize>)
+)
+`)
+	if err != nil {
+		t.Fatalf("failed to parse 2_5_1_a.ops5: %v", err)
+	}
+
+	if len(stmts) != 5 {
+		t.Fatalf("expected 5 statements, got %d", len(stmts))
+	}
+
+	var initRule *model.Rule
+	for _, s := range stmts {
+		if s.Type != StmtRule {
+			t.Errorf("expected statement to be a rule, got %s", s.Type)
+		}
+		if s.Rule.Name == "Initialize" {
+			initRule = s.Rule
+		}
+	}
+
+	if initRule == nil {
+		t.Fatalf("expected to find rule Initialize")
+	}
+
+	if len(initRule.Conditions) != 1 || initRule.Conditions[0].Class != "InitWM" {
+		t.Fatalf("expected Initialize condition to match InitWM, got %v", initRule.Conditions)
+	}
+
+	if len(initRule.Actions) != 7 {
+		t.Fatalf("expected 7 actions in Initialize, got %d", len(initRule.Actions))
+	}
+
+	for i := 0; i < 6; i++ {
+		makeAct, ok := initRule.Actions[i].(model.MakeAction)
+		if !ok {
+			t.Fatalf("action %d should be MakeAction, got %T", i, initRule.Actions[i])
+		}
+		if makeAct.Class != "Person" {
+			t.Errorf("action %d class should be Person, got %s", i, makeAct.Class)
+		}
+	}
+
+	if _, ok := initRule.Actions[6].(model.RemoveAction); !ok {
+		t.Fatalf("action 6 should be RemoveAction, got %T", initRule.Actions[6])
+	}
+}
+
+func TestParseIntegration2_5_2File(t *testing.T) {
+	stmts, err := ParseProgram(`
+(p FindAncestors::Initialize
+        {(Start) <initialize>}
+    -->
+        (remove <initialize>)
+        (write (crlf) |Please type the first name of a person|
+            (crlf) |whose ancestors you would like to find:|
+            (crlf))
+        (make Request ^type ancestor ^target (accept))
+)
+
+(p FindAncestors
+        (Request ^type ancestor ^target {<name> <> nil})
+        (Person ^name <name> ^mother <mother-name> 
+            ^father <father-name>)
+    -->
+        (make Request ^type ancestor ^target <mother-name>)
+        (make Request ^type ancestor ^target <father-name>)    
+)
+
+(p FindAncestors::Print
+        {(Request ^type ancestor ^target {<name> <> nil}) <request1>}
+    -->
+        (write (crlf) <name> is an ancestor)
+        (remove <request1>)
+)
+
+(p FindAncestors::Stop
+        (Request ^type ancestor ^target {<name1> <> nil})
+        - (Request ^type ancestor ^target {<> <name1> <> nil})
+    -->
+        (write (crlf) No More Ancestors (crlf))
+        (halt)
+)
+
+(p Initialize
+        {(InitWM) <initialize>}
+    -->
+        (make Person ^name Penelope ^mother Jessica ^father Jeremy)
+        (make Person ^name Jessica mother Mary-Elizabeth ^father Homer)
+        (make Person ^name Jeremy ^mother Jenny ^father Steven)
+        (make Person ^name Steven ^mother Loree)
+        (make Person ^name Loree ^father Jason)
+        (make Person ^name Homer ^mother Stephanie)
+        (remove <initialize>)
+)
+
+(literalize TestCase
+    type
+    name
+)
+
+(p Test::Ancestor:null
+        {(TestCase ^type nulldb ^name ancestornull) <nulltest>}
+    -->
+        (remove <nulltest>)
+        (make Start)
+)
+
+(p Test::Ancestor:Single
+        {(TestCase ^type singledb ^name ancestorsingle) <test>}
+    -->
+        (remove <test>)
+        (make Person ^name Orphan)
+        (make Request ^type ancestor ^target Orphan)
+)
+
+(p Test::Ancestor:General
+        {(TestCase ^type generaldb ^name ancestorgeneral) <gentest>}
+    -->
+        (remove <gentest>)
+        (make Person ^name Penelope ^mother Jessica ^father Jeremy)
+        (make Person ^name Jessica mother Mary-Elizabeth ^father Homer)
+        (make Person ^name Jeremy ^mother Jenny ^father Steven)
+        (make Request ^type ancestor ^target Penelope)
+)
+`)
+	if err != nil {
+		t.Fatalf("failed to parse 2_5_2.ops5: %v", err)
+	}
+
+	if len(stmts) != 9 {
+		t.Fatalf("expected 9 statements (8 rules + 1 schema), got %d", len(stmts))
+	}
+
+	litCount := 0
+	rulesCount := 0
+	for _, s := range stmts {
+		if s.Type == StmtLiteralize {
+			litCount++
+			if s.LiteralizeClass != "TestCase" {
+				t.Errorf("expected literalize class TestCase, got %s", s.LiteralizeClass)
+			}
+			if len(s.LiteralizeAttrs) != 2 || s.LiteralizeAttrs[0] != "type" || s.LiteralizeAttrs[1] != "name" {
+				t.Errorf("unexpected literalize attributes: %v", s.LiteralizeAttrs)
+			}
+		} else if s.Type == StmtRule {
+			rulesCount++
+		}
+	}
+
+	if litCount != 1 {
+		t.Errorf("expected 1 literalize statement, got %d", litCount)
+	}
+	if rulesCount != 8 {
+		t.Errorf("expected 8 rules, got %d", rulesCount)
+	}
+}
+
+
+

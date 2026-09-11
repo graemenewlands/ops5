@@ -1,0 +1,165 @@
+;;; ============================================================================
+;;; Section 2.5.2: Adding Test Cases to a Rule Set (Parameterized Test Harness)
+;;;
+;;; Problem: Systematic verification of rule sets across different boundary
+;;; conditions and database configurations (empty, boundary, and general cases).
+;;;
+;;; Strategy:
+;;; 1. Declare a parameterized schema (TestCase ^type ^name) to select and bootstrap
+;;;    specific test scenarios without modifying the core rule set.
+;;; 2. Define specialized test setup productions:
+;;;    - Test::Ancestor:null   (nulldb, ancestornull): Tests search against an empty WM.
+;;;    - Test::Ancestor:Single (singledb, ancestorsingle): Tests search with a single
+;;;      isolated record ("Orphan") with no parent records.
+;;;    - Test::Ancestor:General (generaldb, ancestorgeneral): Tests search on a
+;;;      multi-generation family tree subset.
+;;; 3. Core ancestor rules (FindAncestors, FindAncestors::Print, FindAncestors::Stop)
+;;;    execute identically regardless of which setup rule asserted the initial facts.
+;;; ============================================================================
+
+;; ----------------------------------------------------------------------------
+;; Rule 1: FindAncestors::Initialize
+;; Matches the initial (Start) token, prompts the user interactively via (accept),
+;; and creates the root ancestor request.
+;; ----------------------------------------------------------------------------
+(p FindAncestors::Initialize
+        {(Start) <initialize>}
+    -->
+        (remove <initialize>)
+        (write (crlf) |Please type the first name of a person|
+            (crlf) |whose ancestors you would like to find:|
+            (crlf))
+        (make Request ^type ancestor ^target (accept))
+)
+
+;; ----------------------------------------------------------------------------
+;; Rule 2: FindAncestors (Generator)
+;; Matches an active Request for a person who has parents in the database.
+;; Asserts two child requests for mother and father without retracting current request.
+;; Specificity = 8 (2 condition elements), dominating FindAncestors::Print.
+;; ----------------------------------------------------------------------------
+(p FindAncestors
+        (Request ^type ancestor ^target {<name> <> nil})
+        (Person ^name <name> ^mother <mother-name> 
+            ^father <father-name>)
+    -->
+        (make Request ^type ancestor ^target <mother-name>)
+        (make Request ^type ancestor ^target <father-name>)    
+)
+
+;; ----------------------------------------------------------------------------
+;; Rule 3: FindAncestors::Print (Reporter)
+;; Matches an active Request. Fires after FindAncestors refracts for that request,
+;; or immediately for leaf ancestors with no parent entries in WM.
+;; Prints '<name> is an ancestor' and removes the request. Specificity = 4.
+;; ----------------------------------------------------------------------------
+(p FindAncestors::Print
+        {(Request ^type ancestor ^target {<name> <> nil}) <request1>}
+    -->
+        (write (crlf) <name> is an ancestor)
+        (remove <request1>)
+)
+
+;; ----------------------------------------------------------------------------
+;; Rule 4: FindAncestors::Stop (Terminator)
+;; Negative working memory assertion:
+;; Matches when there is an active Request (<name1>), but NO OTHER non-nil
+;; Request exists in working memory.
+;;
+;; During recursive traversal, multiple requests always coexist in WM.
+;; Only when all true ancestors have been printed and retracted does the
+;; root request remain alone in WM.
+;; With specificity = 8, this rule dominates FindAncestors::Print (specificity 4),
+;; printing "No More Ancestors" and halting cleanly without reporting the root person.
+;; ----------------------------------------------------------------------------
+(p FindAncestors::Stop
+        (Request ^type ancestor ^target {<name1> <> nil})
+        - (Request ^type ancestor ^target {<> <name1> <> nil})
+    -->
+        (write (crlf) No More Ancestors (crlf))
+        (halt)
+)
+
+;; ----------------------------------------------------------------------------
+;; Rule 5: Initialize (Working Memory Bootstrap)
+;; Matches the bootstrap token (InitWM), populates working memory with the
+;; initial genealogy database (Person records), and retracts (InitWM).
+;; ----------------------------------------------------------------------------
+(p Initialize
+        {(InitWM) <initialize>}
+    -->
+        (make Person ^name Penelope ^mother Jessica ^father Jeremy)
+        (make Person ^name Jessica mother Mary-Elizabeth ^father Homer)
+        (make Person ^name Jeremy ^mother Jenny ^father Steven)
+        (make Person ^name Steven ^mother Loree)
+        (make Person ^name Loree ^father Jason)
+        (make Person ^name Homer ^mother Stephanie)
+        (remove <initialize>)
+)
+
+;;; ============================================================================
+;;; Parameterized Test Harness (Section 2.5.2)
+;;; ============================================================================
+
+;; Declare schema for parameterized test tokens
+(literalize TestCase    ; Parameterized start element
+    type                ; nulldb, singledb, generaldb, or custom category
+    name                ; unique identifier for each test case
+)
+
+;; ----------------------------------------------------------------------------
+;; Rule 6: Test::Ancestor:null (Empty Database Boundary Test)
+;; Matches: (TestCase ^type nulldb ^name ancestornull)
+;; Setup: Retracts TestCase and asserts (Start) to invoke the interactive prompt
+;; with zero Person records in working memory.
+;; Expected Outcome: Prompts for person, then FindAncestors::Stop immediately fires
+;; because no parents exist in WM, printing "No More Ancestors" and halting (3 cycles).
+;; ----------------------------------------------------------------------------
+(p Test::Ancestor:null
+        {(TestCase ^type nulldb ^name ancestornull) <nulltest>}
+    -->
+        (remove <nulltest>)
+        (make Start)
+)
+
+;; ----------------------------------------------------------------------------
+;; Rule 7: Test::Ancestor:Single (Single Node / Orphan Boundary Test)
+;; Matches: (TestCase ^type singledb ^name ancestorsingle)
+;; Setup: Retracts TestCase, asserts a single Person "Orphan" with no parents,
+;; and asserts an ancestor Request for Orphan.
+;; Expected Outcome: FindAncestors generates nil requests; FindAncestors::Stop
+;; dominates and halts with "No More Ancestors" on cycle 3 without reporting Orphan.
+;; ----------------------------------------------------------------------------
+(p Test::Ancestor:Single
+        {(TestCase ^type singledb ^name ancestorsingle) <test>}
+    -->
+        (remove <test>)
+        (make Person ^name Orphan)
+        (make Request ^type ancestor ^target Orphan)
+)
+
+;; ----------------------------------------------------------------------------
+;; Rule 8: Test::Ancestor:General (Multi-Generation Subtree Test)
+;; Matches: (TestCase ^type generaldb ^name ancestorgeneral)
+;; Setup: Retracts TestCase, asserts a 3-generation family tree (Penelope, Jessica,
+;; Jeremy, Homer, Mary-Elizabeth, Steven, Jenny), and asserts Request for Penelope.
+;; Expected Outcome: Traverses all 6 ancestors, printing them in order, then halts
+;; cleanly via FindAncestors::Stop with "No More Ancestors" (11 cycles).
+;; ----------------------------------------------------------------------------
+(p Test::Ancestor:General
+        {(TestCase ^type generaldb ^name ancestorgeneral) <gentest>}
+    -->
+        (remove <gentest>)
+        (make Person ^name Penelope ^mother Jessica ^father Jeremy)
+        (make Person ^name Jessica mother Mary-Elizabeth ^father Homer)
+        (make Person ^name Jeremy ^mother Jenny ^father Steven)
+        (make Request ^type ancestor ^target Penelope)
+)
+
+;;; ============================================================================
+;;; Usage / Test Execution:
+;;; To initiate a specific test scenario, assert the corresponding TestCase WME:
+;;;   (make TestCase ^type nulldb ^name ancestornull)      ; Empty database test
+;;;   (make TestCase ^type singledb ^name ancestorsingle)  ; Single node test
+;;;   (make TestCase ^type generaldb ^name ancestorgeneral); Multi-generation test
+;;; ============================================================================

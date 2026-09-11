@@ -39,6 +39,8 @@ This engine provides a complete, modern execution environment for rule-based sys
    - [CLI Commands & Flags](#cli-commands--flags)
    - [Interactive REPL Reference](#interactive-repl-reference)
    - [Tutorial: Ancestors Search in the REPL (Section 2.4.3)](docs/tutorial_2_4_3_ancestors.md)
+   - [Tutorial: Working Memory Initialization & Test Harness (Section 2.5)](docs/tutorial_2_5_testing.md)
+   - [Program Termination & Halting Reference](docs/program_termination.md)
    - [Execution Tracing](#execution-tracing)
 6. [Test Harness & JSON Test Suite Specification](#test-harness--json-test-suite-specification)
    - [Test Case Schema](#test-case-schema)
@@ -646,7 +648,10 @@ Defined rule 'classify-alert' (conditions=1, specificity=3)
 | `exit` / `quit` | *none* | Terminate the REPL session | `exit` |
 
 > [!TIP]
-> For a complete interactive walkthrough demonstrating file preloading, working memory inspection, element variable conjunctions, and cycle debugging, see the **[Ancestors Search REPL Tutorial (Section 2.4.3)](docs/tutorial_2_4_3_ancestors.md)**.
+> For interactive walkthroughs demonstrating rule development, conflict resolution, testing paradigms, and halting controls, see:
+> - **[Ancestors Search REPL Tutorial (Section 2.4.3)](docs/tutorial_2_4_3_ancestors.md)**
+> - **[Working Memory Initialization & Parameterized Test Harness (Section 2.5)](docs/tutorial_2_5_testing.md)**
+> - **[Program Termination & Halting Reference](docs/program_termination.md)**
 
 ### Execution Tracing
 

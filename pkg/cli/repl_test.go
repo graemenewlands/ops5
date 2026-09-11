@@ -274,6 +274,71 @@ func TestREPLQuiescenceFormattingOnOwnLine(t *testing.T) {
 	}
 }
 
+func TestREPLCommentLines(t *testing.T) {
+	commands := `
+	; This is a comment at start
+	;; Another comment style
+	(p test-comment-rule
+		(goal ^status active) ; inline comment in rule
+		-->
+		(write (crlf) "Rule fired")
+	)
+	; Comment before make
+	make goal ^status active
+	; Comment before run
+	run
+	; Comment before exit
+	exit
+	`
+	in := strings.NewReader(commands)
+	var out bytes.Buffer
+	repl := NewREPL(in, &out)
+	repl.Start()
+
+	output := out.String()
+	if strings.Contains(output, "Unknown command: ;") {
+		t.Errorf("REPL should not produce 'Unknown command: ;' for comment lines, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Rule fired") {
+		t.Errorf("expected rule to fire, got:\n%s", output)
+	}
+}
+
+func TestREPLRunCycleLimit(t *testing.T) {
+	commands := `
+	(p count-up
+		<c> (Counter ^val <v>)
+		-->
+		(bind <next> (compute <v> + 1))
+		(modify <c> ^val <next>)
+		(write (crlf) Step <next>)
+	)
+	make Counter ^val 0
+	run 2
+	(run 2)
+	exit
+	`
+	in := strings.NewReader(commands)
+	var out bytes.Buffer
+	repl := NewREPL(in, &out)
+	repl.Start()
+
+	output := out.String()
+	if !strings.Contains(output, "Step 1") || !strings.Contains(output, "Step 2") {
+		t.Errorf("expected steps 1 and 2 from first 'run 2', got:\n%s", output)
+	}
+	if !strings.Contains(output, "Step 3") || !strings.Contains(output, "Step 4") {
+		t.Errorf("expected steps 3 and 4 from second '(run 2)', got:\n%s", output)
+	}
+	if strings.Contains(output, "Step 5") {
+		t.Errorf("did not expect step 5 to run, got:\n%s", output)
+	}
+	if repl.Engine().CycleCount() != 4 {
+		t.Errorf("expected exactly 4 cycles executed, got %d", repl.Engine().CycleCount())
+	}
+}
+
+
 
 
 
