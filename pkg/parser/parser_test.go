@@ -768,7 +768,7 @@ func TestParseBareMakeAndAttributeWithoutCaret(t *testing.T) {
 	}
 }
 
-func TestParseIntegration2_4_3File(t *testing.T) {
+func TestParseIntegration2_4_3_aFile(t *testing.T) {
 	stmts, err := ParseProgram(`
 (p FindAncestors::Initialize
         {(Start) <initialize>}
@@ -802,7 +802,7 @@ func TestParseIntegration2_4_3File(t *testing.T) {
 (Person ^name Homer ^mother Stephanie)
 `)
 	if err != nil {
-		t.Fatalf("failed to parse 2_4_3.ops5: %v", err)
+		t.Fatalf("failed to parse 2_4_3_a.ops5: %v", err)
 	}
 
 	rulesCount := 0

@@ -1,6 +1,6 @@
 # OPS5 Interactive Tutorial: Ancestors Search (Section 2.4.3)
 
-This tutorial provides a complete walkthrough for loading and running the integration test in [`tests/integration/2_4_3.ops5`](../tests/integration/2_4_3.ops5) using the interactive OPS5 REPL.
+This tutorial provides a complete walkthrough for loading and running the integration test in [`tests/integration/2_4_3_a.ops5`](../tests/integration/2_4_3_a.ops5) using the interactive OPS5 REPL.
 
 The program is adapted from Section 2.4.3 of *Programming Expert Systems in OPS5: An Introduction to Rule-Based Programming* (Brownston, Farrell, Kant, & Martin, Addison-Wesley, 1985).
 
@@ -60,7 +60,7 @@ flowchart TD
 You can launch the REPL with the integration test preloaded using the `-i` flag:
 
 ```bash
-go run ./cmd/ops5 -i tests/integration/2_4_3.ops5
+go run ./cmd/ops5 -i tests/integration/2_4_3_a.ops5
 ```
 
 Alternatively, launch the REPL empty and load the file manually with the `load` command:
@@ -69,8 +69,8 @@ Alternatively, launch the REPL empty and load the file manually with the `load` 
 go run ./cmd/ops5
 ```
 ```ops5
-ops5> load tests/integration/2_4_3.ops5
-Loaded tests/integration/2_4_3.ops5: added 2 rules, asserted 6 WMEs.
+ops5> load tests/integration/2_4_3_a.ops5
+Loaded tests/integration/2_4_3_a.ops5: added 2 rules, asserted 6 WMEs.
 ```
 
 ---
@@ -158,8 +158,8 @@ To observe each rule firing individually, use the `step` command:
 ops5> reset
 Working memory, conflict set, and genatom counter reset.
 
-ops5> load tests/integration/2_4_3.ops5
-Loaded tests/integration/2_4_3.ops5: added 2 rules, asserted 6 WMEs.
+ops5> load tests/integration/2_4_3_a.ops5
+Loaded tests/integration/2_4_3_a.ops5: added 2 rules, asserted 6 WMEs.
 
 ops5> (make Start)
 Asserted: (7: Start)
@@ -229,5 +229,5 @@ Jessica and Jeremy are ancestors via Penelope
 To run the integration test in scripts or CI pipelines without an interactive terminal:
 
 ```bash
-printf "(make Start)\nrun\nPenelope\nrun\nexit\n" | go run ./cmd/ops5 -i tests/integration/2_4_3.ops5
+printf "(make Start)\nrun\nPenelope\nrun\nexit\n" | go run ./cmd/ops5 -i tests/integration/2_4_3_a.ops5
 ```

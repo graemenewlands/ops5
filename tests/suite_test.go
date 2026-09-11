@@ -204,9 +204,9 @@ func TestIntegration2_4_3(t *testing.T) {
 	inBuf := strings.NewReader("Penelope\n")
 	repl := cli.NewREPL(inBuf, &outBuf)
 
-	err := repl.LoadFile(filepath.Join("integration", "2_4_3.ops5"))
+	err := repl.LoadFile(filepath.Join("integration", "2_4_3_a.ops5"))
 	if err != nil {
-		t.Fatalf("failed to load 2_4_3.ops5: %v", err)
+		t.Fatalf("failed to load 2_4_3_a.ops5: %v", err)
 	}
 
 	// Assert Start to trigger initialization
