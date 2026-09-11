@@ -1,3 +1,13 @@
+(p FindAncestors::Initialize
+        {(Start) <initialize>}
+    -->
+        (remove <initialize>)
+        (write (crlf) |Please type the first name of a person|
+            (crlf) |whose ancestors you would like to find:|
+            (crlf))
+        (make Request ^type ancestor ^target (accept))
+)
+
 (p FindAncestors
         (Request ^type ancestor ^target {<name> <> nil})
         (Person ^name <name> ^mother <mother-name> 

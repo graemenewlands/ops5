@@ -825,6 +825,16 @@ func TestParseIntegration2_4_3_aFile(t *testing.T) {
 
 func TestParseIntegration2_4_3_bFile(t *testing.T) {
 	stmts, err := ParseProgram(`
+(p FindAncestors::Initialize
+        {(Start) <initialize>}
+    -->
+        (remove <initialize>)
+        (write (crlf) |Please type the first name of a person|
+            (crlf) |whose ancestors you would like to find:|
+            (crlf))
+        (make Request ^type ancestor ^target (accept))
+)
+
 (p FindAncestors
         (Request ^type ancestor ^target {<name> <> nil})
         (Person ^name <name> ^mother <mother-name> 
@@ -862,10 +872,11 @@ func TestParseIntegration2_4_3_bFile(t *testing.T) {
 		}
 	}
 
-	if rulesCount != 2 {
-		t.Errorf("expected 2 rules, got %d", rulesCount)
+	if rulesCount != 3 {
+		t.Errorf("expected 3 rules, got %d", rulesCount)
 	}
 	if makesCount != 6 {
 		t.Errorf("expected 6 makes, got %d", makesCount)
 	}
 }
+

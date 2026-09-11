@@ -246,26 +246,24 @@ func TestIntegration2_4_3_a(t *testing.T) {
 // TestIntegration2_4_3_b verifies Section 2.4.3 Part B integration test using specificity conflict resolution.
 func TestIntegration2_4_3_b(t *testing.T) {
 	var outBuf bytes.Buffer
-	repl := cli.NewREPL(strings.NewReader(""), &outBuf)
+	inBuf := strings.NewReader("Penelope\n")
+	repl := cli.NewREPL(inBuf, &outBuf)
 
 	err := repl.LoadFile(filepath.Join("integration", "2_4_3_b.ops5"))
 	if err != nil {
 		t.Fatalf("failed to load 2_4_3_b.ops5: %v", err)
 	}
 
-	// Assert Request to trigger ancestor search for Penelope
-	repl.Engine().Make("Request", map[string]model.Value{
-		"type":   model.NewSymbol("ancestor"),
-		"target": model.NewSymbol("Penelope"),
-	})
+	// Assert Start to trigger initialization
+	repl.Engine().Make("Start", nil)
 
 	cycles, err := repl.Engine().Run(30)
 	if err != nil {
 		t.Fatalf("run failed: %v", err)
 	}
 
-	if cycles != 16 {
-		t.Errorf("expected 16 cycles, got %d", cycles)
+	if cycles != 17 {
+		t.Errorf("expected 17 cycles, got %d", cycles)
 	}
 
 	out := outBuf.String()
