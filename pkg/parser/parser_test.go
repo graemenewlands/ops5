@@ -823,8 +823,49 @@ func TestParseIntegration2_4_3_aFile(t *testing.T) {
 	}
 }
 
+func TestParseIntegration2_4_3_bFile(t *testing.T) {
+	stmts, err := ParseProgram(`
+(p FindAncestors
+        (Request ^type ancestor ^target {<name> <> nil})
+        (Person ^name <name> ^mother <mother-name> 
+            ^father <father-name>)
+    -->
+        (make Request ^type ancestor ^target <mother-name>)
+        (make Request ^type ancestor ^target <father-name>)    
+)
 
+(p FindAncestors::Print
+        {(Request ^type ancestor ^target {<name> <> nil}) <request1>}
+    -->
+        (write (crlf) <name> is an ancestor)
+        (remove <request1>)
+)
 
+(Person ^name Penelope ^mother Jessica ^father Jeremy)
+(Person ^name Jessica mother Mary-Elizabeth ^father Homer)
+(Person ^name Jeremy ^mother Jenny ^father Steven)
+(Person ^name Steven ^mother Loree)
+(Person ^name Loree ^father Jason)
+(Person ^name Homer ^mother Stephanie)
+`)
+	if err != nil {
+		t.Fatalf("failed to parse 2_4_3_b.ops5: %v", err)
+	}
 
+	rulesCount := 0
+	makesCount := 0
+	for _, s := range stmts {
+		if s.Type == StmtRule {
+			rulesCount++
+		} else if s.Type == StmtMake {
+			makesCount++
+		}
+	}
 
-
+	if rulesCount != 2 {
+		t.Errorf("expected 2 rules, got %d", rulesCount)
+	}
+	if makesCount != 6 {
+		t.Errorf("expected 6 makes, got %d", makesCount)
+	}
+}

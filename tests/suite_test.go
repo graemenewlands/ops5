@@ -198,8 +198,13 @@ func TestAllFixtureTestCases(t *testing.T) {
 	}
 }
 
-// TestIntegration2_4_3 verifies Section 2.4.3 integration test from Brownston et al.
+// TestIntegration2_4_3 verifies Section 2.4.3 Part A integration test from Brownston et al.
 func TestIntegration2_4_3(t *testing.T) {
+	TestIntegration2_4_3_a(t)
+}
+
+// TestIntegration2_4_3_a verifies Section 2.4.3 Part A integration test from Brownston et al.
+func TestIntegration2_4_3_a(t *testing.T) {
 	var outBuf bytes.Buffer
 	inBuf := strings.NewReader("Penelope\n")
 	repl := cli.NewREPL(inBuf, &outBuf)
@@ -237,3 +242,50 @@ func TestIntegration2_4_3(t *testing.T) {
 		}
 	}
 }
+
+// TestIntegration2_4_3_b verifies Section 2.4.3 Part B integration test using specificity conflict resolution.
+func TestIntegration2_4_3_b(t *testing.T) {
+	var outBuf bytes.Buffer
+	repl := cli.NewREPL(strings.NewReader(""), &outBuf)
+
+	err := repl.LoadFile(filepath.Join("integration", "2_4_3_b.ops5"))
+	if err != nil {
+		t.Fatalf("failed to load 2_4_3_b.ops5: %v", err)
+	}
+
+	// Assert Request to trigger ancestor search for Penelope
+	repl.Engine().Make("Request", map[string]model.Value{
+		"type":   model.NewSymbol("ancestor"),
+		"target": model.NewSymbol("Penelope"),
+	})
+
+	cycles, err := repl.Engine().Run(30)
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+
+	if cycles != 16 {
+		t.Errorf("expected 16 cycles, got %d", cycles)
+	}
+
+	out := outBuf.String()
+	expectedAncestors := []string{
+		"Jason is an ancestor",
+		"Loree is an ancestor",
+		"Steven is an ancestor",
+		"Jenny is an ancestor",
+		"Jeremy is an ancestor",
+		"Stephanie is an ancestor",
+		"Homer is an ancestor",
+		"Mary-Elizabeth is an ancestor",
+		"Jessica is an ancestor",
+		"Penelope is an ancestor",
+	}
+
+	for _, exp := range expectedAncestors {
+		if !strings.Contains(out, exp) {
+			t.Errorf("expected output to contain %q, but got:\n%s", exp, out)
+		}
+	}
+}
+

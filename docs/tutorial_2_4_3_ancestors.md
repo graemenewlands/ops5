@@ -1,41 +1,34 @@
 # OPS5 Interactive Tutorial: Ancestors Search (Section 2.4.3)
 
-This tutorial provides a complete walkthrough for loading and running the integration test in [`tests/integration/2_4_3_a.ops5`](../tests/integration/2_4_3_a.ops5) using the interactive OPS5 REPL.
+This tutorial provides a complete walkthrough for loading, running, and debugging the Section 2.4.3 integration tests from *Programming Expert Systems in OPS5: An Introduction to Rule-Based Programming* (Brownston, Farrell, Kant, & Martin, Addison-Wesley, 1985):
 
-The program is adapted from Section 2.4.3 of *Programming Expert Systems in OPS5: An Introduction to Rule-Based Programming* (Brownston, Farrell, Kant, & Martin, Addison-Wesley, 1985).
+- [`tests/integration/2_4_3_a.ops5`](../tests/integration/2_4_3_a.ops5): Interactive input prompt with a single recursive rule.
+- [`tests/integration/2_4_3_b.ops5`](../tests/integration/2_4_3_b.ops5): Two-rule decomposition governed by specificity conflict resolution and refraction.
 
 ---
 
-## 1. Overview of the Program
+## 1. Overview and Architectural Comparison
 
-The program implements a recursive ancestor finder over a family tree:
+Section 2.4.3 demonstrates two distinct rule-based programming paradigms in OPS5 to solve the same problem—finding all ancestors of a person within a hierarchical family tree.
 
-1. **Family Database**: 6 `Person` elements are asserted at load time.
-2. **Initialization Rule (`FindAncestors::Initialize`)**:
-   - Matches a `(Start)` trigger element.
-   - Retracts `(Start)`.
-   - Prompts the user on the terminal for a person's name via `(accept)`.
-   - Asserts a `(Request ^type ancestor ^target <name>)` goal.
-3. **Recursive Rule (`PrintAncestors`)**:
-   - Matches a pending `Request` whose `^target` is not `nil`:
-     ```ops5
-     {(Request ^type ancestor ^target {<myparents> <> nil}) <request1>}
-     ```
-   - Matches the corresponding `Person` fact:
-     ```ops5
-     (Person ^name <myparents> ^mother <mother-name> ^father <father-name>)
-     ```
-   - Retracts the current `Request`.
-   - Prints the parents of `<myparents>`.
-   - Asserts recursive `Request` elements for both the mother and the father:
-     ```ops5
-     (make Request ^type ancestor ^target <mother-name>)
-     (make Request ^type ancestor ^target <father-name>)
-     ```
-4. **Base Case & Recursion Termination**:
-   - When a person has no recorded mother or father (such as `Steven` or `Loree`), the missing attribute defaults to `nil`.
-   - The recursive call generates `(Request ^type ancestor ^target nil)`.
-   - The attribute conjunction `{<myparents> <> nil}` filters out `nil` targets, terminating recursion naturally without requiring explicit base-case rules.
+| Aspect | Part A (`2_4_3_a.ops5`) | Part B (`2_4_3_b.ops5`) |
+| :--- | :--- | :--- |
+| **Rule Strategy** | Single recursive rule (`PrintAncestors`) + init rule | Two rules: Generator (`FindAncestors`) vs Reporter (`FindAncestors::Print`) |
+| **Conflict Resolution** | Sequential activation (1 match per cycle) | Specificity competition: Specificity 8 dominates Specificity 4 |
+| **Sequencing Control** | Immediate retraction of current request | Refraction prevents loops; reporter fires after generator refracts |
+| **User Input** | Interactive terminal prompt via `(accept)` | Direct goal assertion via `(make Request ...)` |
+| **Cycles to Quiescence**| 7 cycles | 16 cycles |
+| **Output Format** | Parent pairs: `<mother> and <father> are ancestors via <child>` | Individual ancestors: `<name> is an ancestor` |
+
+---
+
+## 2. Part A: Interactive Prompt & Single Recursive Rule (`2_4_3_a.ops5`)
+
+### Program Structure
+
+Part A uses two rules:
+1. **`FindAncestors::Initialize`**: Matches `(Start)`, prompts the user via `(accept)`, and creates the initial `Request`.
+2. **`PrintAncestors`**: Matches `(Request)` and `(Person)`, prints both parents, retracts the current request, and asserts two sub-requests for mother and father.
 
 ```mermaid
 flowchart TD
@@ -53,88 +46,25 @@ flowchart TD
     SubF --> Stop
 ```
 
----
+### Running Part A in the REPL
 
-## 2. Launching the REPL
-
-You can launch the REPL with the integration test preloaded using the `-i` flag:
+Launch the REPL with Part A:
 
 ```bash
 go run ./cmd/ops5 -i tests/integration/2_4_3_a.ops5
 ```
 
-Alternatively, launch the REPL empty and load the file manually with the `load` command:
-
-```bash
-go run ./cmd/ops5
-```
-```ops5
-ops5> load tests/integration/2_4_3_a.ops5
-Loaded tests/integration/2_4_3_a.ops5: added 2 rules, asserted 6 WMEs.
-```
-
----
-
-## 3. Inspecting Working Memory Before Execution
-
-Before running, inspect the preloaded family database:
-
-```ops5
-ops5> wm
-Working Memory (6 elements):
-  (1: Person ^father Jeremy ^mother Jessica ^name Penelope)
-  (2: Person ^father Homer ^mother Mary-Elizabeth ^name Jessica)
-  (3: Person ^father Steven ^mother Jenny ^name Jeremy)
-  (4: Person ^mother Loree ^name Steven)
-  (5: Person ^father Jason ^name Loree)
-  (6: Person ^mother Stephanie ^name Homer)
-```
-
-Check the conflict set:
-
-```ops5
-ops5> cs
-Conflict set is empty.
-```
-
-> [!NOTE]
-> The conflict set is empty because neither `FindAncestors::Initialize` nor `PrintAncestors` has all of its condition elements satisfied yet. `FindAncestors::Initialize` requires a `(Start)` element.
-
----
-
-## 4. Running the Full Interactive Workflow
-
-### Step 1: Assert `(Start)`
-Trigger the program by asserting the start token:
+Assert `(Start)` and run:
 
 ```ops5
 ops5> (make Start)
 Asserted: (7: Start)
-```
 
-Now verify the conflict set:
-
-```ops5
-ops5> cs
-Conflict Set (1 activations, strategy: LEX):
-* 1. FindAncestors::Initialize  WMEs: [7]  (specificity: 1)
-```
-
-### Step 2: Execute with `run`
-Start the match-select-act cycle:
-
-```ops5
 ops5> run
 Running (max cycles: 0)...
 
 Please type the first name of a person
 whose ancestors you would like to find:
-```
-
-### Step 3: Provide Terminal Input
-The inference engine is now waiting at `(accept)`. Type `Penelope` and press **Enter**:
-
-```ops5
 Penelope
 
 Jessica and Jeremy are ancestors via Penelope
@@ -146,88 +76,219 @@ Stephanie and nil are ancestors via Homer
 Reached quiescence after 7 cycles.
 ```
 
-The engine prints all ancestors up both branches of the family tree and terminates upon quiescence after 7 rule firings.
+---
+
+## 3. Part B: Two-Rule Specificity Decomposition (`2_4_3_b.ops5`)
+
+### Program Structure
+
+Part B contains no interactive input rule and decomposes ancestor finding into two competing rules:
+
+```ops5
+(p FindAncestors
+        (Request ^type ancestor ^target {<name> <> nil})
+        (Person ^name <name> ^mother <mother-name> 
+            ^father <father-name>)
+    -->
+        (make Request ^type ancestor ^target <mother-name>)
+        (make Request ^type ancestor ^target <father-name>)    
+)
+
+(p FindAncestors::Print
+        {(Request ^type ancestor ^target {<name> <> nil}) <request1>}
+    -->
+        (write (crlf) <name> is an ancestor)
+        (remove <request1>)
+)
+```
+
+### The Conflict Resolution & Refraction Mechanism
+
+Part B demonstrates OPS5's declarative conflict resolution without needing explicit stage or control flags:
+
+```mermaid
+flowchart TD
+    Req["Request for <name>"] --> Match{"Does <name> have parents in WM?"}
+    Match -- Yes --> Compete["Both FindAncestors and FindAncestors::Print match"]
+    Compete --> Spec["FindAncestors wins (Specificity 8 > Specificity 4)"]
+    Spec --> Gen["FindAncestors fires:\nAsserts mother & father Requests\n(Current Request is NOT removed)"]
+    Gen --> Refract["FindAncestors is REFRACTED for this instantiation"]
+    Refract --> PrintChild["FindAncestors::Print now fires:\nPrints '<name> is an ancestor'\nRemoves Request"]
+    Match -- No (Leaf) --> SoloPrint["FindAncestors cannot match (missing Person)"]
+    SoloPrint --> PrintLeaf["FindAncestors::Print fires immediately:\nPrints '<name> is an ancestor'\nRemoves Request"]
+```
+
+1. **Specificity Dominance**:
+   - `FindAncestors` tests **2 condition elements** (`Request` and `Person`), giving it a **specificity score of 8**.
+   - `FindAncestors::Print` tests only **1 condition element** (`Request`), giving it a **specificity score of 4**.
+   - When a new `Request` is asserted for a person with parents in working memory, both rules match. Under the LEX strategy (step 4, specificity), `FindAncestors` **always wins** over `FindAncestors::Print`.
+
+2. **Refraction Prevents Infinite Loops**:
+   - `FindAncestors` generates sub-requests for mother and father, but **does not retract** the current `Request`.
+   - Once fired, OPS5's **refraction** rule guarantees that the exact same instantiation `[FindAncestors with Request, Person]` will not fire again.
+
+3. **Delayed Goal Retraction**:
+   - Because `FindAncestors` is now refracted, the lower-specificity rule `FindAncestors::Print` is free to fire for that same `Request`.
+   - `FindAncestors::Print` prints `<name> is an ancestor` and **removes** the `Request`.
+
+4. **Base-Case / Leaf Nodes**:
+   - When recursion reaches an ancestor with no parent records (e.g. `Jason`, `Jenny`, or `Stephanie`), `FindAncestors` fails to match the `Person` pattern.
+   - `FindAncestors::Print` is the sole match in the conflict set; it immediately prints the ancestor and retracts the request.
+
+5. **Recency-Driven Traversal**:
+   - Because new `Request` elements receive higher timetags, recency directs the engine to expand and report leaf ancestors before returning to parent requests, yielding bottom-up reporting.
 
 ---
 
-## 5. Step-by-Step Cycle Debugging
+### Running Part B in the REPL
 
-To observe each rule firing individually, use the `step` command:
+Launch the REPL with Part B:
+
+```bash
+go run ./cmd/ops5 -i tests/integration/2_4_3_b.ops5
+```
+
+```ops5
+Loaded tests/integration/2_4_3_b.ops5: added 2 rules, asserted 6 WMEs.
+OPS5 Interactive Runtime (type 'help' for commands, 'exit' to quit)
+```
+
+#### Step 1: Assert the Goal
+Assert a `Request` for `Penelope`:
+
+```ops5
+ops5> (make Request ^type ancestor ^target Penelope)
+Asserted: (7: Request ^target Penelope ^type ancestor)
+```
+
+#### Step 2: Inspect the Initial Conflict Set
+Observe the specificity difference:
+
+```ops5
+ops5> cs
+Conflict Set (2 activations, strategy: LEX):
+* 1. FindAncestors        WMEs: [7 1]  (specificity: 8)
+  2. FindAncestors::Print  WMEs: [7]    (specificity: 4)
+```
+
+Notice `FindAncestors` is starred (`* 1.`) because its specificity of 8 beats `FindAncestors::Print`'s specificity of 4.
+
+#### Step 3: Run to Quiescence
+Execute all cycles:
+
+```ops5
+ops5> run
+Running (max cycles: 0)...
+
+Jason is an ancestor
+Loree is an ancestor
+Steven is an ancestor
+Jenny is an ancestor
+Jeremy is an ancestor
+Stephanie is an ancestor
+Homer is an ancestor
+Mary-Elizabeth is an ancestor
+Jessica is an ancestor
+Penelope is an ancestor
+Reached quiescence after 16 cycles.
+```
+
+All 10 members of Penelope's ancestral lineage are identified and printed across 16 rule firings.
+
+---
+
+### Step-by-Step Cycle Walkthrough for Part B
+
+To see the interaction between specificity, recency, and refraction cycle-by-cycle:
 
 ```ops5
 ops5> reset
 Working memory, conflict set, and genatom counter reset.
 
-ops5> load tests/integration/2_4_3_a.ops5
-Loaded tests/integration/2_4_3_a.ops5: added 2 rules, asserted 6 WMEs.
+ops5> load tests/integration/2_4_3_b.ops5
+Loaded tests/integration/2_4_3_b.ops5: added 2 rules, asserted 6 WMEs.
 
-ops5> (make Start)
-Asserted: (7: Start)
-
-ops5> step
-Please type the first name of a person
-whose ancestors you would like to find:
-Penelope
-Fired: FindAncestors::Initialize with WMEs [7] (Cycle 1)
-
-ops5> wm Request
-Working Memory (1 elements):
-  (8: Request ^target Penelope ^type ancestor)
-
-ops5> cs
-Conflict Set (1 activations, strategy: LEX):
-* 1. PrintAncestors  WMEs: [8 1]  (specificity: 6)
+ops5> (make Request ^type ancestor ^target Penelope)
+Asserted: (7: Request ^target Penelope ^type ancestor)
 
 ops5> step
-Jessica and Jeremy are ancestors via Penelope
-Fired: PrintAncestors with WMEs [8 1] (Cycle 2)
-
-ops5> wm Request
-Working Memory (2 elements):
-  (9: Request ^target Jessica ^type ancestor)
-  (10: Request ^target Jeremy ^type ancestor)
+Fired: FindAncestors with WMEs [7 1] (Cycle 1)
 
 ops5> cs
-Conflict Set (2 activations, strategy: LEX):
-* 1. PrintAncestors  WMEs: [10 3]  (specificity: 6)
-  2. PrintAncestors  WMEs: [9 2]  (specificity: 6)
+Conflict Set (5 activations, strategy: LEX):
+* 1. FindAncestors        WMEs: [9 3]  (specificity: 8)
+  2. FindAncestors::Print  WMEs: [9]    (specificity: 4)
+  3. FindAncestors        WMEs: [8 2]  (specificity: 8)
+  4. FindAncestors::Print  WMEs: [8]    (specificity: 4)
+  5. FindAncestors::Print  WMEs: [7]    (specificity: 4)
 ```
 
-You can continue stepping with `step` or let the remaining cycles run to completion with `run`.
+Key observations from the conflict set after Cycle 1:
+- WME 8 is `Request ^target Jessica` and WME 9 is `Request ^target Jeremy`.
+- `FindAncestors` with WMEs `[7 1]` is gone due to **refraction**.
+- Activation `[9 3]` (Jeremy's parents) is chosen because WME 9 is more recent than WME 8 or WME 7.
+- `FindAncestors::Print` for Penelope (`WME [7]`) remains in the conflict set, patiently waiting until higher-recency subgoals are processed.
 
 ---
 
-## 6. Tracing Execution
+## 4. Execution Tracing
 
-To see timetag and rule activation details during execution, turn on tracing:
+To inspect the full timetag firing trace, enable tracing before running:
 
 ```ops5
 ops5> trace on
 Tracing enabled
 
-ops5> (make Start)
-Asserted: (7: Start)
+ops5> (make Request ^type ancestor ^target Penelope)
+Asserted: (7: Request ^target Penelope ^type ancestor)
 
 ops5> run
 Running (max cycles: 0)...
-[TRACE] Cycle 1: Fired rule 'FindAncestors::Initialize' with WMEs [7]
-
-Please type the first name of a person
-whose ancestors you would like to find:
-Penelope
-[TRACE] Cycle 2: Fired rule 'PrintAncestors' with WMEs [8 1]
-
-Jessica and Jeremy are ancestors via Penelope
-[TRACE] Cycle 3: Fired rule 'PrintAncestors' with WMEs [10 3]
+[TRACE] Cycle 1: Fired rule 'FindAncestors' with WMEs [7 1]
+[TRACE] Cycle 2: Fired rule 'FindAncestors' with WMEs [9 3]
+[TRACE] Cycle 3: Fired rule 'FindAncestors' with WMEs [11 4]
+[TRACE] Cycle 4: Fired rule 'FindAncestors' with WMEs [13 5]
+[TRACE] Cycle 5: Fired rule 'FindAncestors::Print' with WMEs [14]
+Jason is an ancestor
+[TRACE] Cycle 6: Fired rule 'FindAncestors::Print' with WMEs [13]
+Loree is an ancestor
+[TRACE] Cycle 7: Fired rule 'FindAncestors::Print' with WMEs [11]
+Steven is an ancestor
 ...
+Reached quiescence after 16 cycles.
 ```
 
 ---
 
-## 7. Automated Non-Interactive Execution
+## 5. Automated Script & Pipeline Execution
 
-To run the integration test in scripts or CI pipelines without an interactive terminal:
+You can run both integration tests in non-interactive batch or pipeline environments:
 
+### Part A Non-Interactive Run
 ```bash
 printf "(make Start)\nrun\nPenelope\nrun\nexit\n" | go run ./cmd/ops5 -i tests/integration/2_4_3_a.ops5
+```
+
+### Part B Non-Interactive Run
+```bash
+printf "(make Request ^type ancestor ^target Penelope)\nrun\nexit\n" | go run ./cmd/ops5 -i tests/integration/2_4_3_b.ops5
+```
+
+---
+
+## 6. Automated Go Test Suite
+
+Both implementations are verified in the automated Go test suite:
+
+- [`tests/suite_test.go`](../tests/suite_test.go):
+  - `TestIntegration2_4_3_a`: Verifies Part A produces 7 cycles and correct ancestor pair strings.
+  - `TestIntegration2_4_3_b`: Verifies Part B executes 16 cycles and outputs all 10 individual ancestors.
+- [`pkg/parser/parser_test.go`](../pkg/parser/parser_test.go):
+  - `TestParseIntegration2_4_3_aFile`: Validates AST generation for Part A rules and initial facts.
+  - `TestParseIntegration2_4_3_bFile`: Validates AST generation for Part B rules and initial facts.
+
+Run the test suite with:
+
+```bash
+go test -v -race -count=1 ./...
 ```

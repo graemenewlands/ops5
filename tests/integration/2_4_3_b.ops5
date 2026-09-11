@@ -1,0 +1,22 @@
+(p FindAncestors
+        (Request ^type ancestor ^target {<name> <> nil})
+        (Person ^name <name> ^mother <mother-name> 
+            ^father <father-name>)
+    -->
+        (make Request ^type ancestor ^target <mother-name>)
+        (make Request ^type ancestor ^target <father-name>)    
+)
+
+(p FindAncestors::Print
+        {(Request ^type ancestor ^target {<name> <> nil}) <request1>}
+    -->
+        (write (crlf) <name> is an ancestor)
+        (remove <request1>)
+)
+
+(Person ^name Penelope ^mother Jessica ^father Jeremy)
+(Person ^name Jessica mother Mary-Elizabeth ^father Homer)
+(Person ^name Jeremy ^mother Jenny ^father Steven)
+(Person ^name Steven ^mother Loree)
+(Person ^name Loree ^father Jason)
+(Person ^name Homer ^mother Stephanie)
