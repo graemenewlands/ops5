@@ -122,11 +122,7 @@ func evalOp(val model.Value, op model.Operator, target model.Value) bool {
 func (ct *ConstantTestNode) Test(wme *model.WME) bool {
 	val, ok := wme.Get(ct.Attribute)
 	if !ok {
-		// If attribute is missing, it cannot satisfy equality or ordering tests with non-nil
-		if ct.Op == model.OpNotEqual {
-			return true
-		}
-		return false
+		val = model.NewSymbol("nil")
 	}
 
 	if val.IsVector() {

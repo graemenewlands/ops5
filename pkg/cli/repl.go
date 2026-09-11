@@ -27,10 +27,12 @@ type REPL struct {
 func NewREPL(in io.Reader, out io.Writer) *REPL {
 	eng := engine.New()
 	eng.SetOutputWriter(out)
+	bufIn := bufio.NewReader(in)
+	eng.SetInputReader(bufIn)
 	return &REPL{
 		engine: eng,
 		runner: harness.NewRunner(),
-		in:     bufio.NewReader(in),
+		in:     bufIn,
 		out:    out,
 	}
 }
@@ -298,6 +300,22 @@ func (r *REPL) handleCommand(input string) bool {
 		fmt.Fprintln(r.out, "Working memory, conflict set, and genatom counter reset.")
 
 	default:
+		if strings.HasPrefix(input, "(") {
+			p, err := parser.NewParser(input)
+			if err == nil {
+				for _, va := range r.engine.VectorAttributes() {
+					p.RegisterVectorAttribute(va)
+				}
+				for _, s := range r.engine.Schemas() {
+					p.RegisterSchema(s)
+				}
+				stmt, err := p.NextStatement()
+				if err == nil && stmt != nil && stmt.Type == parser.StmtMake {
+					r.handleMake(input)
+					return false
+				}
+			}
+		}
 		fmt.Fprintf(r.out, "Unknown command: %s (type 'help' for command list)\n", parts[0])
 	}
 
@@ -577,12 +595,17 @@ func (r *REPL) LoadFile(path string) error {
 
 		switch stmt.Type {
 		case parser.StmtRule:
+			for _, s := range p.Schemas() {
+				if _, ok := r.engine.GetSchema(s.Class); !ok {
+					r.engine.DeclareClass(s.Class, s.Attributes)
+				}
+			}
 			r.engine.AddRule(stmt.Rule)
 			rulesCount++
 		case parser.StmtMake:
-			if stmt.Schema != nil {
-				if _, ok := r.engine.GetSchema(stmt.Schema.Class); !ok {
-					r.engine.DeclareClass(stmt.Schema.Class, stmt.Schema.Attributes)
+			for _, s := range p.Schemas() {
+				if _, ok := r.engine.GetSchema(s.Class); !ok {
+					r.engine.DeclareClass(s.Class, s.Attributes)
 				}
 			}
 			r.engine.Make(stmt.MakeClass, stmt.MakeAttributes)

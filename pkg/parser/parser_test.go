@@ -667,6 +667,162 @@ func TestParseLitval(t *testing.T) {
 	}
 }
 
+func TestParseConditionElementConjunctions(t *testing.T) {
+	src := `
+	(p test-conjunctions
+		{(Start) <initialize>}
+		{(Request ^type ancestor ^target {<myparents> <> nil}) <req>}
+		(Counter {<c> > 0 < 100})
+		-->
+		(remove <initialize>)
+		(remove <req>)
+	)
+	`
+	p, err := NewParser(src)
+	if err != nil {
+		t.Fatalf("failed to create parser: %v", err)
+	}
+
+	rule, err := p.ParseRule()
+	if err != nil {
+		t.Fatalf("failed to parse rule: %v", err)
+	}
+
+	if len(rule.Conditions) != 3 {
+		t.Fatalf("expected 3 conditions, got %d", len(rule.Conditions))
+	}
+
+	// CE 1: {(Start) <initialize>}
+	ce1 := rule.Conditions[0]
+	if ce1.Class != "Start" || ce1.ElementVariable != "initialize" {
+		t.Errorf("expected Start with elemVar initialize, got %v", ce1)
+	}
+
+	// CE 2: {(Request ^type ancestor ^target {<myparents> <> nil}) <req>}
+	ce2 := rule.Conditions[1]
+	if ce2.Class != "Request" || ce2.ElementVariable != "req" {
+		t.Errorf("expected Request with elemVar req, got %v", ce2)
+	}
+	var targetTest *model.AttributeTest
+	for i := range ce2.Tests {
+		if ce2.Tests[i].Attribute == "target" {
+			targetTest = &ce2.Tests[i]
+			break
+		}
+	}
+	if targetTest == nil || len(targetTest.Constraints) != 2 {
+		t.Fatalf("expected 2 constraints on ^target, got %v", targetTest)
+	}
+	if !targetTest.Constraints[0].Value.IsVariable() || targetTest.Constraints[0].Value.VariableName() != "myparents" {
+		t.Errorf("expected first constraint on ^target to be <myparents>, got %v", targetTest.Constraints[0])
+	}
+	if targetTest.Constraints[1].Op != model.OpNotEqual || !targetTest.Constraints[1].Value.Equal(model.NewSymbol("nil")) {
+		t.Errorf("expected second constraint on ^target to be <> nil, got %v", targetTest.Constraints[1])
+	}
+
+	// CE 3: (Counter {<c> > 0 < 100}) positional conjunction
+	ce3 := rule.Conditions[2]
+	if ce3.Class != "Counter" {
+		t.Errorf("expected Counter, got %s", ce3.Class)
+	}
+	if len(ce3.Tests) != 1 || len(ce3.Tests[0].Constraints) != 3 {
+		t.Fatalf("expected 1 test with 3 constraints on Counter, got %v", ce3.Tests)
+	}
+}
+
+func TestParseBareMakeAndAttributeWithoutCaret(t *testing.T) {
+	src := `
+	(Person ^name Penelope ^mother Jessica ^father Jeremy)
+	(Person ^name Jessica mother Mary-Elizabeth ^father Homer)
+	`
+	stmts, err := ParseProgram(src)
+	if err != nil {
+		t.Fatalf("failed to parse program: %v", err)
+	}
+
+	if len(stmts) != 2 {
+		t.Fatalf("expected 2 statements, got %d", len(stmts))
+	}
+
+	// Stmt 1: (Person ^name Penelope ^mother Jessica ^father Jeremy)
+	s1 := stmts[0]
+	if s1.Type != StmtMake || s1.MakeClass != "Person" {
+		t.Fatalf("expected StmtMake Person, got %+v", s1)
+	}
+	if s1.MakeAttributes["name"].String() != "Penelope" ||
+		s1.MakeAttributes["mother"].String() != "Jessica" ||
+		s1.MakeAttributes["father"].String() != "Jeremy" {
+		t.Errorf("unexpected attrs in stmt 1: %v", s1.MakeAttributes)
+	}
+
+	// Stmt 2: (Person ^name Jessica mother Mary-Elizabeth ^father Homer)
+	// 'mother' has no caret, but should be recognized as an attribute because Person schema has it
+	s2 := stmts[1]
+	if s2.Type != StmtMake || s2.MakeClass != "Person" {
+		t.Fatalf("expected StmtMake Person, got %+v", s2)
+	}
+	if s2.MakeAttributes["name"].String() != "Jessica" ||
+		s2.MakeAttributes["mother"].String() != "Mary-Elizabeth" ||
+		s2.MakeAttributes["father"].String() != "Homer" {
+		t.Errorf("unexpected attrs in stmt 2: %v", s2.MakeAttributes)
+	}
+}
+
+func TestParseIntegration2_4_3File(t *testing.T) {
+	stmts, err := ParseProgram(`
+(p FindAncestors::Initialize
+        {(Start) <initialize>}
+    -->
+        (remove <initialize>)
+        (write (crlf) |Please type the first name of a person|
+            (crlf) |whose ancestors you would like to find:|
+            (crlf))
+        (make Request ^type ancestor ^target (accept))
+)
+
+(p PrintAncestors
+        {(Request ^type ancestor
+            ^target {<myparents> <> nil}) <request1>}
+        (Person ^name <myparents> ^mother <mother-name>
+            ^father <father-name>)
+    -->
+        (remove <request1>)
+        (write (crlf) <mother-name> and
+                      <father-name> are ancestors
+                        via <myparents>)
+        (make Request ^type ancestor ^target <mother-name>)
+        (make Request ^type ancestor ^target <father-name>)    
+)
+
+(Person ^name Penelope ^mother Jessica ^father Jeremy)
+(Person ^name Jessica mother Mary-Elizabeth ^father Homer)
+(Person ^name Jeremy ^mother Jenny ^father Steven)
+(Person ^name Steven ^mother Loree)
+(Person ^name Loree ^father Jason)
+(Person ^name Homer ^mother Stephanie)
+`)
+	if err != nil {
+		t.Fatalf("failed to parse 2_4_3.ops5: %v", err)
+	}
+
+	rulesCount := 0
+	makesCount := 0
+	for _, s := range stmts {
+		if s.Type == StmtRule {
+			rulesCount++
+		} else if s.Type == StmtMake {
+			makesCount++
+		}
+	}
+
+	if rulesCount != 2 {
+		t.Errorf("expected 2 rules, got %d", rulesCount)
+	}
+	if makesCount != 6 {
+		t.Errorf("expected 6 makes, got %d", makesCount)
+	}
+}
+
 
 
 

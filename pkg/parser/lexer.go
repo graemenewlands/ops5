@@ -13,6 +13,8 @@ const (
 	TokenEOF TokenType = iota
 	TokenLParen        // (
 	TokenRParen        // )
+	TokenLBrace        // {
+	TokenRBrace        // }
 	TokenArrow         // -->
 	TokenNegation      // -
 	TokenAttribute     // ^attr
@@ -31,6 +33,10 @@ func (t TokenType) String() string {
 		return "("
 	case TokenRParen:
 		return ")"
+	case TokenLBrace:
+		return "{"
+	case TokenRBrace:
+		return "}"
 	case TokenArrow:
 		return "-->"
 	case TokenNegation:
@@ -141,6 +147,14 @@ func (l *Lexer) NextToken() (Token, error) {
 		l.next()
 		return Token{Type: TokenRParen, Value: ")", Line: startLine, Col: startCol}, nil
 	}
+	if r == '{' {
+		l.next()
+		return Token{Type: TokenLBrace, Value: "{", Line: startLine, Col: startCol}, nil
+	}
+	if r == '}' {
+		l.next()
+		return Token{Type: TokenRBrace, Value: "}", Line: startLine, Col: startCol}, nil
+	}
 
 	// Arrow -->
 	if r == '-' && l.cursor+2 < len(l.src) && l.src[l.cursor+1] == '-' && l.src[l.cursor+2] == '>' {
@@ -156,7 +170,7 @@ func (l *Lexer) NextToken() (Token, error) {
 		var b strings.Builder
 		for {
 			c := l.peek()
-			if c == 0 || unicode.IsSpace(c) || c == '(' || c == ')' || c == '^' {
+			if c == 0 || unicode.IsSpace(c) || c == '(' || c == ')' || c == '{' || c == '}' || c == '^' {
 				break
 			}
 			b.WriteRune(l.next())
@@ -175,7 +189,7 @@ func (l *Lexer) NextToken() (Token, error) {
 			l.next()
 			return Token{Type: TokenOperator, Value: "<=", Line: startLine, Col: startCol}, nil
 		}
-		if unicode.IsSpace(l.peek()) || l.peek() == 0 || l.peek() == ')' {
+		if unicode.IsSpace(l.peek()) || l.peek() == 0 || l.peek() == ')' || l.peek() == '}' {
 			return Token{Type: TokenOperator, Value: "<", Line: startLine, Col: startCol}, nil
 		}
 
@@ -269,7 +283,7 @@ func (l *Lexer) NextToken() (Token, error) {
 	var b strings.Builder
 	for {
 		c := l.peek()
-		if c == 0 || unicode.IsSpace(c) || c == '(' || c == ')' || c == '^' || c == ';' {
+		if c == 0 || unicode.IsSpace(c) || c == '(' || c == ')' || c == '{' || c == '}' || c == '^' || c == ';' {
 			break
 		}
 		b.WriteRune(l.next())

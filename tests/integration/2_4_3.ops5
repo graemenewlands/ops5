@@ -1,0 +1,30 @@
+(p FindAncestors::Initialize
+        {(Start) <initialize>}
+    -->
+        (remove <initialize>)
+        (write (crlf) |Please type the first name of a person|
+            (crlf) |whose ancestors you would like to find:|
+            (crlf))
+        (make Request ^type ancestor ^target (accept))
+)
+
+(p PrintAncestors
+        {(Request ^type ancestor
+            ^target {<myparents> <> nil}) <request1>}
+        (Person ^name <myparents> ^mother <mother-name>
+            ^father <father-name>)
+    -->
+        (remove <request1>)
+        (write (crlf) <mother-name> and
+                      <father-name> are ancestors
+                        via <myparents>)
+        (make Request ^type ancestor ^target <mother-name>)
+        (make Request ^type ancestor ^target <father-name>)    
+)
+
+(Person ^name Penelope ^mother Jessica ^father Jeremy)
+(Person ^name Jessica mother Mary-Elizabeth ^father Homer)
+(Person ^name Jeremy ^mother Jenny ^father Steven)
+(Person ^name Steven ^mother Loree)
+(Person ^name Loree ^father Jason)
+(Person ^name Homer ^mother Stephanie)

@@ -1,10 +1,13 @@
 package tests
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"ops5/pkg/cli"
 	"ops5/pkg/engine"
 	"ops5/pkg/harness"
 	"ops5/pkg/model"
@@ -192,5 +195,45 @@ func TestAllFixtureTestCases(t *testing.T) {
 				t.Errorf("fixture test %s failed: %v", file, res.Error)
 			}
 		})
+	}
+}
+
+// TestIntegration2_4_3 verifies Section 2.4.3 integration test from Brownston et al.
+func TestIntegration2_4_3(t *testing.T) {
+	var outBuf bytes.Buffer
+	inBuf := strings.NewReader("Penelope\n")
+	repl := cli.NewREPL(inBuf, &outBuf)
+
+	err := repl.LoadFile(filepath.Join("integration", "2_4_3.ops5"))
+	if err != nil {
+		t.Fatalf("failed to load 2_4_3.ops5: %v", err)
+	}
+
+	// Assert Start to trigger initialization
+	repl.Engine().Make("Start", nil)
+
+	cycles, err := repl.Engine().Run(20)
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+
+	if cycles != 7 {
+		t.Errorf("expected 7 cycles, got %d", cycles)
+	}
+
+	out := outBuf.String()
+	expectedAncestors := []string{
+		"Jessica and Jeremy are ancestors via Penelope",
+		"Jenny and Steven are ancestors via Jeremy",
+		"Mary-Elizabeth and Homer are ancestors via Jessica",
+		"Stephanie and nil are ancestors via Homer",
+		"nil and Jason are ancestors via Loree",
+		"Loree and nil are ancestors via Steven",
+	}
+
+	for _, exp := range expectedAncestors {
+		if !strings.Contains(out, exp) {
+			t.Errorf("expected output to contain %q, but got:\n%s", exp, out)
+		}
 	}
 }

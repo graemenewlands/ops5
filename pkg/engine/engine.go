@@ -329,7 +329,11 @@ func (e *Engine) SetInputReader(r io.Reader) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.inputReader = r
-	e.stdinReader = bufio.NewReader(r)
+	if br, ok := r.(*bufio.Reader); ok {
+		e.stdinReader = br
+	} else {
+		e.stdinReader = bufio.NewReader(r)
+	}
 }
 
 // OpenFile opens a file and binds it to a logical name.

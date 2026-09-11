@@ -155,7 +155,7 @@ func matchesJoinTests(tests []JoinTest, token *Token, wme *model.WME) bool {
 		}
 		wmeVal, ok := wme.Get(jt.Attribute)
 		if !ok {
-			return false
+			wmeVal = model.NewSymbol("nil")
 		}
 		if !evalJoinTest(jt, boundVal, wmeVal) {
 			return false
@@ -203,6 +203,10 @@ func (jn *JoinNode) extractBindings(token *Token, wme *model.WME) (map[string]mo
 
 		for _, at := range jn.ce.Tests {
 			wmeVal, hasVal := wme.Get(at.Attribute)
+			if !hasVal {
+				wmeVal = model.NewSymbol("nil")
+				hasVal = true
+			}
 			isMulti := len(at.Constraints) > 1
 			for idx, c := range at.Constraints {
 				if c.Value.IsVariable() {
