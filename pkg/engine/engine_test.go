@@ -815,6 +815,149 @@ func TestEngineEnsureNewline(t *testing.T) {
 	}
 }
 
+func TestEngineExciseRule(t *testing.T) {
+	eng := New()
+	var outBuf bytes.Buffer
+	eng.SetOutputWriter(&outBuf)
+
+	r1 := model.NewRule("rule-1")
+	r1.AddCondition(model.NewPositiveCE("trigger"))
+	r1.AddAction(model.WriteAction{
+		Args: []model.WriteArg{model.WriteCRLF(), model.WriteValue(model.NewSymbol("RULE-1-FIRED"))},
+	})
+	eng.AddRule(r1)
+
+	r2 := model.NewRule("rule-2")
+	r2.AddCondition(model.NewPositiveCE("trigger"))
+	r2.AddAction(model.WriteAction{
+		Args: []model.WriteArg{model.WriteCRLF(), model.WriteValue(model.NewSymbol("RULE-2-FIRED"))},
+	})
+	eng.AddRule(r2)
+
+	if len(eng.Rules()) != 2 {
+		t.Fatalf("expected 2 rules, got %d", len(eng.Rules()))
+	}
+	if eng.Rule("rule-1") == nil || eng.Rule("rule-2") == nil {
+		t.Fatalf("expected rule-1 and rule-2 to be found")
+	}
+
+	eng.Make("trigger", nil)
+
+	if eng.ConflictSet().Count() != 2 {
+		t.Fatalf("expected 2 activations in CS, got %d", eng.ConflictSet().Count())
+	}
+
+	// Excise rule-1
+	if !eng.ExciseRule("rule-1") {
+		t.Fatalf("expected ExciseRule('rule-1') to return true")
+	}
+	if eng.ExciseRule("rule-1") {
+		t.Fatalf("expected second ExciseRule('rule-1') to return false")
+	}
+	if eng.Rule("rule-1") != nil {
+		t.Fatalf("expected rule-1 to be nil after excision")
+	}
+	if len(eng.Rules()) != 1 || eng.Rules()[0].Name != "rule-2" {
+		t.Fatalf("expected only rule-2 in engine rules, got %v", eng.Rules())
+	}
+
+	// Conflict set should only contain rule-2
+	if eng.ConflictSet().Count() != 1 {
+		t.Fatalf("expected 1 activation in CS after excision, got %d", eng.ConflictSet().Count())
+	}
+
+	cycles, err := eng.Run(10)
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	if cycles != 1 {
+		t.Fatalf("expected 1 cycle, got %d", cycles)
+	}
+
+	out := outBuf.String()
+	if strings.Contains(out, "RULE-1-FIRED") {
+		t.Errorf("excised rule-1 should not have fired, got output: %q", out)
+	}
+	if !strings.Contains(out, "RULE-2-FIRED") {
+		t.Errorf("expected rule-2 to fire, got output: %q", out)
+	}
+
+	// Working memory trigger element should still be present
+	triggers := eng.WorkingMemory().FindByClass("trigger")
+	if len(triggers) != 1 {
+		t.Errorf("expected working memory to be preserved, got %d triggers", len(triggers))
+	}
+}
+
+func TestEngineExciseMultipleAndRedefine(t *testing.T) {
+	eng := New()
+	var outBuf bytes.Buffer
+	eng.SetOutputWriter(&outBuf)
+
+	rA := model.NewRule("rule-a")
+	rA.AddCondition(model.NewPositiveCE("task").AddEqualTest("status", model.NewSymbol("ready")))
+	rA.AddAction(model.WriteAction{
+		Args: []model.WriteArg{model.WriteCRLF(), model.WriteValue(model.NewSymbol("A"))},
+	})
+	eng.AddRule(rA)
+
+	rB := model.NewRule("rule-b")
+	rB.AddCondition(model.NewPositiveCE("task").AddEqualTest("status", model.NewSymbol("ready")))
+	rB.AddAction(model.WriteAction{
+		Args: []model.WriteArg{model.WriteCRLF(), model.WriteValue(model.NewSymbol("B"))},
+	})
+	eng.AddRule(rB)
+
+	rC := model.NewRule("rule-c")
+	rC.AddCondition(model.NewPositiveCE("task").AddEqualTest("status", model.NewSymbol("ready")))
+	rC.AddAction(model.WriteAction{
+		Args: []model.WriteArg{model.WriteCRLF(), model.WriteValue(model.NewSymbol("C"))},
+	})
+	eng.AddRule(rC)
+
+	// Excise rule-a and rule-c, plus a non-existent rule
+	excised := eng.ExciseRules("rule-a", "rule-c", "unknown-rule")
+	if len(excised) != 2 || excised[0] != "rule-a" || excised[1] != "rule-c" {
+		t.Fatalf("unexpected excised rules: %v", excised)
+	}
+
+	eng.Make("task", map[string]model.Value{
+		"status": model.NewSymbol("ready"),
+	})
+
+	cycles, err := eng.Run(10)
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	if cycles != 1 {
+		t.Fatalf("expected 1 cycle for rule-b, got %d", cycles)
+	}
+
+	// Re-add rule-a (redefinition) and verify it compiles and can fire on new WME
+	newRA := model.NewRule("rule-a")
+	newRA.AddCondition(model.NewPositiveCE("task").AddEqualTest("status", model.NewSymbol("reloaded")))
+	newRA.AddAction(model.WriteAction{
+		Args: []model.WriteArg{model.WriteCRLF(), model.WriteValue(model.NewSymbol("RELOADED-A"))},
+	})
+	eng.AddRule(newRA)
+
+	eng.Make("task", map[string]model.Value{
+		"status": model.NewSymbol("reloaded"),
+	})
+
+	cycles2, err := eng.Run(10)
+	if err != nil {
+		t.Fatalf("run 2 failed: %v", err)
+	}
+	if cycles2 != 1 {
+		t.Fatalf("expected 1 cycle for reloaded rule-a, got %d", cycles2)
+	}
+	if !strings.Contains(outBuf.String(), "RELOADED-A") {
+		t.Errorf("expected reloaded rule-a to fire, got: %q", outBuf.String())
+	}
+}
+
+
 
 
 

@@ -204,3 +204,46 @@ func TestRetroactiveRuleAdditionWithExistingWMEs(t *testing.T) {
 	}
 }
 
+func TestNetworkRemoveRule(t *testing.T) {
+	net := NewNetwork()
+	mem := wm.New()
+	mem.AddListener(net)
+
+	listener := &recordListener{}
+
+	rule := model.NewRule("rule-to-remove")
+	ce := model.NewPositiveCE("goal").AddEqualTest("status", model.NewSymbol("active"))
+	rule.AddCondition(ce)
+	net.AddRule(rule, listener)
+
+	if !net.HasRule("rule-to-remove") {
+		t.Fatalf("expected network to have rule-to-remove")
+	}
+
+	mem.Make("goal", map[string]model.Value{
+		"status": model.NewSymbol("active"),
+	})
+
+	if len(listener.adds) != 1 {
+		t.Fatalf("expected 1 activation before removal, got %d", len(listener.adds))
+	}
+
+	if !net.RemoveRule("rule-to-remove") {
+		t.Fatalf("expected RemoveRule to return true")
+	}
+	if net.HasRule("rule-to-remove") {
+		t.Fatalf("expected network to not have rule-to-remove after removal")
+	}
+	if net.RemoveRule("rule-to-remove") {
+		t.Fatalf("expected second RemoveRule to return false")
+	}
+
+	// Assert another matching WME - should NOT trigger any new activations
+	mem.Make("goal", map[string]model.Value{
+		"status": model.NewSymbol("active"),
+	})
+	if len(listener.adds) != 1 {
+		t.Fatalf("expected still 1 activation after rule removed, got %d", len(listener.adds))
+	}
+}
+

@@ -11,6 +11,7 @@ import (
 	"ops5/pkg/engine"
 	"ops5/pkg/harness"
 	"ops5/pkg/model"
+	"ops5/pkg/parser"
 )
 
 // TestCoreAlphaBetaNetwork verifies alpha filtering and beta join mechanics
@@ -558,5 +559,124 @@ func TestIntegration2_5_2(t *testing.T) {
 	})
 }
 
+// TestExciseRuleIntegration verifies that excising rules via source file directives
+// and programmatic engine calls evicts them from the Rete network, conflict set, and production memory.
+func TestExciseRuleIntegration(t *testing.T) {
+	t.Run("source_directive_excise", func(t *testing.T) {
+		opsSrc := `
+		(p rule-normal
+			(job ^type normal)
+			-->
+			(write (crlf) "NORMAL JOB PROCESSED")
+		)
 
+		(p rule-priority
+			(job ^type normal ^priority high)
+			-->
+			(write (crlf) "PRIORITY JOB PROCESSED")
+		)
 
+		; Excise rule-priority so only rule-normal can fire
+		(excise rule-priority)
+
+		(make job ^type normal ^priority high)
+		`
+
+		var outBuf bytes.Buffer
+		repl := cli.NewREPL(strings.NewReader(""), &outBuf)
+		
+		// Parse statements and execute
+		p, err := parser.NewParser(opsSrc)
+		if err != nil {
+			t.Fatalf("failed to parse ops5 source: %v", err)
+		}
+
+		for {
+			stmt, err := p.NextStatement()
+			if err != nil {
+				t.Fatalf("parse error: %v", err)
+			}
+			if stmt == nil {
+				break
+			}
+			switch stmt.Type {
+			case parser.StmtRule:
+				repl.Engine().AddRule(stmt.Rule)
+			case parser.StmtMake:
+				repl.Engine().Make(stmt.MakeClass, stmt.MakeAttributes)
+			case parser.StmtExcise:
+				repl.Engine().ExciseRules(stmt.ExciseRules...)
+			}
+		}
+
+		if repl.Engine().Rule("rule-priority") != nil {
+			t.Fatalf("expected rule-priority to be excised")
+		}
+		if repl.Engine().Rule("rule-normal") == nil {
+			t.Fatalf("expected rule-normal to remain in production memory")
+		}
+
+		cycles, err := repl.Engine().Run(10)
+		if err != nil {
+			t.Fatalf("engine run error: %v", err)
+		}
+		if cycles != 1 {
+			t.Fatalf("expected 1 cycle, got %d", cycles)
+		}
+
+		out := outBuf.String()
+		if strings.Contains(out, "PRIORITY JOB PROCESSED") {
+			t.Errorf("excised rule-priority should not have fired, got:\n%s", out)
+		}
+		if !strings.Contains(out, "NORMAL JOB PROCESSED") {
+			t.Errorf("expected rule-normal to fire, got:\n%s", out)
+		}
+
+		// Verify working memory was preserved
+		jobs := repl.Engine().WorkingMemory().FindByClass("job")
+		if len(jobs) != 1 {
+			t.Errorf("expected 1 job WME in WM, got %d", len(jobs))
+		}
+	})
+
+	t.Run("repl_interactive_excise", func(t *testing.T) {
+		replInput := `
+		(p first-rule
+			(data ^num 42)
+			-->
+			(write (crlf) "FIRST FIRED")
+		)
+		(p second-rule
+			(data ^num 42)
+			-->
+			(write (crlf) "SECOND FIRED")
+		)
+		make data ^num 42
+		cs
+		excise first-rule
+		cs
+		run
+		exit
+		`
+		var outBuf bytes.Buffer
+		repl := cli.NewREPL(strings.NewReader(replInput), &outBuf)
+		repl.Start()
+
+		out := outBuf.String()
+		if !strings.Contains(out, "Conflict Set (2 activations") {
+			t.Errorf("expected 2 activations initially, got:\n%s", out)
+		}
+		if !strings.Contains(out, "Excised rule 'first-rule'") {
+			t.Errorf("expected excise confirmation, got:\n%s", out)
+		}
+		if !strings.Contains(out, "Conflict Set (1 activations") {
+			t.Errorf("expected 1 activation after excise, got:\n%s", out)
+		}
+		if strings.Contains(out, "FIRST FIRED") {
+			t.Errorf("excised rule should not fire, got:\n%s", out)
+		}
+		if !strings.Contains(out, "SECOND FIRED") {
+			t.Errorf("un-excised rule should fire, got:\n%s", out)
+		}
+	})
+}

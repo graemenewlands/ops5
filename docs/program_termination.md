@@ -221,7 +221,9 @@ Conflict Set: 0 activations => Step() returns (false, nil) => Quiescence
    {(Start) <initialize>} --> (remove <initialize>)
    ```
    Retracting `(Start)` removes all dependent instantiations from the Rete network's alpha/beta memories, emptying the conflict set.
-3. **Goal Fulfillment**:
+3. **Rule Excision (`excise`)**:
+   Rules can be dynamically evicted by name using `(excise <rule-name>...)` or interactive `excise <rule-name>`. Excising a rule unhooks it from the Rete network and purges all its un-fired activations from the conflict set. See [`excise` Reference](excise.md).
+4. **Goal Fulfillment**:
    Sub-goal WMEs are processed and removed once solved. When all sub-goals are exhausted, no rules match.
 
 ### Diagnostic Significance

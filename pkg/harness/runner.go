@@ -181,6 +181,10 @@ func (r *Runner) Run(tc *TestCase) *Result {
 						Error:        err,
 					}
 				}
+			case parser.StmtExcise:
+				for _, name := range stmt.ExciseRules {
+					eng.ExciseRule(name)
+				}
 			}
 		}
 	}

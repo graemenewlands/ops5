@@ -117,15 +117,89 @@ func (e *Engine) ConflictSet() *conflict.Set {
 }
 
 // AddRule registers a rule with the engine and compiles it into the Rete network.
+// If a rule with the same name already exists, the previous definition is excised first.
 func (e *Engine) AddRule(rule *model.Rule) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+
+	// If rule already exists, replace previous definition
+	for i, r := range e.rules {
+		if r.Name == rule.Name {
+			e.network.RemoveRule(rule.Name)
+			e.conflictSet.RemoveRule(rule.Name)
+			e.rules = append(e.rules[:i], e.rules[i+1:]...)
+			break
+		}
+	}
 
 	e.ruleCount++
 	rule.Index = e.ruleCount
 	e.rules = append(e.rules, rule)
 	existingWMEs := e.wm.All()
 	e.network.AddRuleWithWMEs(rule, e.conflictSet, existingWMEs)
+}
+
+// ExciseRule evicts a production rule by name from production memory,
+// detaches it from the Rete network, and purges any pending activations from the conflict set.
+// Returns true if the rule was found and excised, false otherwise.
+func (e *Engine) ExciseRule(ruleName string) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	found := false
+	var newRules []*model.Rule
+	for _, r := range e.rules {
+		if r.Name == ruleName {
+			found = true
+		} else {
+			newRules = append(newRules, r)
+		}
+	}
+	if !found {
+		return false
+	}
+	e.rules = newRules
+
+	// Detach terminal node from Rete network
+	e.network.RemoveRule(ruleName)
+
+	// Purge pending activations from conflict set
+	e.conflictSet.RemoveRule(ruleName)
+
+	return true
+}
+
+// ExciseRules evicts multiple production rules by name.
+// Returns the list of successfully excised rule names.
+func (e *Engine) ExciseRules(names ...string) []string {
+	var excised []string
+	for _, name := range names {
+		if e.ExciseRule(name) {
+			excised = append(excised, name)
+		}
+	}
+	return excised
+}
+
+// Rules returns a slice of all registered production rules in definition order.
+func (e *Engine) Rules() []*model.Rule {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	res := make([]*model.Rule, len(e.rules))
+	copy(res, e.rules)
+	return res
+}
+
+// Rule returns the registered production rule with the given name, or nil if not found.
+func (e *Engine) Rule(name string) *model.Rule {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for _, r := range e.rules {
+		if r.Name == name {
+			return r
+		}
+	}
+	return nil
 }
 
 // DeclareVectorAttribute registers an attribute name as a vector-attribute.

@@ -849,6 +849,7 @@ const (
 	StmtOpenFile
 	StmtCloseFile
 	StmtDefault
+	StmtExcise
 )
 
 func (st StatementType) String() string {
@@ -867,6 +868,8 @@ func (st StatementType) String() string {
 		return "closefile"
 	case StmtDefault:
 		return "default"
+	case StmtExcise:
+		return "excise"
 	default:
 		return "unknown"
 	}
@@ -885,6 +888,7 @@ type Statement struct {
 	OpenFile        *model.OpenFileAction
 	CloseFile       *model.CloseFileAction
 	Default         *model.DefaultAction
+	ExciseRules     []string
 }
 
 func (p *Parser) parseMakeBody(classTok Token) (string, map[string]model.Value, error) {
@@ -1165,7 +1169,33 @@ func (p *Parser) parseDefaultBody(line int) (*model.DefaultAction, error) {
 	}, nil
 }
 
-// NextStatement parses the next top-level statement (Rule, Make, Literalize, VectorAttribute, OpenFile, CloseFile, or Default).
+// ParseExcise parses a standalone (excise rule-name-1 rule-name-2 ...) statement.
+func (p *Parser) ParseExcise() ([]string, error) {
+	if _, err := p.expect(TokenLParen); err != nil {
+		return nil, err
+	}
+	verbTok, err := p.expect(TokenSymbol)
+	if err != nil || strings.ToLower(verbTok.Value) != "excise" {
+		return nil, fmt.Errorf("expected 'excise', got %v", verbTok.Value)
+	}
+	var names []string
+	for p.current.Type != TokenRParen && p.current.Type != TokenEOF {
+		tok, err := p.expect(TokenSymbol)
+		if err != nil {
+			return nil, fmt.Errorf("expected rule name in excise statement: %w", err)
+		}
+		names = append(names, tok.Value)
+	}
+	if len(names) == 0 {
+		return nil, fmt.Errorf("expected at least one rule name in excise statement")
+	}
+	if _, err := p.expect(TokenRParen); err != nil {
+		return nil, fmt.Errorf("expected ')' closing excise statement: %w", err)
+	}
+	return names, nil
+}
+
+// NextStatement parses the next top-level statement (Rule, Make, Literalize, VectorAttribute, OpenFile, CloseFile, Default, or Excise).
 // Returns (nil, nil) when TokenEOF is reached.
 func (p *Parser) NextStatement() (*Statement, error) {
 	if p.current.Type == TokenEOF {
@@ -1244,6 +1274,16 @@ func (p *Parser) NextStatement() (*Statement, error) {
 		return &Statement{
 			Type:    StmtDefault,
 			Default: act,
+		}, nil
+
+	case "excise":
+		rules, err := p.ParseExcise()
+		if err != nil {
+			return nil, err
+		}
+		return &Statement{
+			Type:        StmtExcise,
+			ExciseRules: rules,
 		}, nil
 
 	default:

@@ -17,6 +17,7 @@ These keywords appear at the root level of `.ops` source files or directly withi
 | **`openfile`** | `(openfile <log-name> <filespec> <mode>)` | Opens a file stream for reading, writing, or appending. See [`file_io` Reference](file_io.md). | `(openfile ruletrace \|RuleTrace.ops\| out)` |
 | **`closefile`** | `(closefile <log-name>)` | Closes an open file stream. See [`file_io` Reference](file_io.md). | `(closefile ruletrace)` |
 | **`default`** | `(default <log-name> <subsystem>)` | Redirects default stream for `accept`, `write`, or `trace`. See [`file_io` Reference](file_io.md). | `(default ruletrace accept)` |
+| **`excise`** | `(excise <rule1> ... <ruleN>)` | Evicts production rules from production memory, detaches their terminal nodes from the Rete network, and purges all pending activations and refraction history from the conflict set. Existing WMEs are preserved. See [`excise` Reference](excise.md). | `(excise detect-item cleanup-task)` |
 
 ---
 
@@ -93,6 +94,7 @@ The interactive CLI shell (`ops5`) supports both bare words and paren-enclosed c
 | **`strategy`** | `[lex\|mea]` | Displays or sets conflict resolution strategy (`LEX` or `MEA`). See [Selection Strategy Reference](conflict_resolution.md). |
 | **`trace`** | `on\|off` | Toggles rule firing execution traces. |
 | **`load`** | `<file.ops>` | Loads and parses an external OPS5 source file. |
+| **`excise`** | `<rule1> [rule2 ...]` | Evicts production rule(s) by name from production memory, detaches terminal nodes from Rete network, and purges pending activations from the conflict set. See [`excise` Reference](excise.md). |
 | **`test`** | `<file.json>` | Executes a JSON test harness case. |
 | **`reset`** | _none_ | Clears working memory, network state, and conflict set. |
 | **`help`** | _none_ | Displays interactive REPL help. |

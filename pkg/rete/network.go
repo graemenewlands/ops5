@@ -7,12 +7,20 @@ import (
 	"ops5/pkg/model"
 )
 
+type terminalInfo struct {
+	terminal *TerminalNode
+	parent   interface {
+		RemoveSuccessor(node LeftActivatable)
+	}
+}
+
 // Network coordinates the Alpha and Beta networks and compiles rules into Rete nodes.
 type Network struct {
 	mu           sync.RWMutex
 	alphaRoot    *AlphaRootNode
 	rootBetaMem  *BetaMemory
 	alphaMemPool map[string]*AlphaMemory
+	terminals    map[string]terminalInfo
 }
 
 // NewNetwork creates an initialized Rete network.
@@ -21,6 +29,7 @@ func NewNetwork() *Network {
 		alphaRoot:    NewAlphaRootNode(),
 		rootBetaMem:  NewBetaMemory(),
 		alphaMemPool: make(map[string]*AlphaMemory),
+		terminals:    make(map[string]terminalInfo),
 	}
 	// Seed the root BetaMemory with the dummy token
 	net.rootBetaMem.LeftActivation(DummyRootToken(), TagAdd)
@@ -140,6 +149,15 @@ func (net *Network) AddRuleWithWMEs(rule *model.Rule, listener ConflictSetListen
 		return
 	}
 
+	// If rule already exists in Rete network, remove previous terminal
+	if prev, exists := net.terminals[rule.Name]; exists {
+		prev.terminal.Deactivate()
+		if prev.parent != nil {
+			prev.parent.RemoveSuccessor(prev.terminal)
+		}
+		delete(net.terminals, rule.Name)
+	}
+
 	boundVariables := make(map[string]bool)
 	currBetaMem := net.rootBetaMem
 
@@ -171,23 +189,37 @@ func (net *Network) AddRuleWithWMEs(rule *model.Rule, listener ConflictSetListen
 		}
 
 		var nextBetaNode LeftActivatable
+		var terminal *TerminalNode
 
 		if isLast {
-			terminal := NewTerminalNode(rule, listener)
+			terminal = NewTerminalNode(rule, listener)
 			nextBetaNode = terminal
 		} else {
 			nextBetaMem := NewBetaMemory()
 			nextBetaNode = nextBetaMem
 		}
 
+		var parentNode interface {
+			RemoveSuccessor(node LeftActivatable)
+		}
+
 		if ce.IsNegative {
 			negNode := NewNegativeJoinNode(currBetaMem, alphaMem, ce, joinTests)
 			negNode.AddSuccessor(nextBetaNode)
 			negNode.Attach()
+			parentNode = negNode
 		} else {
 			joinNode := NewJoinNode(currBetaMem, alphaMem, ce, joinTests)
 			joinNode.AddSuccessor(nextBetaNode)
 			joinNode.Attach()
+			parentNode = joinNode
+		}
+
+		if isLast {
+			net.terminals[rule.Name] = terminalInfo{
+				terminal: terminal,
+				parent:   parentNode,
+			}
 		}
 
 		// Update bound variables for subsequent condition elements
@@ -199,4 +231,31 @@ func (net *Network) AddRuleWithWMEs(rule *model.Rule, listener ConflictSetListen
 			currBetaMem = nextBetaNode.(*BetaMemory)
 		}
 	}
+}
+
+// RemoveRule detaches and deactivates the terminal node for the specified rule.
+// Returns true if the rule was registered in the network and removed, false otherwise.
+func (net *Network) RemoveRule(ruleName string) bool {
+	net.mu.Lock()
+	defer net.mu.Unlock()
+
+	info, ok := net.terminals[ruleName]
+	if !ok {
+		return false
+	}
+
+	info.terminal.Deactivate()
+	if info.parent != nil {
+		info.parent.RemoveSuccessor(info.terminal)
+	}
+	delete(net.terminals, ruleName)
+	return true
+}
+
+// HasRule returns true if a rule with the specified name is compiled into the Rete network.
+func (net *Network) HasRule(ruleName string) bool {
+	net.mu.RLock()
+	defer net.mu.RUnlock()
+	_, exists := net.terminals[ruleName]
+	return exists
 }

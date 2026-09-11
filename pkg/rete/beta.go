@@ -124,6 +124,19 @@ func (jn *JoinNode) AddSuccessor(node LeftActivatable) {
 	jn.successors = append(jn.successors, node)
 }
 
+// RemoveSuccessor unregisters a downstream beta node.
+func (jn *JoinNode) RemoveSuccessor(node LeftActivatable) {
+	jn.mu.Lock()
+	defer jn.mu.Unlock()
+	var newSuccs []LeftActivatable
+	for _, s := range jn.successors {
+		if s != node {
+			newSuccs = append(newSuccs, s)
+		}
+	}
+	jn.successors = newSuccs
+}
+
 func evalJoinTest(jt JoinTest, boundVal model.Value, wmeVal model.Value) bool {
 	if wmeVal.IsVector() {
 		elems := wmeVal.VectorElements()
@@ -344,6 +357,19 @@ func (njn *NegativeJoinNode) AddSuccessor(node LeftActivatable) {
 	njn.successors = append(njn.successors, node)
 }
 
+// RemoveSuccessor unregisters a downstream beta node.
+func (njn *NegativeJoinNode) RemoveSuccessor(node LeftActivatable) {
+	njn.mu.Lock()
+	defer njn.mu.Unlock()
+	var newSuccs []LeftActivatable
+	for _, s := range njn.successors {
+		if s != node {
+			newSuccs = append(newSuccs, s)
+		}
+	}
+	njn.successors = newSuccs
+}
+
 func (njn *NegativeJoinNode) match(token *Token, wme *model.WME) bool {
 	return matchesJoinTests(njn.joinTests, token, wme)
 }
@@ -438,6 +464,7 @@ func (njn *NegativeJoinNode) RightActivation(wme *model.WME, tag PropagationTag)
 type TerminalNode struct {
 	rule     *model.Rule
 	listener ConflictSetListener
+	active   bool
 }
 
 // NewTerminalNode creates a new TerminalNode for a rule.
@@ -445,12 +472,18 @@ func NewTerminalNode(rule *model.Rule, listener ConflictSetListener) *TerminalNo
 	return &TerminalNode{
 		rule:     rule,
 		listener: listener,
+		active:   true,
 	}
+}
+
+// Deactivate disables this terminal node so no further activations are propagated.
+func (tn *TerminalNode) Deactivate() {
+	tn.active = false
 }
 
 // LeftActivation handles a fully matched token arriving at the terminal node.
 func (tn *TerminalNode) LeftActivation(token *Token, tag PropagationTag) {
-	if tn.listener == nil {
+	if !tn.active || tn.listener == nil {
 		return
 	}
 	if tag == TagAdd {

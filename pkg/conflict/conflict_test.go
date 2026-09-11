@@ -110,3 +110,32 @@ func TestConflictSetRefraction(t *testing.T) {
 		t.Fatalf("expected refracted activation not to be added back to conflict set")
 	}
 }
+
+func TestConflictSetRemoveRule(t *testing.T) {
+	cs := NewSet()
+	ruleA := model.NewRule("ruleA")
+	ruleB := model.NewRule("ruleB")
+	tok1 := makeDummyToken([]int64{10})
+	tok2 := makeDummyToken([]int64{20})
+
+	cs.OnActivationAdd(ruleA, tok1)
+	cs.OnActivationAdd(ruleA, tok2)
+	cs.OnActivationAdd(ruleB, tok1)
+
+	if cs.Count() != 3 {
+		t.Fatalf("expected 3 activations, got %d", cs.Count())
+	}
+
+	removed := cs.RemoveRule("ruleA")
+	if removed != 2 {
+		t.Errorf("expected 2 activations removed for ruleA, got %d", removed)
+	}
+	if cs.Count() != 1 {
+		t.Errorf("expected 1 activation remaining (ruleB), got %d", cs.Count())
+	}
+
+	dom, ok := cs.SelectDominant()
+	if !ok || dom.Rule.Name != "ruleB" {
+		t.Errorf("expected dominant to be ruleB, got %v", dom)
+	}
+}

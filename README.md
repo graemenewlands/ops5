@@ -642,6 +642,7 @@ Defined rule 'classify-alert' (conditions=1, specificity=3)
 | `strategy` | `[lex \| mea]` | View or switch conflict resolution strategy | `strategy mea` |
 | `trace` | `on \| off` | Toggle cycle execution tracing | `trace on` |
 | `load` | `<file.ops>` | Load and compile rules and makes from an external file | `load rules.ops` |
+| `excise` / `(excise ...)` | `<rule-name...>` | Evict rule(s) from production memory and detach from Rete | `excise rule-1 rule-2` |
 | `test` | `<file.json>` | Execute an external JSON test suite case | `test fixture.json` |
 | `reset` | *none* | Clear working memory and conflict set | `reset` |
 | `help` | *none* | Display interactive help menu | `help` |
@@ -652,6 +653,7 @@ Defined rule 'classify-alert' (conditions=1, specificity=3)
 > - **[Ancestors Search REPL Tutorial (Section 2.4.3)](docs/tutorial_2_4_3_ancestors.md)**
 > - **[Working Memory Initialization & Parameterized Test Harness (Section 2.5)](docs/tutorial_2_5_testing.md)**
 > - **[Program Termination & Halting Reference](docs/program_termination.md)**
+> - **[Rule Excision Reference](docs/excise.md)**
 
 ### Execution Tracing
 

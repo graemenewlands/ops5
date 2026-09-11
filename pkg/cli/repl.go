@@ -162,6 +162,12 @@ func (r *REPL) handleCommand(input string) bool {
 		return false
 	}
 
+	// 9. S-expression excise: (excise ...)
+	if strings.HasPrefix(strings.ToLower(input), "(excise ") || strings.ToLower(strings.TrimSpace(input)) == "(excise)" {
+		r.handleExcise(input)
+		return false
+	}
+
 	// Strip outer parentheses for command convenience if present: e.g. (wm) -> wm
 	cmd := input
 	if strings.HasPrefix(cmd, "(") && strings.HasSuffix(cmd, ")") && !strings.Contains(cmd, "^") {
@@ -247,6 +253,9 @@ func (r *REPL) handleCommand(input string) bool {
 		} else {
 			fmt.Fprintf(r.out, "Removed: %s\n", removed.String())
 		}
+
+	case "excise":
+		r.handleExcise(input)
 
 	case "strategy":
 		if len(parts) == 1 {
@@ -641,6 +650,10 @@ func (r *REPL) LoadFile(path string) error {
 			if err := r.engine.SetDefault(stmt.Default.LogicalName, stmt.Default.Subsystem); err != nil {
 				return err
 			}
+		case parser.StmtExcise:
+			for _, name := range stmt.ExciseRules {
+				r.engine.ExciseRule(name)
+			}
 		}
 	}
 
@@ -695,6 +708,7 @@ Commands:
   make <cls> [^a v]         Assert a new Working Memory Element (e.g. make goal ^status active)
   modify <tag> [^a v]       Modify attributes of an existing WME by timetag
   remove <tag>              Retract a WME by its timetag
+  excise <rule...>          Evict production rules from memory and conflict set
   openfile <log> <f> <m>    Open a file stream (modes: in, out, append)
   closefile <log>           Close an open file stream
   default <log> <subsys>    Set default stream for accept, write, or trace
@@ -714,6 +728,26 @@ Commands:
   exit / quit               Exit the REPL
 `
 	fmt.Fprint(r.out, helpText)
+}
+
+func (r *REPL) handleExcise(input string) {
+	tokens, err := tokenizeLine(input)
+	if err != nil {
+		fmt.Fprintf(r.out, "Parse error: %v\n", err)
+		return
+	}
+	if len(tokens) < 2 {
+		fmt.Fprintln(r.out, "Usage: excise <rule-name> [rule-name2 ...]")
+		return
+	}
+
+	for _, name := range tokens[1:] {
+		if r.engine.ExciseRule(name) {
+			fmt.Fprintf(r.out, "Excised rule '%s'\n", name)
+		} else {
+			fmt.Fprintf(r.out, "Rule '%s' not found\n", name)
+		}
+	}
 }
 
 func (r *REPL) handleOpenFile(input string) {

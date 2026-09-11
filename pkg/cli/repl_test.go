@@ -338,6 +338,71 @@ func TestREPLRunCycleLimit(t *testing.T) {
 	}
 }
 
+func TestREPLExciseCommand(t *testing.T) {
+	commands := `
+	(p rule-alpha
+		(item ^val 1)
+		-->
+		(write (crlf) "Alpha fired")
+	)
+	(p rule-beta
+		(item ^val 1)
+		-->
+		(write (crlf) "Beta fired")
+	)
+	(p rule-gamma
+		(item ^val 1)
+		-->
+		(write (crlf) "Gamma fired")
+	)
+	excise rule-alpha
+	(excise rule-beta)
+	excise nonexistent-rule
+	excise
+	(excise)
+	make item ^val 1
+	run
+	exit
+	`
+	in := strings.NewReader(commands)
+	var out bytes.Buffer
+	repl := NewREPL(in, &out)
+	repl.Start()
+
+	output := out.String()
+	if !strings.Contains(output, "Excised rule 'rule-alpha'") {
+		t.Errorf("expected excise confirmation for rule-alpha, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Excised rule 'rule-beta'") {
+		t.Errorf("expected excise confirmation for rule-beta, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Rule 'nonexistent-rule' not found") {
+		t.Errorf("expected not found warning for nonexistent-rule, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Usage: excise <rule-name>") {
+		t.Errorf("expected usage message for bare excise without args, got:\n%s", output)
+	}
+	if strings.Contains(output, "Alpha fired") {
+		t.Errorf("excised rule-alpha should not have fired, got:\n%s", output)
+	}
+	if strings.Contains(output, "Beta fired") {
+		t.Errorf("excised rule-beta should not have fired, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Gamma fired") {
+		t.Errorf("un-excised rule-gamma should have fired, got:\n%s", output)
+	}
+	if repl.Engine().Rule("rule-alpha") != nil {
+		t.Errorf("rule-alpha should be removed from engine")
+	}
+	if repl.Engine().Rule("rule-beta") != nil {
+		t.Errorf("rule-beta should be removed from engine")
+	}
+	if repl.Engine().Rule("rule-gamma") == nil {
+		t.Errorf("rule-gamma should still be present in engine")
+	}
+}
+
+
 
 
 

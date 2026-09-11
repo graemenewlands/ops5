@@ -1164,5 +1164,44 @@ func TestParseIntegration2_5_2File(t *testing.T) {
 	}
 }
 
+func TestParseExcise(t *testing.T) {
+	src := `(excise rule-1 rule-2 rule-3)`
+	p, err := NewParser(src)
+	if err != nil {
+		t.Fatalf("failed to create parser: %v", err)
+	}
 
+	stmt, err := p.NextStatement()
+	if err != nil {
+		t.Fatalf("failed to parse excise statement: %v", err)
+	}
+	if stmt.Type != StmtExcise {
+		t.Fatalf("expected statement type StmtExcise, got %v", stmt.Type)
+	}
+	if len(stmt.ExciseRules) != 3 {
+		t.Fatalf("expected 3 rules, got %d", len(stmt.ExciseRules))
+	}
+	expected := []string{"rule-1", "rule-2", "rule-3"}
+	for i, name := range expected {
+		if stmt.ExciseRules[i] != name {
+			t.Errorf("expected rule %d to be %s, got %s", i, name, stmt.ExciseRules[i])
+		}
+	}
 
+	// Test single rule excise
+	p2, _ := NewParser(`(excise solo-rule)`)
+	stmt2, err := p2.NextStatement()
+	if err != nil {
+		t.Fatalf("failed to parse single excise: %v", err)
+	}
+	if len(stmt2.ExciseRules) != 1 || stmt2.ExciseRules[0] != "solo-rule" {
+		t.Fatalf("expected solo-rule, got %v", stmt2.ExciseRules)
+	}
+
+	// Test empty excise error
+	p3, _ := NewParser(`(excise)`)
+	_, err = p3.NextStatement()
+	if err == nil {
+		t.Fatalf("expected error for empty (excise), got nil")
+	}
+}

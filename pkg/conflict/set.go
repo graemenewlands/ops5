@@ -2,6 +2,7 @@ package conflict
 
 import (
 	"sort"
+	"strings"
 	"sync"
 
 	"ops5/pkg/model"
@@ -142,3 +143,27 @@ func (cs *Set) Reset() {
 	cs.activations = make(map[string]*Activation)
 	cs.refracted = make(map[string]bool)
 }
+
+// RemoveRule evicts all activations and refracted entries associated with the specified rule name.
+// Returns the number of pending activations that were removed.
+func (cs *Set) RemoveRule(ruleName string) int {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+
+	count := 0
+	for key, act := range cs.activations {
+		if act.Rule.Name == ruleName {
+			delete(cs.activations, key)
+			count++
+		}
+	}
+
+	for key := range cs.refracted {
+		if strings.HasPrefix(key, ruleName+":") {
+			delete(cs.refracted, key)
+		}
+	}
+
+	return count
+}
+

@@ -68,3 +68,49 @@ func TestHarnessValidation(t *testing.T) {
 		t.Fatalf("expected test case to fail when forbidden WME is present")
 	}
 }
+
+func TestHarnessExciseInSource(t *testing.T) {
+	runner := NewRunner()
+
+	tc := &TestCase{
+		Name:     "harness_excise_test",
+		Strategy: "LEX",
+		Source: `
+		(p will-fire
+		   (task ^status ready)
+		   -->
+		   (make result ^val fired-ok)
+		)
+		(p will-be-excised
+		   (task ^status ready)
+		   -->
+		   (make result ^val should-not-exist)
+		)
+		(excise will-be-excised)
+		`,
+		InitialWM: []WMEAssertion{
+			{
+				Class:      "task",
+				Attributes: map[string]string{"status": "ready"},
+			},
+		},
+		ExpectedWM: []WMEAssertion{
+			{
+				Class:      "result",
+				Attributes: map[string]string{"val": "fired-ok"},
+			},
+		},
+		ForbiddenWM: []WMEAssertion{
+			{
+				Class:      "result",
+				Attributes: map[string]string{"val": "should-not-exist"},
+			},
+		},
+	}
+
+	res := runner.Run(tc)
+	if !res.Passed {
+		t.Fatalf("expected test case to pass, failed with error: %v", res.Error)
+	}
+}
+
