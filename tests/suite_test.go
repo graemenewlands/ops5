@@ -855,4 +855,127 @@ func TestRemoveWildcardIntegration(t *testing.T) {
 	})
 }
 
+// TestWatchIntegration tests the watch command and watch levels 0, 1, and 2
+// across source directives, RHS actions, and REPL/engine execution.
+func TestWatchIntegration(t *testing.T) {
+	t.Run("source_directive_and_rhs_watch_transitions", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		srcFile := filepath.Join(tmpDir, "watch_test.ops5")
+
+		opsSrc := `
+		(watch)
+		(watch 2)
+
+		(p step-one
+			<c> (Counter ^val 0)
+			-->
+			(modify <c> ^val 1)
+			(watch 1)
+		)
+
+		(p step-two
+			<c> (Counter ^val 1)
+			-->
+			(modify <c> ^val 2)
+			(watch 0)
+		)
+
+		(p step-three
+			<c> (Counter ^val 2)
+			-->
+			(remove <c>)
+		)
+
+		(make Counter ^val 0)
+		`
+
+		if err := os.WriteFile(srcFile, []byte(opsSrc), 0644); err != nil {
+			t.Fatalf("failed to write test file: %v", err)
+		}
+
+		var outBuf bytes.Buffer
+		repl := cli.NewREPL(strings.NewReader(""), &outBuf)
+
+		if err := repl.LoadFile(srcFile); err != nil {
+			t.Fatalf("failed to load file: %v", err)
+		}
+
+		// Initial (watch) query in source file should report current watch level 1
+		outOnLoad := outBuf.String()
+		if !strings.Contains(outOnLoad, "Current watch level: 1") {
+			t.Errorf("expected initial watch query output, got:\n%s", outOnLoad)
+		}
+		// (make Counter ^val 0) occurred while (watch 2) was active
+		if !strings.Contains(outOnLoad, "=>WM: (1: Counter ^val 0)") {
+			t.Errorf("expected =>WM: for make under watch 2, got:\n%s", outOnLoad)
+		}
+
+		// Run step 1: (watch 2) is active initially
+		// step-one fires, modifies Counter to val 1, and changes watch to 1
+		cycles, err := repl.Engine().Run(1)
+		if err != nil || cycles != 1 {
+			t.Fatalf("step-one run failed: err=%v, cycles=%d", err, cycles)
+		}
+
+		outStep1 := outBuf.String()
+		if !strings.Contains(outStep1, "Fired rule 'step-one'") {
+			t.Errorf("expected firing trace for step-one, got:\n%s", outStep1)
+		}
+		if !strings.Contains(outStep1, "<=WM: (1: Counter ^val 0)") {
+			t.Errorf("expected <=WM: retraction on modify in step-one, got:\n%s", outStep1)
+		}
+		if !strings.Contains(outStep1, "=>WM: (2: Counter ^val 1)") {
+			t.Errorf("expected =>WM: assertion on modify in step-one, got:\n%s", outStep1)
+		}
+
+		if repl.Engine().WatchLevel() != 1 {
+			t.Fatalf("expected watch level 1 after step-one, got %d", repl.Engine().WatchLevel())
+		}
+
+		// Run step 2: (watch 1) is active
+		// step-two fires, modifies Counter to val 2, and changes watch to 0
+		cycles, err = repl.Engine().Run(1)
+		if err != nil || cycles != 1 {
+			t.Fatalf("step-two run failed: err=%v, cycles=%d", err, cycles)
+		}
+
+		outStep2 := outBuf.String()
+		if !strings.Contains(outStep2, "Fired rule 'step-two'") {
+			t.Errorf("expected firing trace for step-two under watch 1, got:\n%s", outStep2)
+		}
+		// Under watch 1, WME modifications should NOT be logged
+		if strings.Contains(outStep2, "<=WM: (2: Counter ^val 1)") {
+			t.Errorf("did not expect <=WM: for step-two under watch 1, got:\n%s", outStep2)
+		}
+		if strings.Contains(outStep2, "=>WM: (3: Counter ^val 2)") {
+			t.Errorf("did not expect =>WM: for step-two under watch 1, got:\n%s", outStep2)
+		}
+
+		if repl.Engine().WatchLevel() != 0 {
+			t.Fatalf("expected watch level 0 after step-two, got %d", repl.Engine().WatchLevel())
+		}
+
+		// Run step 3: (watch 0) is active
+		// step-three fires and removes Counter
+		markLen := outBuf.Len()
+		cycles, err = repl.Engine().Run(1)
+		if err != nil || cycles != 1 {
+			t.Fatalf("step-three run failed: err=%v, cycles=%d", err, cycles)
+		}
+
+		outStep3 := outBuf.String()[markLen:]
+		if strings.Contains(outStep3, "Fired rule 'step-three'") {
+			t.Errorf("did not expect firing trace for step-three under watch 0, got:\n%s", outStep3)
+		}
+		if strings.Contains(outStep3, "<=WM:") || strings.Contains(outStep3, "=>WM:") {
+			t.Errorf("did not expect any WM traces under watch 0, got:\n%s", outStep3)
+		}
+
+		if repl.Engine().WorkingMemory().Count() != 0 {
+			t.Errorf("expected empty working memory at end, got %d", repl.Engine().WorkingMemory().Count())
+		}
+	})
+}
+
+
 

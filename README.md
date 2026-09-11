@@ -600,7 +600,8 @@ go build -o ops5 ./cmd/ops5
 | Flag | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `-i` | boolean | `false` | Drop into interactive REPL after loading input file |
-| `-trace` | boolean | `false` | Enable cycle-by-cycle execution tracing to stdout |
+| `-watch` | integer | `1` | Set trace watch level: `0` (silent), `1` (rule firings), `2` (firings + WM changes) |
+| `-trace` | boolean | `false` | Enable cycle-by-cycle execution tracing to stdout (alias for `-watch 1`) |
 | `-strategy` | string | `"lex"` | Conflict resolution strategy: `lex` or `mea` |
 | `-max-cycles`| integer | `1000` | Maximum number of cycles before terminating batch run |
 
@@ -640,7 +641,8 @@ Defined rule 'classify-alert' (conditions=1, specificity=3)
 | `step` | *none* | Execute exactly one Match-Resolve-Act cycle | `step` |
 | `run` | `[max_cycles]` | Execute until quiescence, halt, or max cycles | `run 10` |
 | `strategy` | `[lex \| mea]` | View or switch conflict resolution strategy | `strategy mea` |
-| `trace` | `on \| off` | Toggle cycle execution tracing | `trace on` |
+| `watch` / `(watch ...)` | `[0 \| 1 \| 2]` | Display or set trace watch level (0=silent, 1=firings, 2=firings+WM) | `watch 2`<br>`(watch)` |
+| `trace` | `on \| off` | Toggle cycle execution tracing (alias for `watch 1` / `watch 0`) | `trace on` |
 | `load` | `<file.ops>` | Load and compile rules and makes from an external file | `load rules.ops` |
 | `excise` / `(excise ...)` | `<rule-name...>` | Evict rule(s) from production memory and detach from Rete | `excise rule-1 rule-2` |
 | `pm` / `(pm ...)` | `[<rule-name...> \| *]` | Pretty-print production rule source definitions | `pm FindAncestors` |
@@ -657,19 +659,31 @@ Defined rule 'classify-alert' (conditions=1, specificity=3)
 > - **[Rule Excision Reference](docs/excise.md)**
 > - **[Print Production Memory Reference (`pm`)](docs/pm.md)**
 
-### Execution Tracing
+### Execution Tracing (`watch`)
 
-Enabling trace (`-trace` flag or `trace on` in REPL) outputs each rule firing with its cycle number and matching WME timetags:
-```
+The engine provides fine-grained execution tracing via the `watch` directive, REPL command, and CLI flag:
+- **`watch 0`**: Silent mode — suppress all rule firings and working memory change reports.
+- **`watch 1`** (default): Report the rule name and matching WME timetags for each instantiation that is fired.
+- **`watch 2`**: Report rule firings (as in watch 1) plus every working memory addition (`=>WM: ...`) and deletion (`<=WM: ...`).
+- **`watch`**: Query the current watch level without modifying it.
+
+#### Watch 1 Trace Example
+```ops5
 [Cycle 1] Fired rule 'initialize-processing' with WMEs [1]
 [Cycle 2] Fired rule 'process-item' with WMEs [2 4]
 Processed item 102
-[Cycle 3] Fired rule 'process-item' with WMEs [2 3]
-Processed item 101
-[Cycle 4] Fired rule 'complete-batch' with WMEs [2]
-Batch completed successfully
-Execution halted by rule action after 4 cycles.
+Execution halted by rule action after 2 cycles.
 ```
+
+#### Watch 2 Working Memory Trace Example
+```ops5
+=>WM: (1: goal ^type batch ^status start)
+[Cycle 1] Fired rule 'initialize-processing' with WMEs [1]
+<=WM: (1: goal ^type batch ^status start)
+=>WM: (2: goal ^type batch ^status in-progress)
+=>WM: (3: item ^id 101 ^status pending)
+```
+
 
 ---
 

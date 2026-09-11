@@ -1084,6 +1084,169 @@ func TestEngineRuleRemoveWildcard(t *testing.T) {
 	}
 }
 
+func TestEngineWatchLevels(t *testing.T) {
+	// 1. Initial watch level must be 1
+	eng := New()
+	if eng.WatchLevel() != 1 {
+		t.Fatalf("expected initial watch level 1, got %d", eng.WatchLevel())
+	}
+
+	// 2. SetWatchLevel validation
+	for _, lvl := range []int{0, 1, 2} {
+		if err := eng.SetWatchLevel(lvl); err != nil {
+			t.Fatalf("SetWatchLevel(%d) failed: %v", lvl, err)
+		}
+		if eng.WatchLevel() != lvl {
+			t.Fatalf("expected watch level %d, got %d", lvl, eng.WatchLevel())
+		}
+	}
+	if err := eng.SetWatchLevel(3); err == nil {
+		t.Fatalf("expected error for watch level 3, got nil")
+	}
+
+	// 3. Watch Level 0: give no report of firings or changes to working memory
+	{
+		eng0 := New()
+		_ = eng0.SetWatchLevel(0)
+		var traceBuf bytes.Buffer
+		eng0.SetTraceWriter(&traceBuf)
+
+		r := model.NewRule("silent-rule")
+		r.AddCondition(model.NewPositiveCE("trigger"))
+		r.AddAction(model.MakeAction{Class: "item", Attributes: map[string]model.Value{"id": model.NewInt(1)}})
+		eng0.AddRule(r)
+
+		eng0.Make("trigger", nil)
+		_, err := eng0.Run(10)
+		if err != nil {
+			t.Fatalf("run failed: %v", err)
+		}
+		if traceBuf.Len() != 0 {
+			t.Fatalf("watch 0: expected no report of firings or WM changes, got: %q", traceBuf.String())
+		}
+	}
+
+	// 4. Watch Level 1: report rule name and time tags of each WME for each firing; no WM changes
+	{
+		eng1 := New()
+		_ = eng1.SetWatchLevel(1)
+		var traceBuf bytes.Buffer
+		eng1.SetTraceWriter(&traceBuf)
+
+		r := model.NewRule("trace-firing-rule")
+		r.AddCondition(model.NewPositiveCE("task").WithElementVariable("t").AddEqualTest("val", model.NewInt(10)))
+		r.AddAction(model.MakeAction{Class: "result", Attributes: map[string]model.Value{"ok": model.NewSymbol("yes")}})
+		r.AddAction(model.RemoveAction{TargetElementVar: "t"})
+		eng1.AddRule(r)
+
+		// Assertion before run should NOT be reported in watch 1
+		eng1.Make("task", map[string]model.Value{"val": model.NewInt(10)}) // timetag 1
+		if traceBuf.Len() != 0 {
+			t.Fatalf("watch 1: expected no WM change reports, got: %q", traceBuf.String())
+		}
+
+		_, err := eng1.Run(10)
+		if err != nil {
+			t.Fatalf("run failed: %v", err)
+		}
+		traceOut := traceBuf.String()
+		if !strings.Contains(traceOut, "Fired rule 'trace-firing-rule' with WMEs [1]") {
+			t.Fatalf("watch 1: expected rule name and time tags, got: %q", traceOut)
+		}
+		if strings.Contains(traceOut, "=>WM:") || strings.Contains(traceOut, "<=WM:") {
+			t.Fatalf("watch 1: should NOT report WM changes, got: %q", traceOut)
+		}
+	}
+
+	// 5. Watch Level 2: report watch 1 info + report each change to working memory
+	{
+		eng2 := New()
+		_ = eng2.SetWatchLevel(2)
+		var traceBuf bytes.Buffer
+		eng2.SetTraceWriter(&traceBuf)
+
+		// Assertions should report =>WM:
+		eng2.Make("init", map[string]model.Value{"tag": model.NewInt(100)}) // timetag 1
+		if !strings.Contains(traceBuf.String(), "=>WM: (1: init ^tag 100)") {
+			t.Fatalf("watch 2: expected =>WM assertion report, got: %q", traceBuf.String())
+		}
+
+		r := model.NewRule("modify-and-clear")
+		r.AddCondition(model.NewPositiveCE("init").WithElementVariable("i"))
+		r.AddAction(model.ModifyAction{
+			TargetElementVar: "i",
+			Attributes:       map[string]model.Value{"tag": model.NewInt(200)},
+		})
+		r.AddAction(model.RemoveAction{Wildcard: true})
+		eng2.AddRule(r)
+
+		traceBuf.Reset()
+		_, err := eng2.Run(10)
+		if err != nil {
+			t.Fatalf("run failed: %v", err)
+		}
+		traceOut := traceBuf.String()
+
+		// Should report firing (watch 1 info)
+		if !strings.Contains(traceOut, "Fired rule 'modify-and-clear' with WMEs [1]") {
+			t.Fatalf("watch 2: expected firing report, got: %q", traceOut)
+		}
+
+		// Should report modify: retract old (1), assert new (2)
+		if !strings.Contains(traceOut, "<=WM: (1: init ^tag 100)") {
+			t.Fatalf("watch 2: expected modify retraction report, got: %q", traceOut)
+		}
+		if !strings.Contains(traceOut, "=>WM: (2: init ^tag 200)") {
+			t.Fatalf("watch 2: expected modify assertion report, got: %q", traceOut)
+		}
+
+		// Should report (remove *): retract (2)
+		if !strings.Contains(traceOut, "<=WM: (2: init ^tag 200)") {
+			t.Fatalf("watch 2: expected wildcard retraction report, got: %q", traceOut)
+		}
+	}
+}
+
+func TestEngineWatchRHSAction(t *testing.T) {
+	eng := New()
+	_ = eng.SetWatchLevel(0) // start at 0
+	var traceBuf bytes.Buffer
+	eng.SetTraceWriter(&traceBuf)
+
+	// Rule that elevates to watch 2 and makes an item
+	r := model.NewRule("elevate-watch")
+	lvl2 := 2
+	r.AddCondition(model.NewPositiveCE("start"))
+	r.AddAction(model.WatchAction{Level: &lvl2})
+	r.AddAction(model.MakeAction{Class: "payload", Attributes: map[string]model.Value{"val": model.NewInt(999)}})
+	r.AddAction(model.WatchAction{Level: nil}) // query watch level
+	eng.AddRule(r)
+
+	eng.Make("start", nil) // timetag 1, watch level is 0 so no trace
+	if traceBuf.Len() != 0 {
+		t.Fatalf("expected empty trace before firing, got: %q", traceBuf.String())
+	}
+
+	_, err := eng.Run(10)
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+
+	if eng.WatchLevel() != 2 {
+		t.Fatalf("expected watch level to be updated to 2 by RHS action, got %d", eng.WatchLevel())
+	}
+
+	traceOut := traceBuf.String()
+	// Since watch level was elevated to 2 in RHS, the payload make should be reported!
+	if !strings.Contains(traceOut, "=>WM: (2: payload ^val 999)") {
+		t.Fatalf("expected =>WM for payload, got: %q", traceOut)
+	}
+	// Query (watch) writes current watch level: 2
+	if !strings.Contains(traceOut, "Current watch level: 2") {
+		t.Fatalf("expected 'Current watch level: 2', got: %q", traceOut)
+	}
+}
+
 
 
 

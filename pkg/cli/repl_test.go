@@ -495,6 +495,100 @@ func TestREPLRemoveWildcard(t *testing.T) {
 	}
 }
 
+func TestREPLWatchCommand(t *testing.T) {
+	commands := `
+	watch
+	(watch)
+	watch 3
+	(watch 9)
+	watch 1 2
+	(watch 2)
+	watch
+	(p test-rule
+		<g> (goal ^status active)
+		-->
+		(modify <g> ^status done)
+	)
+	make goal ^status active
+	step
+	watch 1
+	(p test-rule-2
+		<g> (goal ^status done)
+		-->
+		(modify <g> ^status finished)
+	)
+	step
+	watch 0
+	(p test-rule-3
+		<g> (goal ^status finished)
+		-->
+		(remove <g>)
+	)
+	step
+	exit
+	`
+	in := strings.NewReader(commands)
+	var out bytes.Buffer
+	repl := NewREPL(in, &out)
+	repl.Start()
+
+	output := out.String()
+	if !strings.Contains(output, "Current watch level: 1") {
+		t.Errorf("expected initial watch level 1, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Invalid watch level: 3 (expected 0, 1, or 2)") {
+		t.Errorf("expected invalid watch level message for 3, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Invalid watch level: 9 (expected 0, 1, or 2)") {
+		t.Errorf("expected invalid watch level message for 9, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Usage: watch [0|1|2]") {
+		t.Errorf("expected usage message for watch 1 2, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Watch level set to 2") {
+		t.Errorf("expected watch level set to 2, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Current watch level: 2") {
+		t.Errorf("expected current watch level 2 after update, got:\n%s", output)
+	}
+	// Under watch 2: should see =>WM: on make, Fired rule on step, and <=WM: and =>WM: on modify
+	if !strings.Contains(output, "=>WM: (1: goal ^status active)") {
+		t.Errorf("expected =>WM: assertion trace for make under watch 2, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Fired rule 'test-rule'") {
+		t.Errorf("expected firing trace for test-rule, got:\n%s", output)
+	}
+	if !strings.Contains(output, "<=WM: (1: goal ^status active)") {
+		t.Errorf("expected <=WM: retraction trace on modify under watch 2, got:\n%s", output)
+	}
+	if !strings.Contains(output, "=>WM: (2: goal ^status done)") {
+		t.Errorf("expected =>WM: assertion trace on modify under watch 2, got:\n%s", output)
+	}
+
+	// Under watch 1: should see firing trace, but NOT <=WM: or =>WM: for test-rule-2
+	if !strings.Contains(output, "Watch level set to 1") {
+		t.Errorf("expected watch level set to 1, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Fired rule 'test-rule-2'") {
+		t.Errorf("expected firing trace for test-rule-2 under watch 1, got:\n%s", output)
+	}
+	if strings.Contains(output, "=>WM: (3: goal ^status finished)") {
+		t.Errorf("did not expect =>WM: under watch 1, got:\n%s", output)
+	}
+
+	// Under watch 0: should NOT see firing trace or WM traces for test-rule-3
+	if !strings.Contains(output, "Watch level set to 0") {
+		t.Errorf("expected watch level set to 0, got:\n%s", output)
+	}
+	if strings.Contains(output, "Fired rule 'test-rule-3'") {
+		t.Errorf("did not expect firing trace for test-rule-3 under watch 0, got:\n%s", output)
+	}
+	if strings.Contains(output, "<=WM: (3: goal ^status finished)") {
+		t.Errorf("did not expect <=WM: under watch 0, got:\n%s", output)
+	}
+}
+
+
 
 
 

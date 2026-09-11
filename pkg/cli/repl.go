@@ -27,6 +27,7 @@ type REPL struct {
 func NewREPL(in io.Reader, out io.Writer) *REPL {
 	eng := engine.New()
 	eng.SetOutputWriter(out)
+	eng.SetTraceWriter(out)
 	bufIn := bufio.NewReader(in)
 	eng.SetInputReader(bufIn)
 	return &REPL{
@@ -180,6 +181,12 @@ func (r *REPL) handleCommand(input string) bool {
 		return false
 	}
 
+	// 12. S-expression watch: (watch ...)
+	if strings.HasPrefix(strings.ToLower(input), "(watch ") || strings.ToLower(strings.TrimSpace(input)) == "(watch)" {
+		r.handleWatch(input)
+		return false
+	}
+
 	// Strip outer parentheses for command convenience if present: e.g. (wm) -> wm
 	cmd := input
 	if strings.HasPrefix(cmd, "(") && strings.HasSuffix(cmd, ")") && !strings.Contains(cmd, "^") {
@@ -273,6 +280,9 @@ func (r *REPL) handleCommand(input string) bool {
 				fmt.Fprintln(r.out, "Unknown strategy. Valid options: LEX, MEA")
 			}
 		}
+
+	case "watch":
+		r.handleWatch(input)
 
 	case "trace":
 		if len(parts) == 1 {
@@ -542,14 +552,11 @@ func (r *REPL) printConflictSet() {
 }
 
 func (r *REPL) stepCycle() {
-	dom, ok := r.engine.ConflictSet().SelectDominant()
+	_, ok := r.engine.ConflictSet().SelectDominant()
 	if !ok {
 		fmt.Fprintln(r.out, "No activations in conflict set (quiescence).")
 		return
 	}
-
-	ruleName := dom.Rule.Name
-	timetags := dom.Timetags
 
 	fired, err := r.engine.Step()
 	if err != nil {
@@ -558,7 +565,6 @@ func (r *REPL) stepCycle() {
 	}
 	if fired {
 		r.engine.EnsureNewline()
-		fmt.Fprintf(r.out, "Fired: %s with WMEs %v (Cycle %d)\n", ruleName, timetags, r.engine.CycleCount())
 	}
 }
 
@@ -677,6 +683,12 @@ func (r *REPL) LoadFile(path string) error {
 					r.engine.Remove(tag)
 				}
 			}
+		case parser.StmtWatch:
+			if stmt.WatchLevel == nil {
+				fmt.Fprintf(r.out, "Current watch level: %d\n", r.engine.WatchLevel())
+			} else {
+				_ = r.engine.SetWatchLevel(*stmt.WatchLevel)
+			}
 		}
 	}
 
@@ -744,6 +756,7 @@ Commands:
   step                      Execute one Match-Resolve-Act cycle
   run [N]                   Run until quiescence, halt, or N cycles
   strategy [lex|mea]        View or switch conflict resolution strategy
+  watch [0|1|2]             Display or set watch trace level (0=none, 1=firings, 2=firings+WM)
   trace on|off              Toggle cycle execution tracing
   load <file.ops>           Load and compile rules and makes from an OPS5 source file
   test <file.json>          Execute an external test case file
@@ -939,5 +952,28 @@ func tokenizeLine(input string) ([]string, error) {
 		tokens = append(tokens, tok.Value)
 	}
 	return tokens, nil
+}
+
+func (r *REPL) handleWatch(input string) {
+	norm := strings.TrimSpace(input)
+	if strings.HasPrefix(norm, "(") && strings.HasSuffix(norm, ")") {
+		norm = strings.TrimSpace(norm[1 : len(norm)-1])
+	}
+	parts := strings.Fields(norm)
+	if len(parts) == 1 {
+		fmt.Fprintf(r.out, "Current watch level: %d\n", r.engine.WatchLevel())
+		return
+	}
+	if len(parts) == 2 {
+		lvl, err := strconv.Atoi(parts[1])
+		if err != nil || lvl < 0 || lvl > 2 {
+			fmt.Fprintf(r.out, "Invalid watch level: %s (expected 0, 1, or 2)\n", parts[1])
+			return
+		}
+		_ = r.engine.SetWatchLevel(lvl)
+		fmt.Fprintf(r.out, "Watch level set to %d\n", lvl)
+		return
+	}
+	fmt.Fprintln(r.out, "Usage: watch [0|1|2]")
 }
 

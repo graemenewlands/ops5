@@ -37,12 +37,14 @@ type Engine struct {
 	ruleCount    int
 	cycleCount   int
 	halted       bool
-	outputWriter io.Writer
-	traceEnabled     bool
-	currentCol       int
-	lastAddedTimetag int64
-	genatomCounter   int64
-	attrIndices      map[string]int
+	outputWriter        io.Writer
+	traceWriter         io.Writer
+	watchLevel          int
+	traceEnabled        bool
+	currentCol          int
+	lastAddedTimetag    int64
+	genatomCounter      int64
+	attrIndices         map[string]int
 
 	// File I/O subsystem
 	openFiles           map[string]*openFileEntry
@@ -73,7 +75,9 @@ func New() *Engine {
 		cycleCount:          0,
 		halted:              false,
 		outputWriter:        os.Stdout,
-		traceEnabled:        false,
+		traceWriter:         os.Stdout,
+		watchLevel:          1,
+		traceEnabled:        true,
 		currentCol:          1,
 		lastAddedTimetag:    0,
 		genatomCounter:      0,
@@ -94,11 +98,87 @@ func (e *Engine) SetOutputWriter(w io.Writer) {
 	e.outputWriter = w
 }
 
+// SetTraceWriter configures where trace messages (watch firings and WM changes) emit output.
+func (e *Engine) SetTraceWriter(w io.Writer) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.traceWriter = w
+}
+
 // SetTrace enables or disables cycle execution tracing.
 func (e *Engine) SetTrace(enabled bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.traceEnabled = enabled
+	if enabled {
+		if e.watchLevel == 0 {
+			e.watchLevel = 1
+		}
+	} else {
+		e.watchLevel = 0
+	}
+}
+
+// WatchLevel returns the current watch trace level (0, 1, or 2).
+func (e *Engine) WatchLevel() int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.watchLevel
+}
+
+// SetWatchLevel sets the watch trace level:
+// 0 = no report of firings or changes to working memory
+// 1 = report rule name and time tags for each instantiation fired
+// 2 = report watch 1 info + report each change to working memory
+func (e *Engine) SetWatchLevel(level int) error {
+	if level < 0 || level > 2 {
+		return fmt.Errorf("invalid watch level %d (expected 0, 1, or 2)", level)
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.watchLevel = level
+	e.traceEnabled = (level > 0)
+	return nil
+}
+
+// TraceWriter returns the current output destination for trace messages.
+func (e *Engine) TraceWriter() io.Writer {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.traceWriterLocked()
+}
+
+func (e *Engine) traceWriterLocked() io.Writer {
+	if e.defaultTraceStream != "" {
+		if entry, ok := e.openFiles[e.defaultTraceStream]; ok && entry.writer != nil {
+			return entry.writer
+		}
+	}
+	if e.traceWriter != nil {
+		return e.traceWriter
+	}
+	if e.outputWriter != nil {
+		return e.outputWriter
+	}
+	return os.Stdout
+}
+
+func (e *Engine) logWMAssertLocked(wme *model.WME) {
+	if e.watchLevel >= 2 {
+		tw := e.traceWriterLocked()
+		if tw != nil {
+			fmt.Fprintf(tw, "=>WM: %s\n", wme.String())
+		}
+	}
+}
+
+func (e *Engine) logWMRetractLocked(wme *model.WME) {
+	if e.watchLevel >= 2 {
+		tw := e.traceWriterLocked()
+		if tw != nil {
+			fmt.Fprintf(tw, "<=WM: %s\n", wme.String())
+		}
+	}
 }
 
 // SetStrategy sets the conflict resolution strategy (LEX or MEA).
@@ -395,12 +475,23 @@ func (e *Engine) Make(class string, attrs map[string]model.Value) *model.WME {
 	}
 	wme := e.wm.Make(class, resolvedAttrs)
 	e.lastAddedTimetag = wme.Timetag
+	e.logWMAssertLocked(wme)
 	return wme
 }
 
 // Remove retracts a WME by timetag.
 func (e *Engine) Remove(timetag int64) (*model.WME, error) {
-	return e.wm.Remove(timetag)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	wme, err := e.wm.Remove(timetag)
+	if err != nil {
+		return nil, err
+	}
+	if e.lastAddedTimetag == timetag {
+		e.lastAddedTimetag = 0
+	}
+	e.logWMRetractLocked(wme)
+	return wme, nil
 }
 
 // RemoveAll retracts all active WMEs from working memory and returns them.
@@ -408,7 +499,11 @@ func (e *Engine) RemoveAll() []*model.WME {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.lastAddedTimetag = 0
-	return e.wm.RemoveAll()
+	wmes := e.wm.RemoveAll()
+	for _, w := range wmes {
+		e.logWMRetractLocked(w)
+	}
+	return wmes
 }
 
 // Modify updates an existing WME, resolving any RHS value functions.
@@ -417,8 +512,9 @@ func (e *Engine) Modify(timetag int64, attrs map[string]model.Value) (*model.WME
 	defer e.mu.Unlock()
 
 	var clsName string
-	if existingWme, exists := e.wm.Get(timetag); exists && existingWme != nil {
-		clsName = existingWme.Class
+	oldWme, _ := e.wm.Get(timetag)
+	if oldWme != nil {
+		clsName = oldWme.Class
 	}
 	resolvedAttrs := make(map[string]model.Value, len(attrs))
 	orderedKeys := e.getOrderedAttributeKeys(clsName, attrs)
@@ -429,6 +525,10 @@ func (e *Engine) Modify(timetag int64, attrs map[string]model.Value) (*model.WME
 	wme, err := e.wm.Modify(timetag, resolvedAttrs)
 	if err == nil && wme != nil {
 		e.lastAddedTimetag = wme.Timetag
+		if oldWme != nil {
+			e.logWMRetractLocked(oldWme)
+		}
+		e.logWMAssertLocked(wme)
 	}
 	return wme, err
 }
@@ -981,13 +1081,8 @@ func (e *Engine) Step() (bool, error) {
 	e.conflictSet.MarkFired(dominant)
 	e.cycleCount++
 
-	if e.traceEnabled {
-		tw := e.outputWriter
-		if e.defaultTraceStream != "" {
-			if entry, ok := e.openFiles[e.defaultTraceStream]; ok && entry.writer != nil {
-				tw = entry.writer
-			}
-		}
+	if e.watchLevel >= 1 {
+		tw := e.traceWriterLocked()
 		if tw != nil {
 			fmt.Fprintf(tw, "[Cycle %d] Fired rule '%s' with WMEs %v\n", e.cycleCount, dominant.Rule.Name, dominant.Timetags)
 		}
@@ -1002,6 +1097,17 @@ func (e *Engine) Step() (bool, error) {
 	// Execute RHS actions
 	for _, action := range dominant.Rule.Actions {
 		switch act := action.(type) {
+		case model.WatchAction:
+			if act.Level == nil {
+				tw := e.traceWriterLocked()
+				if tw != nil {
+					fmt.Fprintf(tw, "Current watch level: %d\n", e.watchLevel)
+				}
+			} else {
+				e.watchLevel = *act.Level
+				e.traceEnabled = (*act.Level > 0)
+			}
+
 		case model.BindAction:
 			resolved := e.resolveValue(act.Value, localBindings)
 			varName := strings.TrimPrefix(strings.TrimSuffix(act.Variable, ">"), "<")
@@ -1022,6 +1128,7 @@ func (e *Engine) Step() (bool, error) {
 			}
 			wme := e.wm.Make(act.Class, resolvedAttrs)
 			e.lastAddedTimetag = wme.Timetag
+			e.logWMAssertLocked(wme)
 
 		case model.ModifyAction:
 			targetTimetag, err := resolveTargetTimetag(dominant, act.TargetElementVar, act.TargetIndex, localBindings)
@@ -1029,8 +1136,9 @@ func (e *Engine) Step() (bool, error) {
 				return true, err
 			}
 			var clsName string
-			if existingWme, exists := e.wm.Get(targetTimetag); exists && existingWme != nil {
-				clsName = existingWme.Class
+			oldWme, _ := e.wm.Get(targetTimetag)
+			if oldWme != nil {
+				clsName = oldWme.Class
 			}
 			resolvedAttrs := make(map[string]model.Value, len(act.Attributes))
 			orderedKeys := e.getOrderedAttributeKeys(clsName, act.Attributes)
@@ -1042,20 +1150,30 @@ func (e *Engine) Step() (bool, error) {
 				return true, err
 			}
 			e.lastAddedTimetag = newWme.Timetag
+			if oldWme != nil {
+				e.logWMRetractLocked(oldWme)
+			}
+			e.logWMAssertLocked(newWme)
 
 		case model.RemoveAction:
 			if act.Wildcard {
-				e.wm.RemoveAll()
+				removed := e.wm.RemoveAll()
 				e.lastAddedTimetag = 0
+				for _, w := range removed {
+					e.logWMRetractLocked(w)
+				}
 				continue
 			}
 			targetTimetag, err := resolveTargetTimetag(dominant, act.TargetElementVar, act.TargetIndex, localBindings)
 			if err != nil {
 				return true, err
 			}
-			_, err = e.wm.Remove(targetTimetag)
+			oldWme, err := e.wm.Remove(targetTimetag)
 			if err != nil {
 				return true, err
+			}
+			if oldWme != nil {
+				e.logWMRetractLocked(oldWme)
 			}
 
 		case model.OpenFileAction:

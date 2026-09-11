@@ -22,6 +22,7 @@ const (
 	ActionCloseFile
 	ActionDefault
 	ActionCustom
+	ActionWatch
 )
 
 // Action represents a RHS action to be executed when a rule fires.
@@ -243,4 +244,18 @@ func (a CustomAction) Type() ActionType { return ActionCustom }
 
 func (a CustomAction) String() string {
 	return fmt.Sprintf("(call %s)", a.Name)
+}
+
+// WatchAction configures or reports the watch trace level.
+type WatchAction struct {
+	Level *int // nil means query current level
+}
+
+func (a WatchAction) Type() ActionType { return ActionWatch }
+
+func (a WatchAction) String() string {
+	if a.Level == nil {
+		return "(watch)"
+	}
+	return fmt.Sprintf("(watch %d)", *a.Level)
 }

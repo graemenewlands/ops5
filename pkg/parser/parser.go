@@ -822,6 +822,13 @@ func (p *Parser) parseAction() (model.Action, error) {
 		}
 		return model.HaltAction{}, nil
 
+	case "watch":
+		level, err := p.parseWatchBody()
+		if err != nil {
+			return nil, err
+		}
+		return model.WatchAction{Level: level}, nil
+
 	default:
 		// Check for bare make action: (ClassName ^attr val ...) or (ClassName attr val ...)
 		if p.current.Type == TokenAttribute || p.isAttributeToken(p.current, p.getSchema(verbTok.Value)) || p.getSchema(verbTok.Value) != nil {
@@ -857,6 +864,7 @@ const (
 	StmtExcise
 	StmtPM
 	StmtRemove
+	StmtWatch
 )
 
 func (st StatementType) String() string {
@@ -881,6 +889,8 @@ func (st StatementType) String() string {
 		return "pm"
 	case StmtRemove:
 		return "remove"
+	case StmtWatch:
+		return "watch"
 	default:
 		return "unknown"
 	}
@@ -903,6 +913,7 @@ type Statement struct {
 	PMRules         []string
 	RemoveWildcard  bool
 	RemoveTimetags  []int64
+	WatchLevel      *int
 }
 
 func (p *Parser) parseMakeBody(classTok Token) (string, map[string]model.Value, error) {
@@ -1283,7 +1294,51 @@ func (p *Parser) ParseTopLevelRemove() (*Statement, error) {
 	}, nil
 }
 
-// NextStatement parses the next top-level statement (Rule, Make, Literalize, VectorAttribute, OpenFile, CloseFile, Default, Excise, PM, or Remove).
+// ParseWatch parses a top-level (watch [0|1|2]) statement.
+func (p *Parser) ParseWatch() (*int, error) {
+	if _, err := p.expect(TokenLParen); err != nil {
+		return nil, err
+	}
+	verbTok, err := p.expect(TokenSymbol)
+	if err != nil || strings.ToLower(verbTok.Value) != "watch" {
+		return nil, fmt.Errorf("expected 'watch', got %v", verbTok.Value)
+	}
+	return p.parseWatchBody()
+}
+
+func (p *Parser) parseWatchBody() (*int, error) {
+	if p.current.Type == TokenRParen {
+		if _, err := p.expect(TokenRParen); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	}
+
+	if p.current.Type != TokenNumber {
+		return nil, fmt.Errorf("expected number or ')' in watch statement, got %s (%q) at line %d, col %d",
+			p.current.Type, p.current.Value, p.current.Line, p.current.Col)
+	}
+
+	lvl, err := strconv.Atoi(p.current.Value)
+	if err != nil {
+		return nil, fmt.Errorf("invalid watch level %q at line %d: %w", p.current.Value, p.current.Line, err)
+	}
+	if lvl < 0 || lvl > 2 {
+		return nil, fmt.Errorf("invalid watch level %d (expected 0, 1, or 2) at line %d", lvl, p.current.Line)
+	}
+
+	if err := p.advance(); err != nil {
+		return nil, err
+	}
+
+	if _, err := p.expect(TokenRParen); err != nil {
+		return nil, fmt.Errorf("expected ')' closing watch statement: %w", err)
+	}
+
+	return &lvl, nil
+}
+
+// NextStatement parses the next top-level statement (Rule, Make, Literalize, VectorAttribute, OpenFile, CloseFile, Default, Excise, PM, Remove, or Watch).
 // Returns (nil, nil) when TokenEOF is reached.
 func (p *Parser) NextStatement() (*Statement, error) {
 	if p.current.Type == TokenEOF {
@@ -1390,6 +1445,16 @@ func (p *Parser) NextStatement() (*Statement, error) {
 			return nil, err
 		}
 		return stmt, nil
+
+	case "watch":
+		level, err := p.ParseWatch()
+		if err != nil {
+			return nil, err
+		}
+		return &Statement{
+			Type:       StmtWatch,
+			WatchLevel: level,
+		}, nil
 
 	default:
 		if p.peek.Type == TokenSymbol {

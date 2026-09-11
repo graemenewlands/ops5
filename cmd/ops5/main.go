@@ -13,7 +13,8 @@ import (
 
 func main() {
 	strategyFlag := flag.String("strategy", "lex", "Conflict resolution strategy: 'lex' or 'mea'")
-	traceFlag := flag.Bool("trace", false, "Enable cycle tracing")
+	watchFlag := flag.Int("watch", 1, "Watch trace level: 0 (none), 1 (firings), 2 (firings+WM)")
+	traceFlag := flag.Bool("trace", false, "Enable cycle tracing (sets watch=1)")
 	interactiveFlag := flag.Bool("i", false, "Drop into interactive REPL after loading file")
 	maxCyclesFlag := flag.Int("max-cycles", 1000, "Maximum number of cycles for batch run")
 
@@ -63,7 +64,10 @@ func main() {
 	} else {
 		repl.Engine().SetStrategy(conflict.StrategyLEX)
 	}
-	repl.Engine().SetTrace(*traceFlag)
+	_ = repl.Engine().SetWatchLevel(*watchFlag)
+	if *traceFlag {
+		_ = repl.Engine().SetWatchLevel(1)
+	}
 
 	// If a file is provided as argument
 	if len(args) >= 1 && args[0] != "test" {

@@ -88,6 +88,7 @@ func (r *Runner) Run(tc *TestCase) *Result {
 	eng := engine.New()
 	var outBuf bytes.Buffer
 	eng.SetOutputWriter(&outBuf)
+	eng.SetTraceWriter(&outBuf)
 
 	defer eng.CloseAllFiles()
 
@@ -206,6 +207,12 @@ func (r *Runner) Run(tc *TestCase) *Result {
 					for _, tag := range stmt.RemoveTimetags {
 						eng.Remove(tag)
 					}
+				}
+			case parser.StmtWatch:
+				if stmt.WatchLevel == nil {
+					fmt.Fprintf(eng.TraceWriter(), "Current watch level: %d\n", eng.WatchLevel())
+				} else {
+					_ = eng.SetWatchLevel(*stmt.WatchLevel)
 				}
 			}
 		}

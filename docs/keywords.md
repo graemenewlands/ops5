@@ -20,6 +20,7 @@ These keywords appear at the root level of `.ops` source files or directly withi
 | **`excise`** | `(excise <rule1> ... <ruleN>)` | Evicts production rules from production memory, detaches their terminal nodes from the Rete network, and purges all pending activations and refraction history from the conflict set. Existing WMEs are preserved. See [`excise` Reference](excise.md). | `(excise detect-item cleanup-task)` |
 | **`pm`** | `(pm [<rule1> ... <ruleN> \| *])` | Pretty-prints the source text of specified production rule(s) or all rules (`*`) currently held in production memory. See [`pm` Reference](pm.md). | `(pm FindAncestors)`<br>`(pm *)` |
 | **`remove`** | `(remove [<timetag...> \| *])` | Retracts specific WME(s) by timetag or all WMEs (`*`) from working memory. | `(remove *)`<br>`(remove 1 2)` |
+| **`watch`** | `(watch [0 \| 1 \| 2])` | Configures or displays the engine trace level (0=silent, 1=rule firings with timetags, 2=rule firings and WM assertions/retractions). Default is 1. | `(watch)`<br>`(watch 2)` |
 
 ---
 
@@ -46,6 +47,8 @@ These action verbs execute sequentially when a production rule fires.
 | **`genatom`** | `(genatom)` | RHS function generating a unique symbolic atom (`atom1`, `atom2`, ...). See [`genatom` Reference](genatom.md). | `(make node ^id (genatom))` |
 | **`litval`** | `(litval [<class>] <attr>)` | RHS function returning the numeric index (2, 3, ...) of an attribute. See [`litval` Reference](litval.md). | `(make meta ^slot (litval name))` |
 | **`halt`** | `(halt)` | Halts the inference engine execution loop immediately. Current cycle completes, but no further rules fire. | `(halt)` |
+| **`watch`** | `(watch [0 \| 1 \| 2])` | Modifies or displays the engine trace level dynamically during rule execution. | `(watch 2)`<br>`(watch 0)` |
+
 
 ---
 
@@ -94,7 +97,8 @@ The interactive CLI shell (`ops5`) supports both bare words and paren-enclosed c
 | **`vector-attribute`** | `<attr1> ...` | Declares attribute(s) as multi-valued vector attributes. |
 | **`vector-attributes`** | _none_ | Lists all registered vector attributes. |
 | **`strategy`** | `[lex\|mea]` | Displays or sets conflict resolution strategy (`LEX` or `MEA`). See [Selection Strategy Reference](conflict_resolution.md). |
-| **`trace`** | `on\|off` | Toggles rule firing execution traces. |
+| **`trace`** | `on\|off` | Toggles rule firing execution traces (legacy alias for `watch 1` / `watch 0`). |
+| **`watch`** | `[0\|1\|2]` | Displays or sets trace level (0=silent, 1=firings, 2=firings + WM changes). |
 | **`load`** | `<file.ops>` | Loads and parses an external OPS5 source file. |
 | **`excise`** | `<rule1> [rule2 ...]` | Evicts production rule(s) by name from production memory, detaches terminal nodes from Rete network, and purges pending activations from the conflict set. See [`excise` Reference](excise.md). |
 | **`pm`** | `[<rule1> ... \| *]` | Pretty-prints the source text of specified production rule(s) or all rules (`*`). See [`pm` Reference](pm.md). |
@@ -117,6 +121,6 @@ For reference and future engine development, the following standard OPS5 constru
 - **`<< ... >>`**: Disjunction block matching any listed symbol or value, e.g. `^status << active pending >>`.
 
 ### Control & Diagnostic Directives
-- **`watch`**: Configures fine-grained tracing levels (e.g. `(watch 0)`, `(watch 1)`, `(watch 2)`).
 - **`matches`**: Displays partial Rete matches for a specific rule.
 - **`pbreak`**: Sets a breakpoint on a production rule.
+

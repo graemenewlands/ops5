@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -1307,6 +1308,81 @@ func TestParseRuleRemoveWildcard(t *testing.T) {
 	}
 	if rmAct.String() != "(remove *)" {
 		t.Fatalf("expected String() to be '(remove *)', got %q", rmAct.String())
+	}
+}
+
+func TestParseWatchTopLevel(t *testing.T) {
+	// 1. (watch) -> nil Level
+	pQuery, err := NewParser(`(watch)`)
+	if err != nil {
+		t.Fatalf("failed to create parser: %v", err)
+	}
+	stmtQuery, err := pQuery.NextStatement()
+	if err != nil {
+		t.Fatalf("failed to parse (watch): %v", err)
+	}
+	if stmtQuery.Type != StmtWatch || stmtQuery.WatchLevel != nil {
+		t.Fatalf("expected StmtWatch with nil WatchLevel, got %+v", stmtQuery)
+	}
+
+	// 2. (watch 0), (watch 1), (watch 2)
+	for _, lvl := range []int{0, 1, 2} {
+		p, err := NewParser(fmt.Sprintf(`(watch %d)`, lvl))
+		if err != nil {
+			t.Fatalf("failed to create parser for level %d: %v", lvl, err)
+		}
+		stmt, err := p.NextStatement()
+		if err != nil {
+			t.Fatalf("failed to parse (watch %d): %v", lvl, err)
+		}
+		if stmt.Type != StmtWatch || stmt.WatchLevel == nil || *stmt.WatchLevel != lvl {
+			t.Fatalf("expected StmtWatch with WatchLevel %d, got %+v", lvl, stmt)
+		}
+	}
+
+	// 3. Invalid watch levels
+	for _, invalid := range []string{`(watch 3)`, `(watch -1)`, `(watch abc)`} {
+		p, _ := NewParser(invalid)
+		_, err := p.NextStatement()
+		if err == nil {
+			t.Fatalf("expected error for %s, got nil", invalid)
+		}
+	}
+}
+
+func TestParseRuleWatchAction(t *testing.T) {
+	ruleSrc := `
+	(p configure-tracing
+		(start)
+		-->
+		(watch 2)
+		(watch)
+	)
+	`
+	p, err := NewParser(ruleSrc)
+	if err != nil {
+		t.Fatalf("failed to create parser: %v", err)
+	}
+	rule, err := p.ParseRule()
+	if err != nil {
+		t.Fatalf("failed to parse rule: %v", err)
+	}
+	if len(rule.Actions) != 2 {
+		t.Fatalf("expected 2 actions, got %d", len(rule.Actions))
+	}
+	act1, ok := rule.Actions[0].(model.WatchAction)
+	if !ok || act1.Level == nil || *act1.Level != 2 {
+		t.Fatalf("expected WatchAction with level 2, got %#v", rule.Actions[0])
+	}
+	if act1.String() != "(watch 2)" {
+		t.Fatalf("expected (watch 2), got %q", act1.String())
+	}
+	act2, ok := rule.Actions[1].(model.WatchAction)
+	if !ok || act2.Level != nil {
+		t.Fatalf("expected WatchAction with nil level, got %#v", rule.Actions[1])
+	}
+	if act2.String() != "(watch)" {
+		t.Fatalf("expected (watch), got %q", act2.String())
 	}
 }
 
