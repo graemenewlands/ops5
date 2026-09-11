@@ -38,6 +38,7 @@ This engine provides a complete, modern execution environment for rule-based sys
    - [Installation & Build](#installation--build)
    - [CLI Commands & Flags](#cli-commands--flags)
    - [Interactive REPL Reference](#interactive-repl-reference)
+   - [Tutorial: Ancestors Search in the REPL (Section 2.4.3)](docs/tutorial_2_4_3_ancestors.md)
    - [Execution Tracing](#execution-tracing)
 6. [Test Harness & JSON Test Suite Specification](#test-harness--json-test-suite-specification)
    - [Test Case Schema](#test-case-schema)
@@ -643,6 +644,9 @@ Defined rule 'classify-alert' (conditions=1, specificity=3)
 | `reset` | *none* | Clear working memory and conflict set | `reset` |
 | `help` | *none* | Display interactive help menu | `help` |
 | `exit` / `quit` | *none* | Terminate the REPL session | `exit` |
+
+> [!TIP]
+> For a complete interactive walkthrough demonstrating file preloading, working memory inspection, element variable conjunctions, and cycle debugging, see the **[Ancestors Search REPL Tutorial (Section 2.4.3)](docs/tutorial_2_4_3_ancestors.md)**.
 
 ### Execution Tracing
 
