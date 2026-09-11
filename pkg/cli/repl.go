@@ -174,6 +174,12 @@ func (r *REPL) handleCommand(input string) bool {
 		return false
 	}
 
+	// 11. S-expression remove: (remove ...)
+	if strings.HasPrefix(strings.ToLower(input), "(remove ") || strings.ToLower(strings.TrimSpace(input)) == "(remove)" || strings.ToLower(strings.TrimSpace(input)) == "(remove*)" || strings.HasPrefix(strings.ToLower(input), "(remove*") {
+		r.handleRemove(input)
+		return false
+	}
+
 	// Strip outer parentheses for command convenience if present: e.g. (wm) -> wm
 	cmd := input
 	if strings.HasPrefix(cmd, "(") && strings.HasSuffix(cmd, ")") && !strings.Contains(cmd, "^") {
@@ -244,21 +250,7 @@ func (r *REPL) handleCommand(input string) bool {
 		r.handleMake("(" + input + ")")
 
 	case "remove":
-		if len(parts) < 2 {
-			fmt.Fprintln(r.out, "Usage: remove <timetag>")
-			return false
-		}
-		timetag, err := strconv.ParseInt(parts[1], 10, 64)
-		if err != nil {
-			fmt.Fprintf(r.out, "Invalid timetag: %s\n", parts[1])
-			return false
-		}
-		removed, err := r.engine.Remove(timetag)
-		if err != nil {
-			fmt.Fprintf(r.out, "Error: %v\n", err)
-		} else {
-			fmt.Fprintf(r.out, "Removed: %s\n", removed.String())
-		}
+		r.handleRemove(input)
 
 	case "excise":
 		r.handleExcise(input)
@@ -677,6 +669,14 @@ func (r *REPL) LoadFile(path string) error {
 					}
 				}
 			}
+		case parser.StmtRemove:
+			if stmt.RemoveWildcard {
+				r.engine.RemoveAll()
+			} else {
+				for _, tag := range stmt.RemoveTimetags {
+					r.engine.Remove(tag)
+				}
+			}
 		}
 	}
 
@@ -730,7 +730,7 @@ Commands:
   vector-attributes         Display declared vector attributes
   make <cls> [^a v]         Assert a new Working Memory Element (e.g. make goal ^status active)
   modify <tag> [^a v]       Modify attributes of an existing WME by timetag
-  remove <tag>              Retract a WME by its timetag
+  remove <tag...> | *       Retract WME(s) by timetag or all WMEs (*)
   excise <rule...>          Evict production rules from memory and conflict set
   pm [<rule...> | *]        Print production rules in memory
   openfile <log> <f> <m>    Open a file stream (modes: in, out, append)
@@ -752,6 +752,42 @@ Commands:
   exit / quit               Exit the REPL
 `
 	fmt.Fprint(r.out, helpText)
+}
+
+func (r *REPL) handleRemove(input string) {
+	tokens, err := tokenizeLine(input)
+	if err != nil {
+		fmt.Fprintf(r.out, "Parse error: %v\n", err)
+		return
+	}
+	if len(tokens) < 2 {
+		fmt.Fprintln(r.out, "Usage: remove <timetag...> | remove *")
+		return
+	}
+
+	if tokens[1] == "*" {
+		removed := r.engine.RemoveAll()
+		if len(removed) == 0 {
+			fmt.Fprintln(r.out, "Working memory is already empty.")
+		} else {
+			fmt.Fprintf(r.out, "Removed all %d WMEs from working memory.\n", len(removed))
+		}
+		return
+	}
+
+	for _, arg := range tokens[1:] {
+		timetag, err := strconv.ParseInt(arg, 10, 64)
+		if err != nil {
+			fmt.Fprintf(r.out, "Invalid timetag: %s\n", arg)
+			continue
+		}
+		removed, err := r.engine.Remove(timetag)
+		if err != nil {
+			fmt.Fprintf(r.out, "Error: %v\n", err)
+		} else {
+			fmt.Fprintf(r.out, "Removed: %s\n", removed.String())
+		}
+	}
 }
 
 func (r *REPL) handleExcise(input string) {

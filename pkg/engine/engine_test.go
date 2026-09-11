@@ -993,6 +993,98 @@ func TestEnginePrintRuleAndRules(t *testing.T) {
 	}
 }
 
+func TestEngineRemoveAll(t *testing.T) {
+	eng := New()
+
+	rule := model.NewRule("match-item")
+	rule.AddCondition(model.NewPositiveCE("item"))
+	rule.AddAction(model.WriteAction{
+		Args: []model.WriteArg{model.WriteCRLF(), model.WriteValue(model.NewSymbol("MATCHED"))},
+	})
+	eng.AddRule(rule)
+
+	eng.Make("item", map[string]model.Value{"id": model.NewInt(1)})
+	eng.Make("item", map[string]model.Value{"id": model.NewInt(2)})
+	eng.Make("item", map[string]model.Value{"id": model.NewInt(3)})
+
+	if eng.WorkingMemory().Count() != 3 {
+		t.Fatalf("expected 3 WMEs in WM, got %d", eng.WorkingMemory().Count())
+	}
+	if eng.ConflictSet().Count() != 3 {
+		t.Fatalf("expected 3 activations in CS, got %d", eng.ConflictSet().Count())
+	}
+
+	removed := eng.RemoveAll()
+	if len(removed) != 3 {
+		t.Fatalf("expected 3 WMEs removed by RemoveAll(), got %d", len(removed))
+	}
+	if eng.WorkingMemory().Count() != 0 {
+		t.Fatalf("expected 0 WMEs in WM after RemoveAll(), got %d", eng.WorkingMemory().Count())
+	}
+	if eng.ConflictSet().Count() != 0 {
+		t.Fatalf("expected 0 activations in CS after RemoveAll(), got %d", eng.ConflictSet().Count())
+	}
+
+	// Verify next timetag continues monotonically
+	wme4 := eng.Make("item", map[string]model.Value{"id": model.NewInt(4)})
+	if wme4.Timetag != 4 {
+		t.Fatalf("expected timetag 4, got %d", wme4.Timetag)
+	}
+	if eng.ConflictSet().Count() != 1 {
+		t.Fatalf("expected 1 activation in CS for new WME, got %d", eng.ConflictSet().Count())
+	}
+}
+
+func TestEngineRuleRemoveWildcard(t *testing.T) {
+	eng := New()
+	var outBuf bytes.Buffer
+	eng.SetOutputWriter(&outBuf)
+
+	// Rule that removes all working memory elements
+	flushRule := model.NewRule("flush-all")
+	flushRule.AddCondition(model.NewPositiveCE("flush-command"))
+	flushRule.AddAction(model.RemoveAction{Wildcard: true})
+	flushRule.AddAction(model.WriteAction{
+		Args: []model.WriteArg{model.WriteCRLF(), model.WriteValue(model.NewSymbol("ALL-WMES-FLUSHED"))},
+	})
+	eng.AddRule(flushRule)
+
+	// Another rule that would match data
+	dataRule := model.NewRule("process-data")
+	dataRule.AddCondition(model.NewPositiveCE("data"))
+	dataRule.AddAction(model.WriteAction{
+		Args: []model.WriteArg{model.WriteCRLF(), model.WriteValue(model.NewSymbol("DATA-PROCESSED"))},
+	})
+	eng.AddRule(dataRule)
+
+	// Assert data and flush-command
+	eng.Make("data", map[string]model.Value{"val": model.NewInt(100)})
+	eng.Make("flush-command", nil) // timetag 2 -> more recent than data, MEA/LEX picks flush-command
+
+	cycles, err := eng.Run(10)
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	if cycles != 1 {
+		t.Fatalf("expected 1 cycle (flush-all fires and clears WM before process-data can fire), got %d", cycles)
+	}
+
+	if eng.WorkingMemory().Count() != 0 {
+		t.Fatalf("expected empty working memory after (remove *), got %d", eng.WorkingMemory().Count())
+	}
+	if eng.ConflictSet().Count() != 0 {
+		t.Fatalf("expected empty conflict set after (remove *), got %d", eng.ConflictSet().Count())
+	}
+	out := outBuf.String()
+	if !strings.Contains(out, "ALL-WMES-FLUSHED") {
+		t.Errorf("expected ALL-WMES-FLUSHED output, got: %q", out)
+	}
+	if strings.Contains(out, "DATA-PROCESSED") {
+		t.Errorf("data-processed should NOT have fired because data was removed by (remove *), got: %q", out)
+	}
+}
+
+
 
 
 

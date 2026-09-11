@@ -629,7 +629,7 @@ Defined rule 'classify-alert' (conditions=1, specificity=3)
 | `(p ...)` | `<rule-definition>` | Compile a production rule into the active Rete network | `(p r1 (goal ^status active) --> (halt))` |
 | `make` | `<class> [^<attr> <val> ...]` | Assert a new WME | `make goal ^type batch ^status start` |
 | `modify` | `<timetag> [^<attr> <val> ...]` | Modify an existing WME by timetag | `modify 1 ^status in-progress` |
-| `remove` | `<timetag>` | Retract a WME by its timetag | `remove 1` |
+| `remove` / `(remove ...)` | `<timetag...> \| *` | Retract WME(s) by timetag or all WMEs (`*`) | `remove *`<br>`(remove 1)` |
 | `openfile` | `<log-name> <filespec> <mode>` | Open file stream (`in`, `out`, `append`) | `(openfile ruletrace \|RuleTrace.ops\| out)` |
 | `closefile` | `<log-name>` | Close an open file stream | `(closefile ruletrace)` |
 | `default` | `[<log-name> <subsystem>]` | View or set default stream for `accept`, `write`, `trace` | `(default ruletrace accept)` |

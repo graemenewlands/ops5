@@ -114,4 +114,19 @@ func TestWorkingMemoryOperations(t *testing.T) {
 	if _, err := wm.Remove(999); err == nil {
 		t.Fatalf("expected error when removing non-existent timetag")
 	}
+
+	// Test RemoveAll
+	allRemoved := wm.RemoveAll()
+	if len(allRemoved) != 1 || allRemoved[0].Timetag != 3 {
+		t.Fatalf("expected timetag 3 removed by RemoveAll, got %v", allRemoved)
+	}
+	if wm.Count() != 0 {
+		t.Fatalf("expected count 0 after RemoveAll, got %d", wm.Count())
+	}
+	// Assert new WME, nextTimetag should still be 4 (not reset to 1)
+	newWME := wm.Make("goal", nil)
+	if newWME.Timetag != 4 {
+		t.Fatalf("expected next timetag 4, got %d", newWME.Timetag)
+	}
 }
+

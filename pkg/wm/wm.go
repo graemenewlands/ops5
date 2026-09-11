@@ -166,6 +166,30 @@ func (wm *WorkingMemory) FindByClass(class string) []*model.WME {
 	return res
 }
 
+// RemoveAll removes all WMEs from working memory, notifying listeners of retractions,
+// while preserving the monotonically increasing nextTimetag counter.
+// Returns the slice of removed WMEs sorted by timetag.
+func (wm *WorkingMemory) RemoveAll() []*model.WME {
+	wm.mu.Lock()
+	oldWmes := make([]*model.WME, 0, len(wm.wmes))
+	for _, w := range wm.wmes {
+		oldWmes = append(oldWmes, w)
+	}
+	sort.Slice(oldWmes, func(i, j int) bool {
+		return oldWmes[i].Timetag < oldWmes[j].Timetag
+	})
+	wm.wmes = make(map[int64]*model.WME)
+	listeners := append([]Listener(nil), wm.listeners...)
+	wm.mu.Unlock()
+
+	for _, w := range oldWmes {
+		for _, l := range listeners {
+			l.OnRetract(w)
+		}
+	}
+	return oldWmes
+}
+
 // Reset clears all WMEs from working memory and optionally notifies listeners of retraction.
 func (wm *WorkingMemory) Reset() {
 	wm.mu.Lock()

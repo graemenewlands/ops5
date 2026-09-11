@@ -83,15 +83,19 @@ func (a ModifyAction) String() string {
 	return b.String()
 }
 
-// RemoveAction removes an existing WME identified by element variable or 1-based index.
+// RemoveAction removes an existing WME identified by element variable, 1-based index, or all WMEs (*).
 type RemoveAction struct {
 	TargetElementVar string
 	TargetIndex      int
+	Wildcard         bool
 }
 
 func (a RemoveAction) Type() ActionType { return ActionRemove }
 
 func (a RemoveAction) String() string {
+	if a.Wildcard {
+		return "(remove *)"
+	}
 	if a.TargetElementVar != "" {
 		return fmt.Sprintf("(remove <%s>)", a.TargetElementVar)
 	}

@@ -457,6 +457,45 @@ func TestREPLPMCommand(t *testing.T) {
 	}
 }
 
+func TestREPLRemoveWildcard(t *testing.T) {
+	commands := `
+	make item ^id 1
+	make item ^id 2
+	make item ^id 3
+	wm
+	(remove *)
+	wm
+	make item ^id 4
+	make item ^id 5
+	remove *
+	wm
+	(remove *)
+	exit
+	`
+	in := strings.NewReader(commands)
+	var out bytes.Buffer
+	repl := NewREPL(in, &out)
+	repl.Start()
+
+	output := out.String()
+	if !strings.Contains(output, "Working Memory (3 elements):") {
+		t.Errorf("expected 3 WMEs initially, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Removed all 3 WMEs from working memory.") {
+		t.Errorf("expected confirmation for (remove *), got:\n%s", output)
+	}
+	if !strings.Contains(output, "Removed all 2 WMEs from working memory.") {
+		t.Errorf("expected confirmation for remove *, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Working memory is already empty.") {
+		t.Errorf("expected empty working memory message for repeated (remove *), got:\n%s", output)
+	}
+	if repl.Engine().WorkingMemory().Count() != 0 {
+		t.Errorf("expected working memory to have 0 elements, got %d", repl.Engine().WorkingMemory().Count())
+	}
+}
+
+
 
 
 

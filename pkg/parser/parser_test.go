@@ -1244,3 +1244,70 @@ func TestParsePM(t *testing.T) {
 	}
 }
 
+func TestParseTopLevelRemove(t *testing.T) {
+	// (remove *)
+	pWild, err := NewParser(`(remove *)`)
+	if err != nil {
+		t.Fatalf("failed to create parser: %v", err)
+	}
+	stmtWild, err := pWild.NextStatement()
+	if err != nil {
+		t.Fatalf("failed to parse (remove *): %v", err)
+	}
+	if stmtWild.Type != StmtRemove || !stmtWild.RemoveWildcard {
+		t.Fatalf("expected StmtRemove with RemoveWildcard true, got %+v", stmtWild)
+	}
+
+	// (remove 1 2 3)
+	pTags, _ := NewParser(`(remove 10 20 30)`)
+	stmtTags, err := pTags.NextStatement()
+	if err != nil {
+		t.Fatalf("failed to parse (remove 10 20 30): %v", err)
+	}
+	if stmtTags.Type != StmtRemove || stmtTags.RemoveWildcard || len(stmtTags.RemoveTimetags) != 3 {
+		t.Fatalf("expected 3 timetags, got %+v", stmtTags)
+	}
+	if stmtTags.RemoveTimetags[0] != 10 || stmtTags.RemoveTimetags[1] != 20 || stmtTags.RemoveTimetags[2] != 30 {
+		t.Fatalf("unexpected timetags: %v", stmtTags.RemoveTimetags)
+	}
+
+	// Empty (remove) error
+	pErr, _ := NewParser(`(remove)`)
+	_, err = pErr.NextStatement()
+	if err == nil {
+		t.Fatalf("expected error for empty (remove), got nil")
+	}
+}
+
+func TestParseRuleRemoveWildcard(t *testing.T) {
+	ruleSrc := `
+	(p clear-all
+		(cleanup)
+		-->
+		(remove *)
+	)
+	`
+	p, err := NewParser(ruleSrc)
+	if err != nil {
+		t.Fatalf("failed to create parser: %v", err)
+	}
+	rule, err := p.ParseRule()
+	if err != nil {
+		t.Fatalf("failed to parse rule: %v", err)
+	}
+	if len(rule.Actions) != 1 {
+		t.Fatalf("expected 1 action, got %d", len(rule.Actions))
+	}
+	rmAct, ok := rule.Actions[0].(model.RemoveAction)
+	if !ok {
+		t.Fatalf("expected RemoveAction, got %T", rule.Actions[0])
+	}
+	if !rmAct.Wildcard {
+		t.Fatalf("expected RemoveAction.Wildcard to be true")
+	}
+	if rmAct.String() != "(remove *)" {
+		t.Fatalf("expected String() to be '(remove *)', got %q", rmAct.String())
+	}
+}
+
+

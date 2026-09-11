@@ -199,6 +199,14 @@ func (r *Runner) Run(tc *TestCase) *Result {
 						}
 					}
 				}
+			case parser.StmtRemove:
+				if stmt.RemoveWildcard {
+					eng.RemoveAll()
+				} else {
+					for _, tag := range stmt.RemoveTimetags {
+						eng.Remove(tag)
+					}
+				}
 			}
 		}
 	}

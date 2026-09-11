@@ -403,6 +403,14 @@ func (e *Engine) Remove(timetag int64) (*model.WME, error) {
 	return e.wm.Remove(timetag)
 }
 
+// RemoveAll retracts all active WMEs from working memory and returns them.
+func (e *Engine) RemoveAll() []*model.WME {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.lastAddedTimetag = 0
+	return e.wm.RemoveAll()
+}
+
 // Modify updates an existing WME, resolving any RHS value functions.
 func (e *Engine) Modify(timetag int64, attrs map[string]model.Value) (*model.WME, error) {
 	e.mu.Lock()
@@ -1036,6 +1044,11 @@ func (e *Engine) Step() (bool, error) {
 			e.lastAddedTimetag = newWme.Timetag
 
 		case model.RemoveAction:
+			if act.Wildcard {
+				e.wm.RemoveAll()
+				e.lastAddedTimetag = 0
+				continue
+			}
 			targetTimetag, err := resolveTargetTimetag(dominant, act.TargetElementVar, act.TargetIndex, localBindings)
 			if err != nil {
 				return true, err

@@ -660,7 +660,11 @@ func (p *Parser) parseAction() (model.Action, error) {
 	case "remove":
 		var targetVar string
 		var targetIdx int
-		if p.current.Type == TokenVariable {
+		var wildcard bool
+		if (p.current.Type == TokenOperator || p.current.Type == TokenSymbol) && p.current.Value == "*" {
+			wildcard = true
+			p.advance()
+		} else if p.current.Type == TokenVariable {
 			targetVar = p.current.Value
 			p.advance()
 		} else if p.current.Type == TokenNumber {
@@ -668,7 +672,7 @@ func (p *Parser) parseAction() (model.Action, error) {
 			targetIdx = idx
 			p.advance()
 		} else {
-			return nil, fmt.Errorf("expected target variable or index in remove action, got %s", p.current.Value)
+			return nil, fmt.Errorf("expected target variable, index, or '*' in remove action, got %s", p.current.Value)
 		}
 		if _, err := p.expect(TokenRParen); err != nil {
 			return nil, err
@@ -676,6 +680,7 @@ func (p *Parser) parseAction() (model.Action, error) {
 		return model.RemoveAction{
 			TargetElementVar: targetVar,
 			TargetIndex:      targetIdx,
+			Wildcard:         wildcard,
 		}, nil
 
 	case "write":
@@ -851,6 +856,7 @@ const (
 	StmtDefault
 	StmtExcise
 	StmtPM
+	StmtRemove
 )
 
 func (st StatementType) String() string {
@@ -873,6 +879,8 @@ func (st StatementType) String() string {
 		return "excise"
 	case StmtPM:
 		return "pm"
+	case StmtRemove:
+		return "remove"
 	default:
 		return "unknown"
 	}
@@ -893,6 +901,8 @@ type Statement struct {
 	Default         *model.DefaultAction
 	ExciseRules     []string
 	PMRules         []string
+	RemoveWildcard  bool
+	RemoveTimetags  []int64
 }
 
 func (p *Parser) parseMakeBody(classTok Token) (string, map[string]model.Value, error) {
@@ -1230,7 +1240,50 @@ func (p *Parser) ParsePM() ([]string, error) {
 	return names, nil
 }
 
-// NextStatement parses the next top-level statement (Rule, Make, Literalize, VectorAttribute, OpenFile, CloseFile, Default, Excise, or PM).
+// ParseTopLevelRemove parses a top-level (remove [timetag... | *]) statement.
+func (p *Parser) ParseTopLevelRemove() (*Statement, error) {
+	if _, err := p.expect(TokenLParen); err != nil {
+		return nil, err
+	}
+	verbTok, err := p.expect(TokenSymbol)
+	if err != nil || strings.ToLower(verbTok.Value) != "remove" {
+		return nil, fmt.Errorf("expected 'remove', got %v", verbTok.Value)
+	}
+	var timetags []int64
+	var isWildcard bool
+	for p.current.Type != TokenRParen && p.current.Type != TokenEOF {
+		if (p.current.Type == TokenOperator || p.current.Type == TokenSymbol) && p.current.Value == "*" {
+			isWildcard = true
+			if err := p.advance(); err != nil {
+				return nil, err
+			}
+		} else if p.current.Type == TokenNumber {
+			val, err := strconv.ParseInt(p.current.Value, 10, 64)
+			if err != nil {
+				return nil, fmt.Errorf("invalid timetag in remove statement: %w", err)
+			}
+			timetags = append(timetags, val)
+			if err := p.advance(); err != nil {
+				return nil, err
+			}
+		} else {
+			return nil, fmt.Errorf("expected timetag or '*' in remove statement, got %s (%q)", p.current.Type, p.current.Value)
+		}
+	}
+	if _, err := p.expect(TokenRParen); err != nil {
+		return nil, fmt.Errorf("expected ')' closing remove statement: %w", err)
+	}
+	if !isWildcard && len(timetags) == 0 {
+		return nil, fmt.Errorf("expected at least one timetag or '*' in remove statement")
+	}
+	return &Statement{
+		Type:           StmtRemove,
+		RemoveWildcard: isWildcard,
+		RemoveTimetags: timetags,
+	}, nil
+}
+
+// NextStatement parses the next top-level statement (Rule, Make, Literalize, VectorAttribute, OpenFile, CloseFile, Default, Excise, PM, or Remove).
 // Returns (nil, nil) when TokenEOF is reached.
 func (p *Parser) NextStatement() (*Statement, error) {
 	if p.current.Type == TokenEOF {
@@ -1330,6 +1383,13 @@ func (p *Parser) NextStatement() (*Statement, error) {
 			Type:    StmtPM,
 			PMRules: rules,
 		}, nil
+
+	case "remove":
+		stmt, err := p.ParseTopLevelRemove()
+		if err != nil {
+			return nil, err
+		}
+		return stmt, nil
 
 	default:
 		if p.peek.Type == TokenSymbol {

@@ -19,6 +19,7 @@ These keywords appear at the root level of `.ops` source files or directly withi
 | **`default`** | `(default <log-name> <subsystem>)` | Redirects default stream for `accept`, `write`, or `trace`. See [`file_io` Reference](file_io.md). | `(default ruletrace accept)` |
 | **`excise`** | `(excise <rule1> ... <ruleN>)` | Evicts production rules from production memory, detaches their terminal nodes from the Rete network, and purges all pending activations and refraction history from the conflict set. Existing WMEs are preserved. See [`excise` Reference](excise.md). | `(excise detect-item cleanup-task)` |
 | **`pm`** | `(pm [<rule1> ... <ruleN> \| *])` | Pretty-prints the source text of specified production rule(s) or all rules (`*`) currently held in production memory. See [`pm` Reference](pm.md). | `(pm FindAncestors)`<br>`(pm *)` |
+| **`remove`** | `(remove [<timetag...> \| *])` | Retracts specific WME(s) by timetag or all WMEs (`*`) from working memory. | `(remove *)`<br>`(remove 1 2)` |
 
 ---
 
@@ -30,7 +31,7 @@ These action verbs execute sequentially when a production rule fires.
 | :--- | :--- | :--- | :--- |
 | **`make`** | `(make <class> [^<attr> <val> ...])` | Asserts a new WME into working memory with a monotonically increasing timetag. | `(make task ^id <new-id> ^status ready)` |
 | **`modify`** | `(modify <target> [^<attr> <val> ...])` | Modifies an existing WME (retracts and re-asserts with a new timetag, preserving unmodified attributes). See [`modify` Reference](modify.md). | `(modify <t> ^status complete)`<br>`(modify 1 ^status complete)` |
-| **`remove`** | `(remove <target>)` | Retracts an existing WME from working memory. `<target>` is an element variable or 1-based CE index. | `(remove <t>)`<br>`(remove 2)` |
+| **`remove`** | `(remove <target...> \| *)` | Retracts existing WME(s) from working memory. `<target>` is an element variable, 1-based CE index, or `*` to clear all working memory. | `(remove <t>)`<br>`(remove 2)`<br>`(remove *)` |
 | **`write`** | `(write <val1> ...)` | Emits values, strings, or resolved variables to output. Supports `(crlf)` and `(tabto N)`. See [`write` Reference](write.md). | `(write (crlf) (tabto 5) <id> (tabto 20) <name> (crlf))` |
 | **`crlf`** | `(crlf)` or `crlf` | Directs `(write ...)` to emit a newline and reset horizontal column counter to 1. | `(write (crlf) "Start")` |
 | **`tabto`** | `(tabto <col>)` | Directs `(write ...)` to pad output with spaces until column `<col>` is reached. | `(write (tabto 15) "Column 2")` |
@@ -82,7 +83,7 @@ The interactive CLI shell (`ops5`) supports both bare words and paren-enclosed c
 | **`run`** | `[N]` | Runs rules until quiescence, `(halt)`, or `N` cycles. |
 | **`make`** | `<class> [^attr val ...]` | Asserts a new WME from the REPL prompt. |
 | **`modify`** | `<timetag> [^attr val ...]` | Modifies an existing WME by its timetag. |
-| **`remove`** | `<timetag>` | Retracts a WME by its timetag. |
+| **`remove`** | `<timetag...> \| *` | Retracts specific WME(s) by timetag or all WMEs (`*`). |
 | **`openfile`** | `<logical-name> <filespec> <mode>` | Opens a file stream (`in`, `out`, `append`). Supports `\|...\|`. |
 | **`closefile`** | `<logical-name>` | Closes an open file stream. |
 | **`default`** | `[<logical-name> <subsystem>]` | Sets or displays default streams for `accept`, `write`, `trace`. |

@@ -759,3 +759,100 @@ func TestPMCommandIntegration(t *testing.T) {
 	})
 }
 
+// TestRemoveWildcardIntegration tests (remove *) in source files, REPL sessions, and RHS rule actions.
+func TestRemoveWildcardIntegration(t *testing.T) {
+	t.Run("source_top_level_remove_wildcard", func(t *testing.T) {
+		opsSrc := `
+		(make person ^name Alice)
+		(make person ^name Bob)
+		; Retract all working memory elements
+		(remove *)
+		; Assert single element
+		(make person ^name Charlie)
+		`
+		var outBuf bytes.Buffer
+		repl := cli.NewREPL(strings.NewReader(""), &outBuf)
+
+		p, err := parser.NewParser(opsSrc)
+		if err != nil {
+			t.Fatalf("parse error: %v", err)
+		}
+
+		for {
+			stmt, err := p.NextStatement()
+			if err != nil {
+				t.Fatalf("parse statement error: %v", err)
+			}
+			if stmt == nil {
+				break
+			}
+			switch stmt.Type {
+			case parser.StmtMake:
+				repl.Engine().Make(stmt.MakeClass, stmt.MakeAttributes)
+			case parser.StmtRemove:
+				if stmt.RemoveWildcard {
+					repl.Engine().RemoveAll()
+				}
+			}
+		}
+
+		// Only Charlie should remain
+		persons := repl.Engine().WorkingMemory().FindByClass("person")
+		if len(persons) != 1 {
+			t.Fatalf("expected exactly 1 person remaining, got %d", len(persons))
+		}
+		nameVal, _ := persons[0].Get("name")
+		if !nameVal.Equal(model.NewSymbol("Charlie")) {
+			t.Errorf("expected Charlie, got %v", nameVal)
+		}
+		// Charlie should have timetag 3 (1=Alice, 2=Bob, 3=Charlie)
+		if persons[0].Timetag != 3 {
+			t.Errorf("expected timetag 3 for Charlie, got %d", persons[0].Timetag)
+		}
+	})
+
+	t.Run("rhs_rule_remove_wildcard", func(t *testing.T) {
+		opsSrc := `
+		(p abort-mission
+			(Emergency ^level critical)
+			-->
+			(remove *)
+			(write (crlf) "MISSION ABORTED - WORKING MEMORY CLEARED")
+		)
+		`
+		var outBuf bytes.Buffer
+		repl := cli.NewREPL(strings.NewReader(""), &outBuf)
+
+		p, _ := parser.NewParser(opsSrc)
+		stmt, _ := p.NextStatement()
+		repl.Engine().AddRule(stmt.Rule)
+
+		repl.Engine().Make("Task", map[string]model.Value{"status": model.NewSymbol("in-progress")})
+		repl.Engine().Make("Task", map[string]model.Value{"status": model.NewSymbol("in-progress")})
+		repl.Engine().Make("Emergency", map[string]model.Value{"level": model.NewSymbol("critical")})
+
+		if repl.Engine().WorkingMemory().Count() != 3 {
+			t.Fatalf("expected 3 WMEs before run, got %d", repl.Engine().WorkingMemory().Count())
+		}
+
+		cycles, err := repl.Engine().Run(10)
+		if err != nil {
+			t.Fatalf("run failed: %v", err)
+		}
+		if cycles != 1 {
+			t.Fatalf("expected 1 cycle, got %d", cycles)
+		}
+
+		if repl.Engine().WorkingMemory().Count() != 0 {
+			t.Errorf("expected 0 WMEs after (remove *), got %d", repl.Engine().WorkingMemory().Count())
+		}
+		if repl.Engine().ConflictSet().Count() != 0 {
+			t.Errorf("expected 0 activations after (remove *), got %d", repl.Engine().ConflictSet().Count())
+		}
+		if !strings.Contains(outBuf.String(), "MISSION ABORTED - WORKING MEMORY CLEARED") {
+			t.Errorf("expected abort message, got: %q", outBuf.String())
+		}
+	})
+}
+
+
