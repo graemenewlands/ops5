@@ -21,6 +21,7 @@ const (
 	TypeAccept
 	TypeGenatom
 	TypeLitval
+	TypeSubstr
 )
 
 func (t ValueType) String() string {
@@ -47,6 +48,8 @@ func (t ValueType) String() string {
 		return "genatom"
 	case TypeLitval:
 		return "litval"
+	case TypeSubstr:
+		return "substr"
 	default:
 		return "unknown"
 	}
@@ -215,6 +218,38 @@ func (v Value) LitvalExpr() *LitvalExpr {
 	return nil
 }
 
+// SubstrExpr represents a (substr elemRef start end) function invocation.
+type SubstrExpr struct {
+	ElementRef Value // variable (e.g. <str>) or integer condition element index (e.g. 1)
+	Start      Value // attribute symbol, integer index, variable, or nested expr
+	End        Value // attribute symbol, integer index, variable, "inf", or nested expr
+}
+
+// NewSubstr creates a new substr expression value.
+func NewSubstr(elemRef, start, end Value) Value {
+	return Value{
+		typ: TypeSubstr,
+		val: &SubstrExpr{
+			ElementRef: elemRef,
+			Start:      start,
+			End:        end,
+		},
+	}
+}
+
+// IsSubstr returns true if this value is a substr function call.
+func (v Value) IsSubstr() bool {
+	return v.typ == TypeSubstr
+}
+
+// SubstrExpr returns the underlying SubstrExpr.
+func (v Value) SubstrExpr() *SubstrExpr {
+	if v.typ == TypeSubstr {
+		return v.val.(*SubstrExpr)
+	}
+	return nil
+}
+
 // Type returns the ValueType.
 func (v Value) Type() ValueType {
 	return v.typ
@@ -331,6 +366,9 @@ func (v Value) String() string {
 			return "(litval " + le.Class + " " + le.Attribute.String() + ")"
 		}
 		return "(litval " + le.Attribute.String() + ")"
+	case TypeSubstr:
+		se := v.val.(*SubstrExpr)
+		return fmt.Sprintf("(substr %s %s %s)", se.ElementRef.String(), se.Start.String(), se.End.String())
 	default:
 		return fmt.Sprintf("%v", v.val)
 	}
@@ -347,6 +385,11 @@ func (v Value) Equal(o Value) bool {
 			l1 := v.val.(*LitvalExpr)
 			l2 := o.val.(*LitvalExpr)
 			return strings.EqualFold(l1.Class, l2.Class) && l1.Attribute.Equal(l2.Attribute)
+		}
+		if v.typ == TypeSubstr {
+			s1 := v.val.(*SubstrExpr)
+			s2 := o.val.(*SubstrExpr)
+			return s1.ElementRef.Equal(s2.ElementRef) && s1.Start.Equal(s2.Start) && s1.End.Equal(s2.End)
 		}
 		if v.typ == TypeVector {
 			v1 := v.val.([]Value)

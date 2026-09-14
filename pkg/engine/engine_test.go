@@ -1247,6 +1247,325 @@ func TestEngineWatchRHSAction(t *testing.T) {
 	}
 }
 
+func TestEnginePPWM(t *testing.T) {
+	eng := New()
+
+	eng.DeclareClass("City", []string{"name", "state", "population"})
+	eng.DeclareVectorAttribute("coords")
+
+	eng.Make("City", map[string]model.Value{
+		"name":       model.NewSymbol("Pittsburgh"),
+		"state":      model.NewSymbol("Pennsylvania"),
+		"population": model.NewInt(300000),
+	})
+	eng.Make("City", map[string]model.Value{
+		"name":       model.NewSymbol("Philadelphia"),
+		"state":      model.NewSymbol("Pennsylvania"),
+		"population": model.NewInt(1500000),
+	})
+	eng.Make("City", map[string]model.Value{
+		"name":       model.NewSymbol("Boston"),
+		"state":      model.NewSymbol("Massachusetts"),
+		"population": model.NewInt(675000),
+	})
+	eng.Make("Person", map[string]model.Value{
+		"name":  model.NewSymbol("Franklin"),
+		"state": model.NewSymbol("Pennsylvania"),
+	})
+
+	// 1. PPWM with user's exact example: (ppwm City ^state Pennsylvania)
+	wmes, err := eng.PPWM("City ^state Pennsylvania")
+	if err != nil {
+		t.Fatalf("PPWM failed: %v", err)
+	}
+	if len(wmes) != 2 {
+		t.Fatalf("expected 2 WMEs matching (ppwm City ^state Pennsylvania), got %d", len(wmes))
+	}
+	if wmes[0].Timetag != 1 || wmes[1].Timetag != 2 {
+		t.Errorf("expected timetags 1 and 2, got %d and %d", wmes[0].Timetag, wmes[1].Timetag)
+	}
+
+	// 2. PrintPPWM
+	lines := eng.PrintPPWM(model.NewPositiveCE("City").AddEqualTest("state", model.NewSymbol("Pennsylvania")))
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 lines from PrintPPWM, got %d", len(lines))
+	}
+	if lines[0] != "(1: City ^name Pittsburgh ^population 300000 ^state Pennsylvania)" {
+		t.Errorf("unexpected line 0: %q", lines[0])
+	}
+	if lines[1] != "(2: City ^name Philadelphia ^population 1500000 ^state Pennsylvania)" {
+		t.Errorf("unexpected line 1: %q", lines[1])
+	}
+
+	// 3. PPWM wildcard
+	allWMEs, err := eng.PPWM("*")
+	if err != nil {
+		t.Fatalf("PPWM * failed: %v", err)
+	}
+	if len(allWMEs) != 4 {
+		t.Fatalf("expected all 4 WMEs for wildcard, got %d", len(allWMEs))
+	}
+
+	// 4. Multiple attributes: City ^state Pennsylvania ^name Pittsburgh
+	singleWME, err := eng.PPWM("(ppwm City ^state Pennsylvania ^name Pittsburgh)")
+	if err != nil {
+		t.Fatalf("PPWM multiple attrs failed: %v", err)
+	}
+	if len(singleWME) != 1 || singleWME[0].Timetag != 1 {
+		t.Fatalf("expected only timetag 1, got %v", singleWME)
+	}
+
+	// 5. PPWM with non-matching pattern
+	none, err := eng.PPWM("City ^state Ohio")
+	if err != nil {
+		t.Fatalf("PPWM non-matching failed: %v", err)
+	}
+	if len(none) != 0 {
+		t.Fatalf("expected 0 matches for Ohio, got %d", len(none))
+	}
+
+	// 6. PPWM error on forbidden constructs
+	if _, err := eng.PPWM("City ^state <x>"); err == nil {
+		t.Fatal("expected error on variable in PPWM, got nil")
+	}
+	if _, err := eng.PPWM("City ^population > 500000"); err == nil {
+		t.Fatal("expected error on predicate in PPWM, got nil")
+	}
+}
+
+func TestEngineSubstr(t *testing.T) {
+	eng := New()
+	eng.DeclareClass("string", []string{"sequence"})
+	eng.DeclareVectorAttribute("sequence")
+
+	w1 := eng.Make("string", map[string]model.Value{
+		"sequence": model.NewVector([]model.Value{
+			model.NewSymbol("A"),
+			model.NewSymbol("B"),
+			model.NewSymbol("C"),
+			model.NewSymbol("D"),
+		}),
+	})
+
+	// 1. Single element access: (substr 1 sequence sequence) -> scalar 'A'
+	res1 := eng.EvaluateSubstr(&model.SubstrExpr{
+		ElementRef: model.NewInt(w1.Timetag),
+		Start:      model.NewSymbol("sequence"),
+		End:        model.NewSymbol("sequence"),
+	}, nil)
+	if res1.Type() != model.TypeSymbol || res1.Raw().(string) != "A" {
+		t.Fatalf("expected scalar 'A', got %v (%s)", res1, res1.Type())
+	}
+
+	// 2. Numeric range: (substr 1 2 4) -> vector [A, B, C]
+	res2 := eng.EvaluateSubstr(&model.SubstrExpr{
+		ElementRef: model.NewInt(w1.Timetag),
+		Start:      model.NewInt(2),
+		End:        model.NewInt(4),
+	}, nil)
+	if !res2.IsVector() || len(res2.VectorElements()) != 3 {
+		t.Fatalf("expected vector of 3 elements, got %v", res2)
+	}
+	if res2.VectorElements()[0].Raw() != "A" || res2.VectorElements()[1].Raw() != "B" || res2.VectorElements()[2].Raw() != "C" {
+		t.Fatalf("expected [A, B, C], got %v", res2)
+	}
+
+	// 3. inf range: (substr 1 3 inf) -> vector [B, C, D]
+	res3 := eng.EvaluateSubstr(&model.SubstrExpr{
+		ElementRef: model.NewInt(w1.Timetag),
+		Start:      model.NewInt(3),
+		End:        model.NewSymbol("inf"),
+	}, nil)
+	if !res3.IsVector() || len(res3.VectorElements()) != 3 {
+		t.Fatalf("expected vector of 3 elements, got %v", res3)
+	}
+	if res3.VectorElements()[0].Raw() != "B" || res3.VectorElements()[1].Raw() != "C" || res3.VectorElements()[2].Raw() != "D" {
+		t.Fatalf("expected [B, C, D], got %v", res3)
+	}
+
+	// 4. Element variable lookup with bindings: <str> -> timetag
+	bindings := map[string]model.Value{
+		"str": model.NewInt(w1.Timetag),
+	}
+	res4 := eng.EvaluateSubstr(&model.SubstrExpr{
+		ElementRef: model.NewVariable("str"),
+		Start:      model.NewSymbol("sequence"),
+		End:        model.NewSymbol("sequence"),
+	}, bindings)
+	if res4.Type() != model.TypeSymbol || res4.Raw().(string) != "A" {
+		t.Fatalf("expected scalar 'A' via element variable, got %v", res4)
+	}
+
+	// 5. Multiple attributes schema: person ^name Graeme ^age 30 ^scores 10 20 30 40
+	eng.DeclareClass("person", []string{"name", "age", "scores"})
+	eng.DeclareVectorAttribute("scores")
+
+	w2 := eng.Make("person", map[string]model.Value{
+		"name": model.NewSymbol("Graeme"),
+		"age":  model.NewInt(30),
+		"scores": model.NewVector([]model.Value{
+			model.NewInt(10),
+			model.NewInt(20),
+			model.NewInt(30),
+			model.NewInt(40),
+		}),
+	})
+
+	// Name access: (substr 2 name name) -> Graeme
+	resName := eng.EvaluateSubstr(&model.SubstrExpr{
+		ElementRef: model.NewInt(w2.Timetag),
+		Start:      model.NewSymbol("name"),
+		End:        model.NewSymbol("name"),
+	}, nil)
+	if resName.Raw() != "Graeme" {
+		t.Fatalf("expected Graeme, got %v", resName)
+	}
+
+	// Age access: (substr 2 age age) -> 30
+	resAge := eng.EvaluateSubstr(&model.SubstrExpr{
+		ElementRef: model.NewInt(w2.Timetag),
+		Start:      model.NewSymbol("age"),
+		End:        model.NewSymbol("age"),
+	}, nil)
+	if resAge.Raw() != int64(30) {
+		t.Fatalf("expected 30, got %v", resAge)
+	}
+
+	// Scores single access: (substr 2 scores scores) -> 10
+	resScore := eng.EvaluateSubstr(&model.SubstrExpr{
+		ElementRef: model.NewInt(w2.Timetag),
+		Start:      model.NewSymbol("scores"),
+		End:        model.NewSymbol("scores"),
+	}, nil)
+	if resScore.Raw() != int64(10) {
+		t.Fatalf("expected 10, got %v", resScore)
+	}
+
+	// Scores inf range: (substr 2 5 inf) -> [20, 30, 40]
+	resScoresInf := eng.EvaluateSubstr(&model.SubstrExpr{
+		ElementRef: model.NewInt(w2.Timetag),
+		Start:      model.NewInt(5),
+		End:        model.NewSymbol("inf"),
+	}, nil)
+	if !resScoresInf.IsVector() || len(resScoresInf.VectorElements()) != 3 {
+		t.Fatalf("expected 3 scores, got %v", resScoresInf)
+	}
+	if resScoresInf.VectorElements()[0].Raw() != int64(20) || resScoresInf.VectorElements()[2].Raw() != int64(40) {
+		t.Fatalf("expected [20, 30, 40], got %v", resScoresInf)
+	}
+
+	// Out of bounds
+	resEmpty := eng.EvaluateSubstr(&model.SubstrExpr{
+		ElementRef: model.NewInt(w2.Timetag),
+		Start:      model.NewInt(99),
+		End:        model.NewSymbol("inf"),
+	}, nil)
+	if !resEmpty.IsVector() || len(resEmpty.VectorElements()) != 0 {
+		t.Fatalf("expected empty vector for out of bounds inf, got %v", resEmpty)
+	}
+}
+
+func TestEngineSubstrRuleExecution(t *testing.T) {
+	eng := New()
+	eng.SetTrace(false)
+
+	eng.DeclareClass("string", []string{"sequence"})
+	eng.DeclareVectorAttribute("sequence")
+	eng.DeclareClass("output", []string{"val"})
+
+	// Rule:
+	// (p pop-string
+	//    <sVal> (string ^sequence <first> <second>)
+	//    -->
+	//    (bind <head> (substr <sVal> sequence sequence))
+	//    (bind <next> (compute (litval sequence) + 1))
+	//    (modify <sVal> ^sequence (substr <sVal> <next> inf))
+	//    (make output ^val <head>)
+	// )
+	r := model.NewRule("pop-string")
+	ce := model.NewPositiveCE("string").
+		WithElementVariable("sVal").
+		AddEqualTest("sequence", model.NewVariable("first")).
+		AddEqualTest("sequence", model.NewVariable("second"))
+	r.AddCondition(ce)
+
+	r.AddAction(model.BindAction{
+		Variable: "head",
+		Value: model.NewSubstr(
+			model.NewVariable("sVal"),
+			model.NewSymbol("sequence"),
+			model.NewSymbol("sequence"),
+		),
+	})
+	r.AddAction(model.BindAction{
+		Variable: "next",
+		Value: model.NewCompute(
+			[]model.Value{model.NewLitval("", model.NewSymbol("sequence")), model.NewInt(1)},
+			[]model.ComputeOp{model.ComputeOpAdd},
+		),
+	})
+	r.AddAction(model.ModifyAction{
+		TargetElementVar: "sVal",
+		Attributes: map[string]model.Value{
+			"sequence": model.NewSubstr(
+				model.NewVariable("sVal"),
+				model.NewVariable("next"),
+				model.NewSymbol("inf"),
+			),
+		},
+	})
+	r.AddAction(model.MakeAction{
+		Class: "output",
+		Attributes: map[string]model.Value{
+			"val": model.NewVariable("head"),
+		},
+	})
+
+	eng.AddRule(r)
+
+	// Make initial WME with sequence [A, B, C]
+	eng.Make("string", map[string]model.Value{
+		"sequence": model.NewVector([]model.Value{
+			model.NewSymbol("A"),
+			model.NewSymbol("B"),
+			model.NewSymbol("C"),
+		}),
+	})
+
+	// Run to quiescence
+	cycles, err := eng.Run(10)
+	if err != nil {
+		t.Fatalf("engine run failed: %v", err)
+	}
+
+	// Should fire 2 times (A then B, leaving [C] which doesn't match <first> <second>)
+	if cycles != 2 {
+		t.Fatalf("expected 2 cycles, got %d", cycles)
+	}
+
+	outputs := eng.FindWMEsMatching(model.NewPositiveCE("output"))
+	if len(outputs) != 2 {
+		t.Fatalf("expected 2 output WMEs, got %d", len(outputs))
+	}
+
+	out1, _ := outputs[0].Get("val")
+	out2, _ := outputs[1].Get("val")
+	if out1.Raw() != "A" || out2.Raw() != "B" {
+		t.Fatalf("expected outputs A and B, got %v and %v", out1, out2)
+	}
+
+	// Final string element should have sequence [C]
+	stringsWMEs := eng.FindWMEsMatching(model.NewPositiveCE("string"))
+	if len(stringsWMEs) != 1 {
+		t.Fatalf("expected 1 string WME remaining, got %d", len(stringsWMEs))
+	}
+	remSeq, _ := stringsWMEs[0].Get("sequence")
+	if !remSeq.IsVector() || len(remSeq.VectorElements()) != 1 || remSeq.VectorElements()[0].Raw() != "C" {
+		t.Fatalf("expected remaining sequence [C], got %v", remSeq)
+	}
+}
+
+
 
 
 

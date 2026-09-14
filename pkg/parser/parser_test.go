@@ -1386,4 +1386,287 @@ func TestParseRuleWatchAction(t *testing.T) {
 	}
 }
 
+func TestParsePPWM(t *testing.T) {
+	// 1. Basic (ppwm City ^state Pennsylvania)
+	src1 := `(ppwm City ^state Pennsylvania)`
+	p1, err := NewParser(src1)
+	if err != nil {
+		t.Fatalf("failed to create parser: %v", err)
+	}
+	stmt1, err := p1.NextStatement()
+	if err != nil {
+		t.Fatalf("failed to parse ppwm: %v", err)
+	}
+	if stmt1.Type != StmtPPWM || stmt1.PPWMPattern == nil {
+		t.Fatalf("expected StmtPPWM, got %+v", stmt1)
+	}
+	if stmt1.PPWMPattern.Class != "City" {
+		t.Errorf("expected class City, got %s", stmt1.PPWMPattern.Class)
+	}
+	if len(stmt1.PPWMPattern.Tests) != 1 || stmt1.PPWMPattern.Tests[0].Attribute != "state" {
+		t.Fatalf("expected 1 test on state, got %+v", stmt1.PPWMPattern.Tests)
+	}
+	if stmt1.PPWMPattern.Tests[0].Constraints[0].Value.String() != "Pennsylvania" {
+		t.Errorf("expected Pennsylvania, got %s", stmt1.PPWMPattern.Tests[0].Constraints[0].Value.String())
+	}
+
+	// 2. Inner parens (ppwm (City ^state Pennsylvania))
+	src2 := `(ppwm (City ^state Pennsylvania))`
+	p2, err := NewParser(src2)
+	if err != nil {
+		t.Fatalf("failed to create parser: %v", err)
+	}
+	stmt2, err := p2.NextStatement()
+	if err != nil {
+		t.Fatalf("failed to parse ppwm with inner parens: %v", err)
+	}
+	if stmt2.PPWMPattern.Class != "City" || len(stmt2.PPWMPattern.Tests) != 1 {
+		t.Fatalf("unexpected pattern: %+v", stmt2.PPWMPattern)
+	}
+
+	// 3. (ppwm City) without attributes
+	src3 := `(ppwm City)`
+	p3, err := NewParser(src3)
+	if err != nil {
+		t.Fatalf("failed to create parser: %v", err)
+	}
+	stmt3, err := p3.NextStatement()
+	if err != nil {
+		t.Fatalf("failed to parse (ppwm City): %v", err)
+	}
+	if stmt3.PPWMPattern.Class != "City" || len(stmt3.PPWMPattern.Tests) != 0 {
+		t.Fatalf("expected City with 0 tests, got %+v", stmt3.PPWMPattern)
+	}
+
+	// 4. (ppwm *) and (ppwm) wildcard
+	for _, wildcardSrc := range []string{`(ppwm *)`, `(ppwm)`} {
+		p, err := NewParser(wildcardSrc)
+		if err != nil {
+			t.Fatalf("failed to create parser for %s: %v", wildcardSrc, err)
+		}
+		stmt, err := p.NextStatement()
+		if err != nil {
+			t.Fatalf("failed to parse %s: %v", wildcardSrc, err)
+		}
+		if stmt.PPWMPattern.Class != "*" {
+			t.Errorf("expected wildcard class '*' for %s, got %s", wildcardSrc, stmt.PPWMPattern.Class)
+		}
+	}
+
+	// 5. Positional with schema
+	schemaSrc := `
+	(literalize City name state population)
+	(ppwm City Pittsburgh Pennsylvania 1500000)
+	`
+	pSchema, err := NewParser(schemaSrc)
+	if err != nil {
+		t.Fatalf("failed to create parser: %v", err)
+	}
+	s1, err := pSchema.NextStatement()
+	if err != nil || s1.Type != StmtLiteralize {
+		t.Fatalf("expected literalize, got %v: %v", s1, err)
+	}
+	s2, err := pSchema.NextStatement()
+	if err != nil || s2.Type != StmtPPWM {
+		t.Fatalf("expected ppwm, got %v: %v", s2, err)
+	}
+	if len(s2.PPWMPattern.Tests) != 3 {
+		t.Fatalf("expected 3 positional tests, got %d", len(s2.PPWMPattern.Tests))
+	}
+	if s2.PPWMPattern.Tests[0].Attribute != "name" || s2.PPWMPattern.Tests[1].Attribute != "state" || s2.PPWMPattern.Tests[2].Attribute != "population" {
+		t.Fatalf("unexpected attribute mapping: %+v", s2.PPWMPattern.Tests)
+	}
+
+	// 6. Vector attributes
+	vecSrc := `
+	(vector-attribute coords)
+	(ppwm Point ^coords 10 20)
+	`
+	pVec, err := NewParser(vecSrc)
+	if err != nil {
+		t.Fatalf("failed to create parser: %v", err)
+	}
+	v1, err := pVec.NextStatement()
+	if err != nil || v1.Type != StmtVectorAttribute {
+		t.Fatalf("expected vector-attribute, got %v: %v", v1, err)
+	}
+	v2, err := pVec.NextStatement()
+	if err != nil || v2.Type != StmtPPWM {
+		t.Fatalf("expected ppwm, got %v: %v", v2, err)
+	}
+	if len(v2.PPWMPattern.Tests) != 1 || !v2.PPWMPattern.Tests[0].Constraints[0].Value.IsVector() {
+		t.Fatalf("expected vector test, got %+v", v2.PPWMPattern.Tests)
+	}
+
+	// 7. Forbidden constructs tests
+	forbiddenCases := []struct {
+		name string
+		src  string
+	}{
+		{"variable value", `(ppwm City ^state <x>)`},
+		{"variable class", `(ppwm <c> ^state Pennsylvania)`},
+		{"variable element", `(ppwm <c> (City ^state Pennsylvania))`},
+		{"predicate greater", `(ppwm City ^population > 1000)`},
+		{"predicate less-equal", `(ppwm City ^population <= 1000)`},
+		{"predicate not-equal", `(ppwm City ^state != Pennsylvania)`},
+		{"predicate equal op", `(ppwm City ^state = Pennsylvania)`},
+		{"quote operator", `(ppwm City ^state //)`},
+		{"curly braces", `(ppwm City ^state { PA NY })`},
+		{"angle brackets", `(ppwm City ^state <PA>)`},
+		{"negation", `(ppwm -(City ^state Pennsylvania))`},
+	}
+
+	for _, fc := range forbiddenCases {
+		t.Run(fc.name, func(t *testing.T) {
+			p, err := NewParser(fc.src)
+			if err == nil {
+				_, parseErr := p.NextStatement()
+				if parseErr == nil {
+					t.Fatalf("expected error for forbidden construct %q (%s), but got nil", fc.name, fc.src)
+				}
+			}
+		})
+	}
+}
+
+func TestParseStrategyTopLevel(t *testing.T) {
+	src := `
+	(strategy mea)
+	(strategy lex)
+	(strategy MEA)
+	`
+	p, err := NewParser(src)
+	if err != nil {
+		t.Fatalf("failed to create parser: %v", err)
+	}
+
+	s1, err := p.NextStatement()
+	if err != nil || s1.Type != StmtStrategy || s1.Strategy != "MEA" {
+		t.Fatalf("expected strategy MEA, got %+v (err: %v)", s1, err)
+	}
+
+	s2, err := p.NextStatement()
+	if err != nil || s2.Type != StmtStrategy || s2.Strategy != "LEX" {
+		t.Fatalf("expected strategy LEX, got %+v (err: %v)", s2, err)
+	}
+
+	s3, err := p.NextStatement()
+	if err != nil || s3.Type != StmtStrategy || s3.Strategy != "MEA" {
+		t.Fatalf("expected strategy MEA, got %+v (err: %v)", s3, err)
+	}
+
+	invalidSrc := `(strategy invalid)`
+	pInv, err := NewParser(invalidSrc)
+	if err != nil {
+		t.Fatalf("failed to create parser: %v", err)
+	}
+	_, err = pInv.NextStatement()
+	if err == nil {
+		t.Fatalf("expected error for invalid strategy, got nil")
+	}
+}
+
+func TestParseSubstr(t *testing.T) {
+	src := `
+	(substr <str> sequence sequence)
+	(substr <str> 2 4)
+	(substr <str> (compute (litval sequence) + 1) inf)
+	(substr 1 ^sequence inf)
+	`
+	p, err := NewParser(src)
+	if err != nil {
+		t.Fatalf("failed to create parser: %v", err)
+	}
+
+	// 1: (substr <str> sequence sequence)
+	s1, err := p.NextStatement()
+	if err != nil || s1.Type != StmtSubstr {
+		t.Fatalf("expected StmtSubstr, got %+v (err: %v)", s1, err)
+	}
+	if !s1.Substr.ElementRef.IsVariable() || s1.Substr.ElementRef.VariableName() != "str" {
+		t.Errorf("expected ElementRef <str>, got %v", s1.Substr.ElementRef)
+	}
+	if s1.Substr.Start.Raw() != "sequence" || s1.Substr.End.Raw() != "sequence" {
+		t.Errorf("expected sequence/sequence, got %v / %v", s1.Substr.Start, s1.Substr.End)
+	}
+
+	// 2: (substr <str> 2 4)
+	s2, err := p.NextStatement()
+	if err != nil || s2.Type != StmtSubstr {
+		t.Fatalf("expected StmtSubstr, got %+v (err: %v)", s2, err)
+	}
+	if s2.Substr.Start.Raw() != int64(2) || s2.Substr.End.Raw() != int64(4) {
+		t.Errorf("expected 2 / 4, got %v / %v", s2.Substr.Start, s2.Substr.End)
+	}
+
+	// 3: (substr <str> (compute (litval sequence) + 1) inf)
+	s3, err := p.NextStatement()
+	if err != nil || s3.Type != StmtSubstr {
+		t.Fatalf("expected StmtSubstr, got %+v (err: %v)", s3, err)
+	}
+	if !s3.Substr.Start.IsCompute() {
+		t.Errorf("expected compute expr for start, got %v", s3.Substr.Start)
+	}
+	if s3.Substr.End.Raw() != "inf" {
+		t.Errorf("expected inf for end, got %v", s3.Substr.End)
+	}
+
+	// 4: (substr 1 ^sequence inf)
+	s4, err := p.NextStatement()
+	if err != nil || s4.Type != StmtSubstr {
+		t.Fatalf("expected StmtSubstr, got %+v (err: %v)", s4, err)
+	}
+	if s4.Substr.ElementRef.Raw() != int64(1) {
+		t.Errorf("expected ElementRef 1, got %v", s4.Substr.ElementRef)
+	}
+	if s4.Substr.Start.Raw() != "sequence" || s4.Substr.End.Raw() != "inf" {
+		t.Errorf("expected sequence / inf, got %v / %v", s4.Substr.Start, s4.Substr.End)
+	}
+}
+
+func TestParseSubstrInRule(t *testing.T) {
+	src := `
+	(p process-string
+	   <sVal> (string ^sequence <first> <second>)
+	   -->
+	   (bind <head> (substr <sVal> sequence sequence))
+	   (bind <next> (compute (litval sequence) + 1))
+	   (bind <tail> (substr <sVal> <next> inf))
+	   (modify <sVal> ^sequence (substr <sVal> <next> inf))
+	)
+	`
+	rules, err := ParseRules(src)
+	if err != nil {
+		t.Fatalf("failed to parse rule: %v", err)
+	}
+	if len(rules) != 1 {
+		t.Fatalf("expected 1 rule, got %d", len(rules))
+	}
+	rule := rules[0]
+	if len(rule.Actions) != 4 {
+		t.Fatalf("expected 4 actions, got %d", len(rule.Actions))
+	}
+
+	// Action 0: bind <head> (substr <sVal> sequence sequence)
+	b0, ok := rule.Actions[0].(model.BindAction)
+	if !ok || !b0.Value.IsSubstr() {
+		t.Fatalf("expected BindAction with substr, got %T: %v", rule.Actions[0], rule.Actions[0])
+	}
+	if b0.Variable != "head" {
+		t.Errorf("expected var head, got %s", b0.Variable)
+	}
+
+	// Action 3: modify <sVal> ^sequence (substr ...)
+	m3, ok := rule.Actions[3].(model.ModifyAction)
+	if !ok {
+		t.Fatalf("expected ModifyAction, got %T: %v", rule.Actions[3], rule.Actions[3])
+	}
+	seqVal, ok := m3.Attributes["sequence"]
+	if !ok || !seqVal.IsSubstr() {
+		t.Errorf("expected substr in modify sequence, got %v", seqVal)
+	}
+}
+
+
+
 

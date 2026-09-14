@@ -1,0 +1,15 @@
+; Workflow validating substr RHS function with vector attributes, litval, and bind
+(literalize string sequence)
+(vector-attribute sequence)
+(literalize processed head remaining)
+
+(p pop-char
+   <str> (string ^sequence <first> <second>)
+   -->
+   (bind <head> (substr <str> sequence sequence))
+   (bind <next> (compute (litval sequence) + 1))
+   (bind <rest> (substr <str> <next> inf))
+   (modify <str> ^sequence <rest>)
+   (make processed ^head <head> ^remaining <rest>)
+   (write "Popped:" <head> "Remaining:" <rest> (crlf))
+)

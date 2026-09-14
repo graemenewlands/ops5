@@ -19,6 +19,7 @@ These keywords appear at the root level of `.ops` source files or directly withi
 | **`default`** | `(default <log-name> <subsystem>)` | Redirects default stream for `accept`, `write`, or `trace`. See [`file_io` Reference](file_io.md). | `(default ruletrace accept)` |
 | **`excise`** | `(excise <rule1> ... <ruleN>)` | Evicts production rules from production memory, detaches their terminal nodes from the Rete network, and purges all pending activations and refraction history from the conflict set. Existing WMEs are preserved. See [`excise` Reference](excise.md). | `(excise detect-item cleanup-task)` |
 | **`pm`** | `(pm [<rule1> ... <ruleN> \| *])` | Pretty-prints the source text of specified production rule(s) or all rules (`*`) currently held in production memory. See [`pm` Reference](pm.md). | `(pm FindAncestors)`<br>`(pm *)` |
+| **`ppwm`** | `(ppwm [<class> [^<attr> <val> ...]] \| *)` | Filters and prints active working memory elements matching an LHS condition pattern. See [`ppwm` Reference](ppwm.md). | `(ppwm City ^state Pennsylvania)` |
 | **`remove`** | `(remove [<timetag...> \| *])` | Retracts specific WME(s) by timetag or all WMEs (`*`) from working memory. | `(remove *)`<br>`(remove 1 2)` |
 | **`watch`** | `(watch [0 \| 1 \| 2])` | Configures or displays the engine trace level (0=silent, 1=rule firings with timetags, 2=rule firings and WM assertions/retractions). Default is 1. | `(watch)`<br>`(watch 2)` |
 
@@ -46,6 +47,7 @@ These action verbs execute sequentially when a production rule fires.
 | **`acceptline`** | `(acceptline [<log-name>])` | RHS value function reading a full line of text into a scalar or vector. See [`file_io` Reference](file_io.md). | `(make data ^tokens (acceptline))` |
 | **`genatom`** | `(genatom)` | RHS function generating a unique symbolic atom (`atom1`, `atom2`, ...). See [`genatom` Reference](genatom.md). | `(make node ^id (genatom))` |
 | **`litval`** | `(litval [<class>] <attr>)` | RHS function returning the numeric index (2, 3, ...) of an attribute. See [`litval` Reference](litval.md). | `(make meta ^slot (litval name))` |
+| **`substr`** | `(substr <elem> <start> <end>)` | RHS function extracting a subsequence or single value from a WME. See [`substr` Reference](substr.md). | `(substr <str> sequence sequence)`<br>`(substr <str> 3 inf)` |
 | **`halt`** | `(halt)` | Halts the inference engine execution loop immediately. Current cycle completes, but no further rules fire. | `(halt)` |
 | **`watch`** | `(watch [0 \| 1 \| 2])` | Modifies or displays the engine trace level dynamically during rule execution. | `(watch 2)`<br>`(watch 0)` |
 
@@ -92,6 +94,7 @@ The interactive CLI shell (`ops5`) supports both bare words and paren-enclosed c
 | **`default`** | `[<logical-name> <subsystem>]` | Sets or displays default streams for `accept`, `write`, `trace`. |
 | **`genatom`** | _none_ | Generates and displays a unique symbolic atom (e.g. `atom1`). |
 | **`litval`** | `[<class>] <attr>` | Displays the numeric index assigned to an attribute name. |
+| **`substr`** | `<elem> <start> <end>` | Extracts a subsequence or value from a working memory element. See [`substr` Reference](substr.md). |
 | **`literalize`** | `<class> <attr1> ...` | Declares a class schema with positional attribute layout. |
 | **`schemas`** / **`schema`** | `[class]` | Prints registered class schemas and their vector attributes. |
 | **`vector-attribute`** | `<attr1> ...` | Declares attribute(s) as multi-valued vector attributes. |
@@ -102,6 +105,7 @@ The interactive CLI shell (`ops5`) supports both bare words and paren-enclosed c
 | **`load`** | `<file.ops>` | Loads and parses an external OPS5 source file. |
 | **`excise`** | `<rule1> [rule2 ...]` | Evicts production rule(s) by name from production memory, detaches terminal nodes from Rete network, and purges pending activations from the conflict set. See [`excise` Reference](excise.md). |
 | **`pm`** | `[<rule1> ... \| *]` | Pretty-prints the source text of specified production rule(s) or all rules (`*`). See [`pm` Reference](pm.md). |
+| **`ppwm`** | `[<class> [^attr val...]] \| *` | Prints active working memory elements matching an LHS condition pattern. See [`ppwm` Reference](ppwm.md). |
 | **`test`** | `<file.json>` | Executes a JSON test harness case. |
 | **`reset`** | _none_ | Clears working memory, network state, and conflict set. |
 | **`help`** | _none_ | Displays interactive REPL help. |
@@ -112,9 +116,6 @@ The interactive CLI shell (`ops5`) supports both bare words and paren-enclosed c
 ## 5. Classic OPS5 Keywords Not Yet Implemented (Roadmap)
 
 For reference and future engine development, the following standard OPS5 constructs from the classic Charles Forgy specification are planned or tracked for future implementation:
-
-### RHS Functions & Computations
-- **`substr`**: Extracts a sub-vector or substring from a value, e.g. `(substr <vec> 1 2)`.
 
 ### LHS Compound Matchers
 - **`{ ... }`**: Conjunction block restricting an attribute to multiple bounds, e.g. `^val { > 0 < 100 }`.

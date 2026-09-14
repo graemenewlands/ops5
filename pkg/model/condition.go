@@ -183,3 +183,73 @@ func (ce *ConditionElement) String() string {
 	b.WriteString(")")
 	return b.String()
 }
+
+// Matches evaluates whether this condition element pattern matches the given WME.
+// Class matching is case-insensitive, with "*" matching any class.
+// All attribute tests must be satisfied by the WME.
+func (ce *ConditionElement) Matches(wme *WME) bool {
+	if wme == nil {
+		return false
+	}
+	if ce.Class != "" && ce.Class != "*" {
+		if !strings.EqualFold(wme.Class, ce.Class) {
+			return false
+		}
+	}
+
+	for _, at := range ce.Tests {
+		val, ok := wme.Get(at.Attribute)
+		if !ok {
+			val = NewSymbol("nil")
+		}
+
+		for _, c := range at.Constraints {
+			if !evalConstraint(val, c.Op, c.Value) {
+				return false
+			}
+		}
+	}
+
+	return true
+}
+
+func evalConstraint(val Value, op Operator, target Value) bool {
+	if val.IsVector() {
+		elems := val.VectorElements()
+		if target.IsVector() {
+			return evalOp(val, op, target)
+		}
+		// Membership test for scalar target against vector attribute
+		for _, elem := range elems {
+			if evalOp(elem, op, target) {
+				return true
+			}
+		}
+		return false
+	}
+
+	return evalOp(val, op, target)
+}
+
+func evalOp(val Value, op Operator, target Value) bool {
+	switch op {
+	case OpEqual:
+		return val.Equal(target)
+	case OpNotEqual:
+		return !val.Equal(target)
+	case OpLess:
+		cmp, err := val.Compare(target)
+		return err == nil && cmp < 0
+	case OpLessEqual:
+		cmp, err := val.Compare(target)
+		return err == nil && cmp <= 0
+	case OpGreater:
+		cmp, err := val.Compare(target)
+		return err == nil && cmp > 0
+	case OpGreaterEqual:
+		cmp, err := val.Compare(target)
+		return err == nil && cmp >= 0
+	default:
+		return false
+	}
+}

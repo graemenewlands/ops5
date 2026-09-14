@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"ops5/pkg/cli"
+	"ops5/pkg/conflict"
 	"ops5/pkg/engine"
 	"ops5/pkg/harness"
 	"ops5/pkg/model"
@@ -976,6 +977,510 @@ func TestWatchIntegration(t *testing.T) {
 		}
 	})
 }
+
+func TestPPWMIntegration(t *testing.T) {
+	runner := harness.NewRunner()
+	src := `
+	(literalize City name state population)
+	(make City ^name Pittsburgh ^state Pennsylvania ^population 300000)
+	(make City ^name Philadelphia ^state Pennsylvania ^population 1500000)
+	(make City ^name Boston ^state Massachusetts ^population 675000)
+	(make Person ^name Franklin ^state Pennsylvania)
+	(ppwm City ^state Pennsylvania)
+	(ppwm City ^name Boston)
+	`
+	tc := &harness.TestCase{
+		Name:     "ppwm_integration_test",
+		Strategy: "lex",
+		Source:   src,
+	}
+
+	res := runner.Run(tc)
+	if !res.Passed {
+		t.Fatalf("runner failed: %v", res.Error)
+	}
+
+	output := res.Output
+	if !strings.Contains(output, "(1: City ^name Pittsburgh ^population 300000 ^state Pennsylvania)") {
+		t.Errorf("expected Pittsburgh in output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "(2: City ^name Philadelphia ^population 1500000 ^state Pennsylvania)") {
+		t.Errorf("expected Philadelphia in output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "(3: City ^name Boston ^population 675000 ^state Massachusetts)") {
+		t.Errorf("expected Boston in output, got:\n%s", output)
+	}
+	// Person Franklin should not match (ppwm City ^state Pennsylvania)
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	for _, l := range lines {
+		if strings.Contains(l, "Person") {
+			t.Errorf("did not expect Person in output of City queries, got line: %s", l)
+		}
+	}
+}
+
+// TestIntegration3_MonkeyBananas verifies Section 3 Monkey and Bananas Problem
+// from Brownston et al. (1985) across all required environments and initial conditions.
+func TestIntegration3_MonkeyBananas(t *testing.T) {
+	loadMonkeyBananas := func(t *testing.T, in string) (*cli.REPL, *bytes.Buffer) {
+		t.Helper()
+		var outBuf bytes.Buffer
+		repl := cli.NewREPL(strings.NewReader(in), &outBuf)
+		err := repl.LoadFile(filepath.Join("integration", "3_monkey_bananas.ops5"))
+		if err != nil {
+			t.Fatalf("failed to load 3_monkey_bananas.ops5: %v", err)
+		}
+		if repl.Engine().ConflictSet().Strategy() != conflict.StrategyMEA {
+			t.Fatalf("expected strategy MEA, got %v", repl.Engine().ConflictSet().Strategy())
+		}
+		return repl, &outBuf
+	}
+
+	t.Run("ceiling_bananas", func(t *testing.T) {
+		repl, outBuf := loadMonkeyBananas(t, "")
+		repl.Engine().Make("TestCase", map[string]model.Value{
+			"name": model.NewSymbol("ceiling"),
+		})
+		cycles, err := repl.Engine().Run(50)
+		if err != nil {
+			t.Fatalf("run failed: %v", err)
+		}
+		t.Logf("ceiling run completed in %d cycles", cycles)
+		out := outBuf.String()
+
+		expectedCmds := []string{
+			"jump onto the floor",
+			"walk to 9-5",
+			"grab ladder",
+			"walk to 2-2",
+			"drop ladder",
+			"climb onto ladder",
+			"grab bananas",
+			"SUCCESS: The monkey has grabbed the bananas!",
+		}
+
+		lastIdx := -1
+		for _, cmd := range expectedCmds {
+			idx := strings.Index(out, cmd)
+			if idx == -1 {
+				t.Errorf("expected output to contain command %q, got:\n%s", cmd, out)
+			} else if idx < lastIdx {
+				t.Errorf("command %q appeared out of order, got:\n%s", cmd, out)
+			}
+			lastIdx = idx
+		}
+
+		// Verify final WM state
+		monkeys := repl.Engine().WorkingMemory().FindByClass("monkey")
+		if len(monkeys) != 1 {
+			t.Fatalf("expected 1 monkey in WM, got %d", len(monkeys))
+		}
+		holdsVal, _ := monkeys[0].Get("holds")
+		if !holdsVal.Equal(model.NewSymbol("bananas")) {
+			t.Errorf("expected monkey to hold bananas, got %v", holdsVal)
+		}
+		onVal, _ := monkeys[0].Get("on")
+		if !onVal.Equal(model.NewSymbol("ladder")) {
+			t.Errorf("expected monkey on ladder, got %v", onVal)
+		}
+	})
+
+	t.Run("floor_bananas", func(t *testing.T) {
+		repl, outBuf := loadMonkeyBananas(t, "")
+		repl.Engine().Make("TestCase", map[string]model.Value{
+			"name": model.NewSymbol("floor"),
+		})
+		cycles, err := repl.Engine().Run(50)
+		if err != nil {
+			t.Fatalf("run failed: %v", err)
+		}
+		t.Logf("floor run completed in %d cycles", cycles)
+		out := outBuf.String()
+
+		expectedCmds := []string{
+			"jump onto the floor",
+			"walk to 2-2",
+			"grab bananas",
+			"SUCCESS: The monkey has grabbed the bananas!",
+		}
+
+		lastIdx := -1
+		for _, cmd := range expectedCmds {
+			idx := strings.Index(out, cmd)
+			if idx == -1 {
+				t.Errorf("expected output to contain command %q, got:\n%s", cmd, out)
+			} else if idx < lastIdx {
+				t.Errorf("command %q appeared out of order, got:\n%s", cmd, out)
+			}
+			lastIdx = idx
+		}
+
+		monkeys := repl.Engine().WorkingMemory().FindByClass("monkey")
+		if len(monkeys) != 1 {
+			t.Fatalf("expected 1 monkey in WM, got %d", len(monkeys))
+		}
+		holdsVal, _ := monkeys[0].Get("holds")
+		if !holdsVal.Equal(model.NewSymbol("bananas")) {
+			t.Errorf("expected monkey to hold bananas, got %v", holdsVal)
+		}
+	})
+
+	t.Run("couch_bananas", func(t *testing.T) {
+		repl, outBuf := loadMonkeyBananas(t, "")
+		repl.Engine().Make("TestCase", map[string]model.Value{
+			"name": model.NewSymbol("couch"),
+		})
+		cycles, err := repl.Engine().Run(50)
+		if err != nil {
+			t.Fatalf("run failed: %v", err)
+		}
+		t.Logf("couch run completed in %d cycles", cycles)
+		out := outBuf.String()
+
+		expectedCmds := []string{
+			"walk to 5-7",
+			"climb onto couch",
+			"grab bananas",
+			"SUCCESS: The monkey has grabbed the bananas!",
+		}
+
+		lastIdx := -1
+		for _, cmd := range expectedCmds {
+			idx := strings.Index(out, cmd)
+			if idx == -1 {
+				t.Errorf("expected output to contain command %q, got:\n%s", cmd, out)
+			} else if idx < lastIdx {
+				t.Errorf("command %q appeared out of order, got:\n%s", cmd, out)
+			}
+			lastIdx = idx
+		}
+
+		monkeys := repl.Engine().WorkingMemory().FindByClass("monkey")
+		if len(monkeys) != 1 {
+			t.Fatalf("expected 1 monkey in WM, got %d", len(monkeys))
+		}
+		holdsVal, _ := monkeys[0].Get("holds")
+		if !holdsVal.Equal(model.NewSymbol("bananas")) {
+			t.Errorf("expected monkey to hold bananas, got %v", holdsVal)
+		}
+		onVal, _ := monkeys[0].Get("on")
+		if !onVal.Equal(model.NewSymbol("couch")) {
+			t.Errorf("expected monkey on couch, got %v", onVal)
+		}
+	})
+
+	t.Run("ladder_bananas", func(t *testing.T) {
+		repl, outBuf := loadMonkeyBananas(t, "")
+		repl.Engine().Make("TestCase", map[string]model.Value{
+			"name": model.NewSymbol("ladder"),
+		})
+		cycles, err := repl.Engine().Run(50)
+		if err != nil {
+			t.Fatalf("run failed: %v", err)
+		}
+		t.Logf("ladder run completed in %d cycles", cycles)
+		out := outBuf.String()
+
+		expectedCmds := []string{
+			"jump onto the floor",
+			"walk to 9-5",
+			"climb onto ladder",
+			"grab bananas",
+			"SUCCESS: The monkey has grabbed the bananas!",
+		}
+
+		lastIdx := -1
+		for _, cmd := range expectedCmds {
+			idx := strings.Index(out, cmd)
+			if idx == -1 {
+				t.Errorf("expected output to contain command %q, got:\n%s", cmd, out)
+			} else if idx < lastIdx {
+				t.Errorf("command %q appeared out of order, got:\n%s", cmd, out)
+			}
+			lastIdx = idx
+		}
+
+		monkeys := repl.Engine().WorkingMemory().FindByClass("monkey")
+		if len(monkeys) != 1 {
+			t.Fatalf("expected 1 monkey in WM, got %d", len(monkeys))
+		}
+		holdsVal, _ := monkeys[0].Get("holds")
+		if !holdsVal.Equal(model.NewSymbol("bananas")) {
+			t.Errorf("expected monkey to hold bananas, got %v", holdsVal)
+		}
+	})
+
+	t.Run("holding_blanket", func(t *testing.T) {
+		repl, outBuf := loadMonkeyBananas(t, "")
+		repl.Engine().Make("TestCase", map[string]model.Value{
+			"name": model.NewSymbol("blanket"),
+		})
+		cycles, err := repl.Engine().Run(50)
+		if err != nil {
+			t.Fatalf("run failed: %v", err)
+		}
+		t.Logf("blanket run completed in %d cycles", cycles)
+		out := outBuf.String()
+
+		expectedCmds := []string{
+			"jump onto the floor",
+			"walk to 9-5",
+			"drop blanket",
+			"grab ladder",
+			"walk to 2-2",
+			"drop ladder",
+			"climb onto ladder",
+			"grab bananas",
+			"SUCCESS: The monkey has grabbed the bananas!",
+		}
+
+		lastIdx := -1
+		for _, cmd := range expectedCmds {
+			idx := strings.Index(out, cmd)
+			if idx == -1 {
+				t.Errorf("expected output to contain command %q, got:\n%s", cmd, out)
+			} else if idx < lastIdx {
+				t.Errorf("command %q appeared out of order, got:\n%s", cmd, out)
+			}
+			lastIdx = idx
+		}
+
+		monkeys := repl.Engine().WorkingMemory().FindByClass("monkey")
+		if len(monkeys) != 1 {
+			t.Fatalf("expected 1 monkey in WM, got %d", len(monkeys))
+		}
+		holdsVal, _ := monkeys[0].Get("holds")
+		if !holdsVal.Equal(model.NewSymbol("bananas")) {
+			t.Errorf("expected monkey to hold bananas, got %v", holdsVal)
+		}
+	})
+
+	t.Run("couch_holding_blanket", func(t *testing.T) {
+		repl, outBuf := loadMonkeyBananas(t, "")
+		repl.Engine().Make("TestCase", map[string]model.Value{
+			"name": model.NewSymbol("couch-blanket"),
+		})
+		cycles, err := repl.Engine().Run(50)
+		if err != nil {
+			t.Fatalf("run failed: %v", err)
+		}
+		t.Logf("couch-blanket run completed in %d cycles", cycles)
+		out := outBuf.String()
+
+		expectedCmds := []string{
+			"drop blanket",
+			"grab bananas",
+			"SUCCESS: The monkey has grabbed the bananas!",
+		}
+
+		lastIdx := -1
+		for _, cmd := range expectedCmds {
+			idx := strings.Index(out, cmd)
+			if idx == -1 {
+				t.Errorf("expected output to contain command %q, got:\n%s", cmd, out)
+			} else if idx < lastIdx {
+				t.Errorf("command %q appeared out of order, got:\n%s", cmd, out)
+			}
+			lastIdx = idx
+		}
+	})
+
+	t.Run("heavy_couch_constraint", func(t *testing.T) {
+		repl, outBuf := loadMonkeyBananas(t, "")
+		repl.Engine().Make("TestCase", map[string]model.Value{
+			"name": model.NewSymbol("heavy-couch"),
+		})
+		cycles, err := repl.Engine().Run(10)
+		if err != nil {
+			t.Fatalf("run failed: %v", err)
+		}
+		t.Logf("heavy-couch run completed in %d cycles", cycles)
+		out := outBuf.String()
+
+		if !strings.Contains(out, "The monkey is incapable of moving heavy object couch") {
+			t.Errorf("expected heavy object error message, got:\n%s", out)
+		}
+	})
+
+	t.Run("interactive_input_scenario_choice", func(t *testing.T) {
+		// Test selecting "ceiling" via interactive selection prompt
+		input := "ceiling\n"
+		repl, outBuf := loadMonkeyBananas(t, input)
+		repl.Engine().Make("Start", nil)
+
+		cycles, err := repl.Engine().Run(50)
+		if err != nil {
+			t.Fatalf("run failed: %v", err)
+		}
+		t.Logf("interactive scenario selection completed in %d cycles", cycles)
+		out := outBuf.String()
+
+		if !strings.Contains(out, "=== Monkey & Bananas Problem (10'x10'x10' Room) ===") {
+			t.Errorf("expected initial prompt header, got:\n%s", out)
+		}
+		if !strings.Contains(out, "grab bananas") {
+			t.Errorf("expected grab bananas in output, got:\n%s", out)
+		}
+		if !strings.Contains(out, "SUCCESS: The monkey has grabbed the bananas!") {
+			t.Errorf("expected success message, got:\n%s", out)
+		}
+	})
+
+	t.Run("interactive_input_custom_locations", func(t *testing.T) {
+		// Test interactive step-by-step entry
+		// monkey-at: 5-7, monkey-on: couch, monkey-holds: nil, couch-at: 5-7, ladder-at: 9-5, bananas-at: 2-2, bananas-on: ceiling
+		input := "interactive\n5-7\ncouch\nnil\n5-7\n9-5\n2-2\nceiling\n"
+		repl, outBuf := loadMonkeyBananas(t, input)
+		repl.Engine().Make("Start", nil)
+
+		cycles, err := repl.Engine().Run(60)
+		if err != nil {
+			t.Fatalf("run failed: %v", err)
+		}
+		t.Logf("interactive custom location setup completed in %d cycles", cycles)
+		out := outBuf.String()
+
+		expectedPrompts := []string{
+			"Enter monkey location (e.g. 5-7):",
+			"Enter monkey surface (floor or couch):",
+			"Enter monkey held item (nil or blanket):",
+			"Enter couch location (e.g. 5-7):",
+			"Enter ladder location (e.g. 9-5):",
+			"Enter bananas location (e.g. 2-2):",
+			"Enter bananas surface (ceiling, couch, ladder, or floor):",
+			"Planning action sequence for monkey...",
+			"jump onto the floor",
+			"walk to 9-5",
+			"grab ladder",
+			"walk to 2-2",
+			"drop ladder",
+			"climb onto ladder",
+			"grab bananas",
+			"SUCCESS: The monkey has grabbed the bananas!",
+		}
+
+		for _, p := range expectedPrompts {
+			if !strings.Contains(out, p) {
+				t.Errorf("expected output to contain %q, but got:\n%s", p, out)
+			}
+		}
+	})
+}
+
+func TestSubstrFunctionComprehensive(t *testing.T) {
+	program := `
+	(literalize string sequence)
+	(vector-attribute sequence)
+	(literalize person first-name last-name age)
+	(literalize log val)
+
+	(p test-element-variable
+	   <str> (string ^sequence <first> <second>)
+	   -->
+	   (bind <head> (substr <str> sequence sequence))
+	   (bind <next> (compute (litval sequence) + 1))
+	   (bind <tail> (substr <str> <next> inf))
+	   (make log ^val <head>)
+	   (modify <str> ^sequence <tail>)
+	)
+
+	(p test-scalar-attribute
+	   <p> (person ^first-name <f> ^last-name <l> ^age <body>)
+	   -->
+	   (bind <fn> (substr <p> first-name first-name))
+	   (bind <ln> (substr <p> last-name last-name))
+	   (bind <ag> (substr <p> age age))
+	   (make log ^val <fn>)
+	   (make log ^val <ln>)
+	   (make log ^val <ag>)
+	   (remove <p>)
+	)
+
+	(p test-ce-number
+	   (string ^sequence <val>)
+	   -->
+	   (bind <last-val> (substr 1 sequence sequence))
+	   (make log ^val <last-val>)
+	   (remove 1)
+	)
+	`
+	p, err := parser.NewParser(program)
+	if err != nil {
+		t.Fatalf("failed to create parser: %v", err)
+	}
+	eng := engine.New()
+	eng.SetTrace(false)
+
+	for {
+		stmt, err := p.NextStatement()
+		if err != nil {
+			t.Fatalf("parser error: %v", err)
+		}
+		if stmt == nil {
+			break
+		}
+		switch stmt.Type {
+		case parser.StmtLiteralize:
+			eng.DeclareClass(stmt.LiteralizeClass, stmt.LiteralizeAttrs)
+		case parser.StmtVectorAttribute:
+			for _, va := range stmt.VectorAttrs {
+				eng.DeclareVectorAttribute(va)
+			}
+		case parser.StmtRule:
+			eng.AddRule(stmt.Rule)
+		}
+	}
+
+	// Assert string with sequence X Y Z
+	eng.Make("string", map[string]model.Value{
+		"sequence": model.NewVector([]model.Value{
+			model.NewSymbol("X"),
+			model.NewSymbol("Y"),
+			model.NewSymbol("Z"),
+		}),
+	})
+
+	// Assert person
+	eng.Make("person", map[string]model.Value{
+		"first-name": model.NewSymbol("Alice"),
+		"last-name":  model.NewSymbol("Smith"),
+		"age":        model.NewInt(25),
+	})
+
+	cycles, err := eng.Run(20)
+	if err != nil {
+		t.Fatalf("engine run error: %v", err)
+	}
+
+	t.Logf("completed in %d cycles", cycles)
+
+	// Collect log values
+	logs := eng.FindWMEsMatching(model.NewPositiveCE("log"))
+	var logVals []string
+	for _, l := range logs {
+		v, _ := l.Get("val")
+		logVals = append(logVals, v.String())
+	}
+
+	// We expect:
+	// From person: Alice, Smith, 25
+	// From string: X, Y, Z
+	expectedValues := []string{"Alice", "Smith", "25", "X", "Y", "Z"}
+	for _, exp := range expectedValues {
+		found := false
+		for _, lv := range logVals {
+			if lv == exp {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected log value %q not found in %v", exp, logVals)
+		}
+	}
+}
+
+
 
 
 

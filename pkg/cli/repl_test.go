@@ -588,6 +588,149 @@ func TestREPLWatchCommand(t *testing.T) {
 	}
 }
 
+func TestREPLPPWMCommand(t *testing.T) {
+	commands := `
+	(literalize City name state population)
+	make City ^name Pittsburgh ^state Pennsylvania ^population 300000
+	make City ^name Philadelphia ^state Pennsylvania ^population 1500000
+	make City ^name Boston ^state Massachusetts ^population 675000
+	make Person ^name Franklin ^state Pennsylvania
+	(ppwm City ^state Pennsylvania)
+	ppwm City ^state Pennsylvania
+	(ppwm (City ^state Pennsylvania))
+	(ppwm City ^name Boston)
+	ppwm Person
+	ppwm City ^state Ohio
+	(ppwm City ^state <x>)
+	(ppwm City ^population > 100000)
+	(ppwm City ^state //)
+	(ppwm City ^state { PA NY })
+	exit
+	`
+	in := strings.NewReader(commands)
+	var out bytes.Buffer
+	repl := NewREPL(in, &out)
+	repl.Start()
+
+	output := out.String()
+
+	// Verify matching elements
+	if !strings.Contains(output, "(1: City ^name Pittsburgh ^population 300000 ^state Pennsylvania)") {
+		t.Errorf("expected Pittsburgh in ppwm output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "(2: City ^name Philadelphia ^population 1500000 ^state Pennsylvania)") {
+		t.Errorf("expected Philadelphia in ppwm output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "(3: City ^name Boston ^population 675000 ^state Massachusetts)") {
+		t.Errorf("expected Boston in ppwm output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "(4: Person ^name Franklin ^state Pennsylvania)") {
+		t.Errorf("expected Franklin in ppwm Person output, got:\n%s", output)
+	}
+
+	// Verify error reporting for forbidden constructs
+	if !strings.Contains(output, "ppwm error: ppwm pattern cannot contain variables (found '<x>')") {
+		t.Errorf("expected variable error message, got:\n%s", output)
+	}
+	if !strings.Contains(output, "ppwm error: ppwm pattern cannot contain predicates (found '>')") {
+		t.Errorf("expected predicate error message, got:\n%s", output)
+	}
+	if !strings.Contains(output, "ppwm error: ppwm pattern cannot contain the quote operator '//'") {
+		t.Errorf("expected quote error message, got:\n%s", output)
+	}
+	if !strings.Contains(output, "ppwm error: ppwm pattern cannot contain curly braces") {
+		t.Errorf("expected curly braces error message, got:\n%s", output)
+	}
+}
+
+func TestREPLLoadFilePPWMDirective(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "test_ppwm.ops")
+	opsContent := `
+	(literalize City name state)
+	(make City ^name Pittsburgh ^state Pennsylvania)
+	(make City ^name Boston ^state Massachusetts)
+	(ppwm City ^state Pennsylvania)
+	`
+	if err := os.WriteFile(filePath, []byte(opsContent), 0644); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
+	}
+
+	commands := fmt.Sprintf("load %s\nexit\n", filePath)
+	in := strings.NewReader(commands)
+	var out bytes.Buffer
+	repl := NewREPL(in, &out)
+	repl.Start()
+
+	output := out.String()
+	if !strings.Contains(output, "(1: City ^name Pittsburgh ^state Pennsylvania)") {
+		t.Errorf("expected Pittsburgh from (ppwm ...) directive during load, got:\n%s", output)
+	}
+	if strings.Contains(output, "Boston") {
+		t.Errorf("did not expect Boston in (ppwm City ^state Pennsylvania) output, got:\n%s", output)
+	}
+}
+
+func TestREPLSubstrInteractive(t *testing.T) {
+	commands := `
+	(literalize string sequence)
+	(vector-attribute sequence)
+	make string ^sequence A B C D
+	(substr 1 sequence sequence)
+	substr 1 2 4
+	(substr 1 3 inf)
+	exit
+	`
+	in := strings.NewReader(commands)
+	var out bytes.Buffer
+	repl := NewREPL(in, &out)
+	repl.Start()
+
+	output := out.String()
+	// (substr 1 sequence sequence) should print scalar A
+	if !strings.Contains(output, "ops5> A\n") && !strings.Contains(output, "\nA\n") {
+		t.Errorf("expected scalar 'A' output for substr 1 sequence sequence, got:\n%s", output)
+	}
+	// substr 1 2 4 should print A B C
+	if !strings.Contains(output, "A B C") {
+		t.Errorf("expected 'A B C' output for substr 1 2 4, got:\n%s", output)
+	}
+	// (substr 1 3 inf) should print B C D
+	if !strings.Contains(output, "B C D") {
+		t.Errorf("expected 'B C D' output for substr 1 3 inf, got:\n%s", output)
+	}
+}
+
+func TestREPLLoadFileSubstrDirective(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "test_substr.ops")
+	opsContent := `
+	(literalize string sequence)
+	(vector-attribute sequence)
+	(make string ^sequence alpha beta gamma delta)
+	(substr 1 sequence sequence)
+	(substr 1 3 inf)
+	`
+	if err := os.WriteFile(filePath, []byte(opsContent), 0644); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
+	}
+
+	commands := fmt.Sprintf("load %s\nexit\n", filePath)
+	in := strings.NewReader(commands)
+	var out bytes.Buffer
+	repl := NewREPL(in, &out)
+	repl.Start()
+
+	output := out.String()
+	if !strings.Contains(output, "alpha") {
+		t.Errorf("expected alpha from (substr 1 sequence sequence), got:\n%s", output)
+	}
+	if !strings.Contains(output, "beta gamma delta") {
+		t.Errorf("expected 'beta gamma delta' from (substr 1 3 inf), got:\n%s", output)
+	}
+}
+
+
 
 
 

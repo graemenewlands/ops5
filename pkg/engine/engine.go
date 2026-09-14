@@ -14,6 +14,7 @@ import (
 
 	"ops5/pkg/conflict"
 	"ops5/pkg/model"
+	"ops5/pkg/parser"
 	"ops5/pkg/rete"
 	"ops5/pkg/wm"
 )
@@ -45,6 +46,7 @@ type Engine struct {
 	lastAddedTimetag    int64
 	genatomCounter      int64
 	attrIndices         map[string]int
+	currentActivation   *conflict.Activation
 
 	// File I/O subsystem
 	openFiles           map[string]*openFileEntry
@@ -313,8 +315,62 @@ func (e *Engine) PrintRules(names ...string) []string {
 	return res
 }
 
+// FindWMEsMatching returns all active WMEs matching the given condition element pattern, ordered by timetag.
+func (e *Engine) FindWMEsMatching(pattern *model.ConditionElement) []*model.WME {
+	allWMEs := e.wm.All()
+	if pattern == nil {
+		return allWMEs
+	}
+	var res []*model.WME
+	for _, w := range allWMEs {
+		if pattern.Matches(w) {
+			res = append(res, w)
+		}
+	}
+	return res
+}
 
-// DeclareVectorAttribute registers an attribute name as a vector-attribute.
+// PrintPPWM returns string representations of all active WMEs matching the pattern.
+func (e *Engine) PrintPPWM(pattern *model.ConditionElement) []string {
+	wmes := e.FindWMEsMatching(pattern)
+	res := make([]string, len(wmes))
+	for i, w := range wmes {
+		res[i] = w.String()
+	}
+	return res
+}
+
+// PPWM parses a ppwm command or pattern string, validates it against OPS5 restrictions,
+// and returns all matching active working memory elements.
+func (e *Engine) PPWM(patternSrc string) ([]*model.WME, error) {
+	trimmed := strings.TrimSpace(patternSrc)
+	if strings.HasPrefix(strings.ToLower(trimmed), "(ppwm") {
+		// already has (ppwm
+	} else if strings.HasPrefix(trimmed, "(") && strings.HasSuffix(trimmed, ")") {
+		trimmed = "(ppwm " + trimmed[1:]
+	} else if strings.HasPrefix(strings.ToLower(trimmed), "ppwm ") || strings.ToLower(trimmed) == "ppwm" || strings.ToLower(trimmed) == "ppwm*" {
+		trimmed = "(" + trimmed + ")"
+	} else {
+		trimmed = "(ppwm " + trimmed + ")"
+	}
+
+	p, err := parser.NewParser(trimmed)
+	if err != nil {
+		return nil, err
+	}
+	for _, va := range e.VectorAttributes() {
+		p.RegisterVectorAttribute(va)
+	}
+	for _, s := range e.Schemas() {
+		p.RegisterSchema(s)
+	}
+	pattern, err := p.ParsePPWM()
+	if err != nil {
+		return nil, err
+	}
+	return e.FindWMEsMatching(pattern), nil
+}
+
 func (e *Engine) DeclareVectorAttribute(attr string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -990,9 +1046,14 @@ func (e *Engine) resolveValue(val model.Value, bindings map[string]model.Value) 
 	}
 	if val.IsVector() {
 		elems := val.VectorElements()
-		resolved := make([]model.Value, len(elems))
-		for i, el := range elems {
-			resolved[i] = e.resolveValue(el, bindings)
+		resolved := make([]model.Value, 0, len(elems))
+		for _, el := range elems {
+			r := e.resolveValue(el, bindings)
+			if r.IsVector() {
+				resolved = append(resolved, r.VectorElements()...)
+			} else {
+				resolved = append(resolved, r)
+			}
 		}
 		return model.NewVector(resolved)
 	}
@@ -1038,6 +1099,9 @@ func (e *Engine) resolveValue(val model.Value, bindings map[string]model.Value) 
 		}
 		return model.NewSymbol("nil")
 	}
+	if val.IsSubstr() {
+		return e.evaluateSubstrLocked(val.SubstrExpr(), bindings)
+	}
 	return val
 }
 
@@ -1076,6 +1140,11 @@ func (e *Engine) Step() (bool, error) {
 		// Conflict set empty -> quiescence reached
 		return false, nil
 	}
+
+	e.currentActivation = dominant
+	defer func() {
+		e.currentActivation = nil
+	}()
 
 	// Refract activation so it won't fire again for the same WMEs
 	e.conflictSet.MarkFired(dominant)
@@ -1150,6 +1219,10 @@ func (e *Engine) Step() (bool, error) {
 				return true, err
 			}
 			e.lastAddedTimetag = newWme.Timetag
+			if act.TargetElementVar != "" {
+				varName := strings.TrimPrefix(strings.TrimSuffix(act.TargetElementVar, ">"), "<")
+				localBindings[varName] = model.NewInt(newWme.Timetag)
+			}
 			if oldWme != nil {
 				e.logWMRetractLocked(oldWme)
 			}
@@ -1336,7 +1409,7 @@ func (e *Engine) getOrderedAttributeKeys(class string, attrs map[string]model.Va
 	var keys []string
 	seen := make(map[string]bool, len(attrs))
 
-	if schema, ok := e.schemas[class]; ok {
+	if schema, ok := e.schemas[strings.ToLower(class)]; ok {
 		for _, attr := range schema.Attributes {
 			norm := model.NormalizeAttribute(attr)
 			if _, exists := attrs[norm]; exists && !seen[norm] {
@@ -1399,6 +1472,238 @@ func (e *Engine) EnsureNewline() {
 		}
 		e.currentCol = 1
 	}
+}
+
+// EvaluateSubstr evaluates a substr expression on working memory.
+func (e *Engine) EvaluateSubstr(se *model.SubstrExpr, bindings map[string]model.Value) model.Value {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.evaluateSubstrLocked(se, bindings)
+}
+
+func (e *Engine) evaluateSubstrLocked(se *model.SubstrExpr, bindings map[string]model.Value) model.Value {
+	if se == nil {
+		return model.NewSymbol("nil")
+	}
+
+	var targetWME *model.WME
+
+	// 1. Resolve ElementRef
+	// Can be an element variable (e.g. <str>) or an integer condition element index / timetag (e.g. 1)
+	if se.ElementRef.IsVariable() {
+		vName := strings.TrimPrefix(strings.TrimSuffix(se.ElementRef.VariableName(), ">"), "<")
+		if bound, ok := bindings[vName]; ok {
+			if bound.Type() == model.TypeInteger {
+				tag := bound.Raw().(int64)
+				if w, ok := e.wm.Get(tag); ok {
+					targetWME = w
+				} else if e.currentActivation != nil {
+					for _, w := range e.currentActivation.Token.WMEs() {
+						if w.Timetag == tag {
+							targetWME = w
+							break
+						}
+					}
+					if targetWME == nil && tag >= 1 && int(tag) <= len(e.currentActivation.Token.WMEs()) {
+						targetWME = e.currentActivation.Token.WMEs()[tag-1]
+					}
+				}
+			}
+		}
+	} else {
+		refVal := e.resolveValue(se.ElementRef, bindings)
+		if refVal.Type() == model.TypeInteger {
+			idx := refVal.Raw().(int64)
+			if e.currentActivation != nil && idx >= 1 && int(idx) <= len(e.currentActivation.Token.WMEs()) {
+				targetWME = e.currentActivation.Token.WMEs()[idx-1]
+			} else if w, ok := e.wm.Get(idx); ok {
+				targetWME = w
+			}
+		}
+	}
+
+	if targetWME == nil {
+		return model.NewSymbol("nil")
+	}
+
+	normClass := strings.ToLower(targetWME.Class)
+	schema := e.schemas[normClass]
+
+	var orderedAttrs []string
+	seenAttrs := make(map[string]bool)
+
+	if schema != nil {
+		for _, a := range schema.Attributes {
+			norm := model.NormalizeAttribute(a)
+			if !seenAttrs[norm] {
+				orderedAttrs = append(orderedAttrs, norm)
+				seenAttrs[norm] = true
+			}
+		}
+	}
+	var extraAttrs []string
+	for a := range targetWME.Attributes {
+		norm := model.NormalizeAttribute(a)
+		if !seenAttrs[norm] {
+			extraAttrs = append(extraAttrs, norm)
+			seenAttrs[norm] = true
+		}
+	}
+	sort.Strings(extraAttrs)
+	orderedAttrs = append(orderedAttrs, extraAttrs...)
+
+	attrStartPos := make(map[string]int)
+	attrEndPos := make(map[string]int)
+
+	// Position 1 is class name
+	posList := []model.Value{model.NewSymbol(targetWME.Class)}
+
+	for _, attr := range orderedAttrs {
+		isVec := e.vectorAttrs[attr] || (schema != nil && schema.IsVectorAttribute(attr))
+		startPos := len(posList) + 1
+		attrStartPos[attr] = startPos
+
+		val, exists := targetWME.Attributes[attr]
+		if !exists {
+			if isVec {
+				attrEndPos[attr] = startPos - 1
+			} else {
+				posList = append(posList, model.NewSymbol("nil"))
+				attrEndPos[attr] = len(posList)
+			}
+		} else {
+			if isVec {
+				if val.IsVector() {
+					elems := val.VectorElements()
+					for _, el := range elems {
+						posList = append(posList, el)
+					}
+					attrEndPos[attr] = len(posList)
+				} else if val.Type() == model.TypeSymbol && strings.EqualFold(val.Raw().(string), "nil") {
+					attrEndPos[attr] = startPos - 1
+				} else {
+					posList = append(posList, val)
+					attrEndPos[attr] = len(posList)
+				}
+			} else {
+				posList = append(posList, val)
+				attrEndPos[attr] = len(posList)
+			}
+		}
+	}
+
+	resolveAttrOrIndex := func(val model.Value) (int, bool, bool) {
+		r := e.resolveValue(val, bindings)
+		if r.Type() == model.TypeInteger {
+			return int(r.Raw().(int64)), false, true
+		}
+		if r.Type() == model.TypeFloat {
+			return int(r.Raw().(float64)), false, true
+		}
+		strVal := ""
+		if r.Type() == model.TypeSymbol || r.Type() == model.TypeString {
+			strVal = r.Raw().(string)
+		} else if r.Type() == model.TypeVariable {
+			strVal = r.VariableName()
+		}
+		if strings.EqualFold(strVal, "inf") {
+			return 0, true, true
+		}
+		norm := model.NormalizeAttribute(strVal)
+		if pos, ok := attrStartPos[norm]; ok {
+			return pos, false, true
+		}
+		if lit, ok := e.litvalLocked(targetWME.Class, norm); ok {
+			return lit, false, true
+		}
+		if num, err := strconv.Atoi(strVal); err == nil {
+			return num, false, true
+		}
+		return 0, false, false
+	}
+
+	startIdx, _, startOk := resolveAttrOrIndex(se.Start)
+	if !startOk {
+		return model.NewSymbol("nil")
+	}
+
+	endIdx, endIsInf, endOk := resolveAttrOrIndex(se.End)
+	if !endOk {
+		return model.NewSymbol("nil")
+	}
+
+	if endIsInf {
+		foundVec := false
+		for _, attr := range orderedAttrs {
+			isVec := e.vectorAttrs[attr] || (schema != nil && schema.IsVectorAttribute(attr))
+			if isVec {
+				sPos := attrStartPos[attr]
+				ePos := attrEndPos[attr]
+				if startIdx >= sPos && startIdx <= ePos {
+					endIdx = ePos
+					foundVec = true
+					break
+				}
+			}
+		}
+		if !foundVec {
+			for _, attr := range orderedAttrs {
+				isVec := e.vectorAttrs[attr] || (schema != nil && schema.IsVectorAttribute(attr))
+				if isVec {
+					sPos := attrStartPos[attr]
+					if startIdx >= sPos {
+						endIdx = attrEndPos[attr]
+						foundVec = true
+						break
+					}
+				}
+			}
+		}
+		if !foundVec {
+			for _, attr := range orderedAttrs {
+				isVec := e.vectorAttrs[attr] || (schema != nil && schema.IsVectorAttribute(attr))
+				if isVec {
+					endIdx = attrEndPos[attr]
+					foundVec = true
+					break
+				}
+			}
+		}
+		if !foundVec {
+			endIdx = len(posList)
+		}
+	}
+
+	if !endIsInf && startIdx == endIdx {
+		// Single element access: returns the scalar element
+		if startIdx >= 1 && startIdx <= len(posList) {
+			return posList[startIdx-1]
+		}
+		return model.NewSymbol("nil")
+	}
+
+	if startIdx > endIdx || startIdx > len(posList) || endIdx < 1 {
+		return model.NewVector([]model.Value{})
+	}
+
+	clampedStart := startIdx
+	if clampedStart < 1 {
+		clampedStart = 1
+	}
+	clampedEnd := endIdx
+	if clampedEnd > len(posList) {
+		clampedEnd = len(posList)
+	}
+
+	if clampedStart > clampedEnd {
+		return model.NewVector([]model.Value{})
+	}
+
+	var res []model.Value
+	for i := clampedStart; i <= clampedEnd; i++ {
+		res = append(res, posList[i-1])
+	}
+	return model.NewVector(res)
 }
 
 

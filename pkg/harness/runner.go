@@ -214,6 +214,20 @@ func (r *Runner) Run(tc *TestCase) *Result {
 				} else {
 					_ = eng.SetWatchLevel(*stmt.WatchLevel)
 				}
+			case parser.StmtPPWM:
+				matches := eng.FindWMEsMatching(stmt.PPWMPattern)
+				for _, w := range matches {
+					fmt.Fprintln(&outBuf, w.String())
+				}
+			case parser.StmtStrategy:
+				if strings.ToUpper(stmt.Strategy) == "MEA" {
+					eng.SetStrategy(conflict.StrategyMEA)
+				} else if strings.ToUpper(stmt.Strategy) == "LEX" {
+					eng.SetStrategy(conflict.StrategyLEX)
+				}
+			case parser.StmtSubstr:
+				val := eng.EvaluateSubstr(stmt.Substr, nil)
+				fmt.Fprintln(&outBuf, val.String())
 			}
 		}
 	}

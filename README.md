@@ -14,6 +14,7 @@ This engine provides a complete, modern execution environment for rule-based sys
    - [File I/O, Stream Redirection & Input](docs/file_io.md)
    - [Unique Atom Generation (`genatom`)](docs/genatom.md)
    - [Attribute Index Resolution (`litval`)](docs/litval.md)
+   - [Subsequence & Vector Extraction (`substr`)](docs/substr.md)
    - [LHS Condition Elements & Pattern Matching](docs/lhs_patterns.md)
    - [Design Patterns & Programming Idioms](docs/idioms.md)
    - [Lexical Elements & Data Types](#lexical-elements--data-types)
@@ -40,6 +41,7 @@ This engine provides a complete, modern execution environment for rule-based sys
    - [Interactive REPL Reference](#interactive-repl-reference)
    - [Tutorial: Ancestors Search in the REPL (Section 2.4.3)](docs/tutorial_2_4_3_ancestors.md)
    - [Tutorial: Working Memory Initialization & Test Harness (Section 2.5)](docs/tutorial_2_5_testing.md)
+   - [Tutorial: Monkey & Bananas Problem (Section 3)](docs/tutorial_3_monkey_bananas.md)
    - [Program Termination & Halting Reference](docs/program_termination.md)
    - [Execution Tracing](#execution-tracing)
 6. [Test Harness & JSON Test Suite Specification](#test-harness--json-test-suite-specification)
@@ -414,6 +416,22 @@ Returns the 1-based numeric index assigned to an attribute within its element cl
 ```
 Can also be evaluated inside `make`, `modify`, `write`, `compute`, and in the REPL.
 
+#### `(substr <elem-ref> <start> <end>)`
+> [!NOTE]
+> For complete documentation and examples, see the [OPS5 `substr` Reference](docs/substr.md).
+
+Extracts a subsequence of values or a single element from a working memory element:
+- `<elem-ref>`: Element variable (e.g. `<str>`) or 1-based condition element index.
+- `<start>`: Attribute name, integer, variable, or expression.
+- `<end>`: Attribute name, integer, variable, expression, or the special symbol `inf` (denoting end of vector attribute).
+
+When `<start> == <end>` and `<end> != inf`, it extracts and returns that single scalar value directly:
+```ops5
+(bind <head> (substr <str> sequence sequence)) ; returns 1st element as scalar
+(bind <next> (compute (litval sequence) + 1))
+(modify <str> ^sequence (substr <str> <next> inf)) ; pops head and keeps rest
+```
+
 ---
 
 ## Rete Pattern Matching Engine
@@ -636,6 +654,7 @@ Defined rule 'classify-alert' (conditions=1, specificity=3)
 | `default` | `[<log-name> <subsystem>]` | View or set default stream for `accept`, `write`, `trace` | `(default ruletrace accept)` |
 | `genatom` / `(genatom)` | *none* | Generate and display a unique symbolic atom | `(genatom)` |
 | `litval` / `(litval ...)` | `[<class>] <attr>` | Display numeric index assigned to an attribute | `(litval name)` |
+| `substr` / `(substr ...)` | `<elem> <start> <end>` | Extract a subsequence or value from a WME | `(substr 1 sequence sequence)` |
 | `wm` | `[class]` | Display active WMEs (optionally filtered by class) | `wm item` |
 | `cs` | *none* | Display conflict set in current salience order (`*` indicates dominant) | `cs` |
 | `step` | *none* | Execute exactly one Match-Resolve-Act cycle | `step` |
@@ -646,6 +665,7 @@ Defined rule 'classify-alert' (conditions=1, specificity=3)
 | `load` | `<file.ops>` | Load and compile rules and makes from an external file | `load rules.ops` |
 | `excise` / `(excise ...)` | `<rule-name...>` | Evict rule(s) from production memory and detach from Rete | `excise rule-1 rule-2` |
 | `pm` / `(pm ...)` | `[<rule-name...> \| *]` | Pretty-print production rule source definitions | `pm FindAncestors` |
+| `ppwm` / `(ppwm ...)` | `[<class> [^<attr> <val>...]] \| *` | Print working memory elements matching an LHS condition pattern | `(ppwm City ^state Pennsylvania)` |
 | `test` | `<file.json>` | Execute an external JSON test suite case | `test fixture.json` |
 | `reset` | *none* | Clear working memory and conflict set | `reset` |
 | `help` | *none* | Display interactive help menu | `help` |
@@ -655,9 +675,11 @@ Defined rule 'classify-alert' (conditions=1, specificity=3)
 > For interactive walkthroughs demonstrating rule development, conflict resolution, testing paradigms, and halting controls, see:
 > - **[Ancestors Search REPL Tutorial (Section 2.4.3)](docs/tutorial_2_4_3_ancestors.md)**
 > - **[Working Memory Initialization & Parameterized Test Harness (Section 2.5)](docs/tutorial_2_5_testing.md)**
+> - **[Monkey & Bananas Problem Tutorial (Section 3)](docs/tutorial_3_monkey_bananas.md)**
 > - **[Program Termination & Halting Reference](docs/program_termination.md)**
 > - **[Rule Excision Reference](docs/excise.md)**
 > - **[Print Production Memory Reference (`pm`)](docs/pm.md)**
+> - **[Pretty-Print Working Memory Reference (`ppwm`)](docs/ppwm.md)**
 
 ### Execution Tracing (`watch`)
 

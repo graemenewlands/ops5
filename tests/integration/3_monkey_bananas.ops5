@@ -1,0 +1,640 @@
+;;; ============================================================================
+;;; Section 3: The Monkey and Bananas Problem (Means-Ends Analysis)
+;;;
+;;; Reference: "Programming Expert Systems in OPS5" (Brownston, Farrell, Kant, & Martin, 1985)
+;;;
+;;; Problem Statement:
+;;; In a 10' x 10' x 10' room, there is:
+;;; - a heavy couch on the floor
+;;; - a light ladder on the floor
+;;; - a bunch of bananas (suspended from ceiling, or on couch, ladder, or floor)
+;;; - one very, very hungry monkey who is incapable of moving heavy objects
+;;; - the monkey's blanket
+;;;
+;;; Write a program that will read in a description of the objects and their
+;;; locations in the room and produce as output a sequence of commands that
+;;; give the monkey that if followed, will allow the monkey to grab the bunch
+;;; of bananas.
+;;; ============================================================================
+
+;; Set conflict resolution strategy to Means-Ends Analysis (MEA)
+(strategy mea)
+
+;; ----------------------------------------------------------------------------
+;; Working Memory Schemas
+;; ----------------------------------------------------------------------------
+
+(literalize Room
+    x                   ; room width in feet (default 10)
+    y                   ; room length in feet (default 10)
+    z                   ; room height in feet (default 10)
+)
+
+(literalize monkey
+    at                  ; current (x-y) location coordinate (e.g., 5-7)
+    on                  ; current surface: floor, couch, ladder
+    holds               ; held item: nil, blanket, ladder, bananas
+)
+
+(literalize object
+    name                ; couch, ladder, bananas, blanket
+    at                  ; current (x-y) location coordinate (e.g., 5-7)
+    weight              ; heavy or light
+    on                  ; support surface: floor, couch, ladder, ceiling
+)
+
+(literalize goal
+    status              ; active, satisfied, failed, not-processed
+    type                ; holds, move, walk-to, on
+    object              ; target object or destination surface
+    to                  ; destination location for move actions
+)
+
+(literalize Start)      ; Interactive bootstrap token
+
+(literalize ScenarioSelection
+    choice              ; ceiling, floor, couch, ladder, blanket, interactive
+)
+
+(literalize PromptStep
+    step                ; current step in multi-prompt interactive input
+)
+
+(literalize TestCase    ; Parameterized test harness token (Section 2.5.2 pattern)
+    name                ; ceiling, floor, couch, ladder, blanket, couch-blanket, heavy-couch
+    type                ; test category
+)
+
+;; ============================================================================
+;; MEA Production Rules for the Monkey & Bananas Problem
+;; ============================================================================
+
+;; ----------------------------------------------------------------------------
+;; Goal: (holds <w>) when <w> is suspended from the ceiling
+;; ----------------------------------------------------------------------------
+
+;; mb1: If bananas are on the ceiling, move ladder under them
+(p mb1
+    (goal ^status active ^type holds ^object <w>)
+    (object ^name <w> ^at <p> ^on ceiling)
+    -->
+    (make goal ^status active ^type move ^object ladder ^to <p>)
+)
+
+;; mb2: If bananas are on ceiling and ladder is under them, climb onto ladder
+(p mb2
+    (goal ^status active ^type holds ^object <w>)
+    (object ^name <w> ^at <p> ^on ceiling)
+    (object ^name ladder ^at <p>)
+    -->
+    (make goal ^status active ^type on ^object ladder)
+)
+
+;; mb3: If monkey is on ladder under ceiling bananas, free hands to grab them
+(p mb3
+    (goal ^status active ^type holds ^object <w>)
+    (object ^name <w> ^at <p> ^on ceiling)
+    (object ^name ladder ^at <p>)
+    (monkey ^on ladder)
+    -->
+    (make goal ^status active ^type holds ^object nil)
+)
+
+;; mb4: If monkey is on ladder under ceiling bananas with free hands, grab them
+(p mb4
+    {(goal ^status active ^type holds ^object <w>) <g>}
+    (object ^name <w> ^at <p> ^on ceiling)
+    (object ^name ladder ^at <p>)
+    {(monkey ^on ladder ^holds nil) <m>}
+    -->
+    (write (crlf) grab <w>)
+    (modify <m> ^holds <w>)
+    (modify <g> ^status satisfied)
+)
+
+;; ----------------------------------------------------------------------------
+;; Goal: (holds <w>) when <w> is on the floor
+;; ----------------------------------------------------------------------------
+
+;; mb5: If target object is on the floor, walk to it
+(p mb5
+    (goal ^status active ^type holds ^object <w>)
+    (object ^name <w> ^at <p> ^on floor)
+    -->
+    (make goal ^status active ^type walk-to ^object <p>)
+)
+
+;; mb5a: If target is on the floor and monkey is at <p> but on a surface, get to floor
+(p mb5a
+    (goal ^status active ^type holds ^object <w>)
+    (object ^name <w> ^at <p> ^on floor)
+    (monkey ^at <p> ^on {<surf> <> floor})
+    -->
+    (make goal ^status active ^type on ^object floor)
+)
+
+;; mb6: If monkey is at <p> where object is on floor, ensure hands are free
+(p mb6
+    (goal ^status active ^type holds ^object <w>)
+    (object ^name <w> ^at <p> ^on floor)
+    (monkey ^at <p> ^on floor)
+    -->
+    (make goal ^status active ^type holds ^object nil)
+)
+
+;; mb7: If monkey is at <p> on floor with free hands, grab the object
+(p mb7
+    {(goal ^status active ^type holds ^object <w>) <g>}
+    (object ^name <w> ^at <p> ^on floor)
+    {(monkey ^at <p> ^on floor ^holds nil) <m>}
+    -->
+    (write (crlf) grab <w>)
+    (modify <m> ^holds <w>)
+    (modify <g> ^status satisfied)
+)
+
+;; ----------------------------------------------------------------------------
+;; Goal: (holds <w>) when <w> is on a raised surface (couch or ladder)
+;; ----------------------------------------------------------------------------
+
+;; mb-surf-walk: If bananas are on couch/ladder at <p>, walk to <p>
+(p mb-surf-walk
+    (goal ^status active ^type holds ^object <w>)
+    (object ^name <w> ^at <p> ^on {<surf> <> ceiling <> floor})
+    -->
+    (make goal ^status active ^type walk-to ^object <p>)
+)
+
+;; mb-surf-climb: If monkey is at <p>, climb onto the supporting surface
+(p mb-surf-climb
+    (goal ^status active ^type holds ^object <w>)
+    (object ^name <w> ^at <p> ^on {<surf> <> ceiling <> floor})
+    (monkey ^at <p>)
+    -->
+    (make goal ^status active ^type on ^object <surf>)
+)
+
+;; mb-surf-free: If monkey is on the surface with bananas, ensure hands are free
+(p mb-surf-free
+    (goal ^status active ^type holds ^object <w>)
+    (object ^name <w> ^at <p> ^on {<surf> <> ceiling <> floor})
+    (monkey ^at <p> ^on <surf>)
+    -->
+    (make goal ^status active ^type holds ^object nil)
+)
+
+;; mb-surf-grab: If monkey is on the surface with free hands, grab the bananas
+(p mb-surf-grab
+    {(goal ^status active ^type holds ^object <w>) <g>}
+    (object ^name <w> ^at <p> ^on {<surf> <> ceiling <> floor})
+    {(monkey ^at <p> ^on <surf> ^holds nil) <m>}
+    -->
+    (write (crlf) grab <w>)
+    (modify <m> ^holds <w>)
+    (modify <g> ^status satisfied)
+)
+
+;; ----------------------------------------------------------------------------
+;; Goal: (move <o> to <p>)
+;; ----------------------------------------------------------------------------
+
+;; mb-move-heavy: The hungry monkey is incapable of moving heavy objects!
+(p mb-move-heavy
+    {(goal ^status active ^type move ^object <o> ^to <p>) <g>}
+    (object ^name <o> ^weight heavy)
+    -->
+    (write (crlf) The monkey is incapable of moving heavy object <o>)
+    (modify <g> ^status failed)
+    (halt)
+)
+
+;; mb8: To move a light object to <p>, monkey must hold it first
+(p mb8
+    (goal ^status active ^type move ^object <o> ^to <p>)
+    (object ^name <o> ^weight light ^at <> <p>)
+    -->
+    (make goal ^status active ^type holds ^object <o>)
+)
+
+;; mb9: If monkey holds the light object, walk to destination <p>
+(p mb9
+    (goal ^status active ^type move ^object <o> ^to <p>)
+    (object ^name <o> ^weight light ^at <> <p>)
+    (monkey ^holds <o>)
+    -->
+    (make goal ^status active ^type walk-to ^object <p>)
+)
+
+;; mb10: Once object is at destination <p>, move goal is satisfied
+(p mb10
+    {(goal ^status active ^type move ^object <o> ^to <p>) <g>}
+    (object ^name <o> ^weight light ^at <p>)
+    -->
+    (modify <g> ^status satisfied)
+)
+
+;; ----------------------------------------------------------------------------
+;; Goal: (walk-to <p>)
+;; ----------------------------------------------------------------------------
+
+;; mb-walk-already: If monkey is already at <p>, walk goal is satisfied immediately
+(p mb-walk-already
+    {(goal ^status active ^type walk-to ^object <p>) <g>}
+    (monkey ^at <p>)
+    -->
+    (modify <g> ^status satisfied)
+)
+
+;; mb11: To walk to <p>, monkey must be on the floor
+(p mb11
+    (goal ^status active ^type walk-to ^object <p>)
+    -->
+    (make goal ^status active ^type on ^object floor)
+)
+
+;; mb12: Walk to <p> when monkey is on floor with empty hands
+(p mb12
+    {(goal ^status active ^type walk-to ^object <p>) <g>}
+    {(monkey ^on floor ^at {<c> <> <p>} ^holds nil) <m>}
+    -->
+    (write (crlf) walk to <p>)
+    (modify <m> ^at <p>)
+    (modify <g> ^status satisfied)
+)
+
+;; mb13: Walk to <p> while carrying an object (e.g., ladder or blanket)
+(p mb13
+    {(goal ^status active ^type walk-to ^object <p>) <g>}
+    {(monkey ^on floor ^at {<c> <> <p>} ^holds {<w> <> nil}) <m>}
+    {(object ^name <w>) <o>}
+    -->
+    (write (crlf) walk to <p>)
+    (modify <m> ^at <p>)
+    (modify <o> ^at <p>)
+    (modify <g> ^status satisfied)
+)
+
+;; ----------------------------------------------------------------------------
+;; Goal: (on floor)
+;; ----------------------------------------------------------------------------
+
+;; mb-on-floor-already: If already on the floor, goal is satisfied
+(p mb-on-floor-already
+    {(goal ^status active ^type on ^object floor) <g>}
+    (monkey ^on floor)
+    -->
+    (modify <g> ^status satisfied)
+)
+
+;; mb14: If monkey is not on the floor, jump onto the floor
+(p mb14
+    {(goal ^status active ^type on ^object floor) <g>}
+    {(monkey ^on {<x> <> floor}) <m>}
+    -->
+    (write (crlf) jump onto the floor)
+    (modify <m> ^on floor)
+    (modify <g> ^status satisfied)
+)
+
+;; ----------------------------------------------------------------------------
+;; Goal: (on <o>) [climbing onto couch or ladder]
+;; ----------------------------------------------------------------------------
+
+;; mb-on-obj-already: If monkey is already on <o>, goal is satisfied
+(p mb-on-obj-already
+    {(goal ^status active ^type on ^object <o>) <g>}
+    (monkey ^on <o>)
+    -->
+    (modify <g> ^status satisfied)
+)
+
+;; mb15: To climb onto <o>, first walk to <o>'s location
+(p mb15
+    (goal ^status active ^type on ^object <o>)
+    (object ^name <o> ^at <p>)
+    -->
+    (make goal ^status active ^type walk-to ^object <p>)
+)
+
+;; mb16: At <o>'s location, monkey needs free hands before climbing
+(p mb16
+    (goal ^status active ^type on ^object <o>)
+    (object ^name <o> ^at <p>)
+    (monkey ^at <p>)
+    -->
+    (make goal ^status active ^type holds ^object nil)
+)
+
+;; mb17: At <o>'s location with free hands, climb onto <o>
+(p mb17
+    {(goal ^status active ^type on ^object <o>) <g>}
+    (object ^name <o> ^at <p>)
+    {(monkey ^at <p> ^holds nil) <m>}
+    -->
+    (write (crlf) climb onto <o>)
+    (modify <m> ^on <o>)
+    (modify <g> ^status satisfied)
+)
+
+;; ----------------------------------------------------------------------------
+;; Goal: (holds nil) [freeing monkey's hands]
+;; ----------------------------------------------------------------------------
+
+;; mb-holds-nil-already: Hands already free
+(p mb-holds-nil-already
+    {(goal ^status active ^type holds ^object nil) <g>}
+    (monkey ^holds nil)
+    -->
+    (modify <g> ^status satisfied)
+)
+
+;; mb18: If holding an object (ladder, blanket, etc.), drop it
+(p mb18
+    {(goal ^status active ^type holds ^object nil) <g>}
+    {(monkey ^holds {<x> <> nil}) <m>}
+    -->
+    (write (crlf) drop <x>)
+    (modify <m> ^holds nil)
+    (modify <g> ^status satisfied)
+)
+
+;; ----------------------------------------------------------------------------
+;; Goal Completion & Fallback
+;; ----------------------------------------------------------------------------
+
+;; mb-success: Bananas in hand, mission accomplished!
+(p mb-success
+    (goal ^status satisfied ^type holds ^object bananas)
+    (monkey ^holds bananas)
+    -->
+    (write (crlf) |SUCCESS: The monkey has grabbed the bananas!| (crlf))
+    (halt)
+)
+
+;; mb19: Fallback rule for unprocessed active goals
+(p mb19
+    {(goal ^status active) <g>}
+    -->
+    (modify <g> ^status not-processed)
+)
+
+;; ============================================================================
+;; Interactive Setup & Input Reading (accept)
+;; ============================================================================
+
+;; PromptUser: Initiates interactive session when (Start) is asserted
+(p PromptUser
+    {(Start) <s>}
+    -->
+    (remove <s>)
+    (write (crlf) |=== Monkey & Bananas Problem (10'x10'x10' Room) ===|
+           (crlf) |Choose initial setup:|
+           (crlf) |  ceiling     - Bananas on ceiling at 2-2, ladder at 9-5, couch at 5-7|
+           (crlf) |  floor       - Bananas on floor at 2-2|
+           (crlf) |  couch       - Bananas on couch at 5-7|
+           (crlf) |  ladder      - Bananas on ladder at 9-5|
+           (crlf) |  blanket     - Bananas on ceiling, monkey holding blanket|
+           (crlf) |  interactive - Enter custom object locations step-by-step|
+           (crlf) |Enter choice: |)
+    (make ScenarioSelection ^choice (accept))
+)
+
+;; Setup::Interactive:Prompts for step 1
+(p Setup::Interactive
+    {(ScenarioSelection ^choice interactive) <sel>}
+    -->
+    (remove <sel>)
+    (make Room ^x 10 ^y 10 ^z 10)
+    (write (crlf) |Enter monkey location (e.g. 5-7): |)
+    (make PromptStep ^step monkey-at)
+)
+
+(p Setup::PromptMonkeyAt
+    {(PromptStep ^step monkey-at) <p>}
+    -->
+    (remove <p>)
+    (make monkey ^at (accept))
+    (write (crlf) |Enter monkey surface (floor or couch): |)
+    (make PromptStep ^step monkey-on)
+)
+
+(p Setup::PromptMonkeyOn
+    {(PromptStep ^step monkey-on) <p>}
+    {(monkey ^on nil) <m>}
+    -->
+    (remove <p>)
+    (modify <m> ^on (accept))
+    (write (crlf) |Enter monkey held item (nil or blanket): |)
+    (make PromptStep ^step monkey-holds)
+)
+
+(p Setup::PromptMonkeyHolds
+    {(PromptStep ^step monkey-holds) <p>}
+    {(monkey ^holds nil) <m>}
+    -->
+    (remove <p>)
+    (modify <m> ^holds (accept))
+    (write (crlf) |Enter couch location (e.g. 5-7): |)
+    (make PromptStep ^step couch-at)
+)
+
+(p Setup::PromptCouchAt
+    {(PromptStep ^step couch-at) <p>}
+    -->
+    (remove <p>)
+    (make object ^name couch ^at (accept) ^weight heavy ^on floor)
+    (write (crlf) |Enter ladder location (e.g. 9-5): |)
+    (make PromptStep ^step ladder-at)
+)
+
+(p Setup::PromptLadderAt
+    {(PromptStep ^step ladder-at) <p>}
+    -->
+    (remove <p>)
+    (make object ^name ladder ^at (accept) ^weight light ^on floor)
+    (write (crlf) |Enter bananas location (e.g. 2-2): |)
+    (make PromptStep ^step bananas-at)
+)
+
+(p Setup::PromptBananasAt
+    {(PromptStep ^step bananas-at) <p>}
+    -->
+    (remove <p>)
+    (make object ^name bananas ^at (accept) ^weight light)
+    (write (crlf) |Enter bananas surface (ceiling, couch, ladder, or floor): |)
+    (make PromptStep ^step bananas-on)
+)
+
+(p Setup::PromptBananasOn
+    {(PromptStep ^step bananas-on) <p>}
+    {(object ^name bananas ^on nil) <b>}
+    -->
+    (remove <p>)
+    (modify <b> ^on (accept))
+    (make goal ^status active ^type holds ^object bananas)
+    (write (crlf) |Planning action sequence for monkey...| (crlf))
+)
+
+;; Setup shortcuts from ScenarioSelection choice
+(p Setup::SelectCeiling
+    {(ScenarioSelection ^choice ceiling) <sel>}
+    -->
+    (remove <sel>)
+    (make Room ^x 10 ^y 10 ^z 10)
+    (make monkey ^at 5-7 ^on couch ^holds nil)
+    (make object ^name couch ^at 5-7 ^weight heavy ^on floor)
+    (make object ^name ladder ^at 9-5 ^weight light ^on floor)
+    (make object ^name bananas ^at 2-2 ^weight light ^on ceiling)
+    (make object ^name blanket ^at 5-7 ^weight light ^on couch)
+    (make goal ^status active ^type holds ^object bananas)
+)
+
+(p Setup::SelectFloor
+    {(ScenarioSelection ^choice floor) <sel>}
+    -->
+    (remove <sel>)
+    (make Room ^x 10 ^y 10 ^z 10)
+    (make monkey ^at 5-7 ^on couch ^holds nil)
+    (make object ^name couch ^at 5-7 ^weight heavy ^on floor)
+    (make object ^name ladder ^at 9-5 ^weight light ^on floor)
+    (make object ^name bananas ^at 2-2 ^weight light ^on floor)
+    (make object ^name blanket ^at 5-7 ^weight light ^on couch)
+    (make goal ^status active ^type holds ^object bananas)
+)
+
+(p Setup::SelectCouch
+    {(ScenarioSelection ^choice couch) <sel>}
+    -->
+    (remove <sel>)
+    (make Room ^x 10 ^y 10 ^z 10)
+    (make monkey ^at 1-1 ^on floor ^holds nil)
+    (make object ^name couch ^at 5-7 ^weight heavy ^on floor)
+    (make object ^name ladder ^at 9-5 ^weight light ^on floor)
+    (make object ^name bananas ^at 5-7 ^weight light ^on couch)
+    (make object ^name blanket ^at 5-7 ^weight light ^on couch)
+    (make goal ^status active ^type holds ^object bananas)
+)
+
+(p Setup::SelectLadder
+    {(ScenarioSelection ^choice ladder) <sel>}
+    -->
+    (remove <sel>)
+    (make Room ^x 10 ^y 10 ^z 10)
+    (make monkey ^at 5-7 ^on couch ^holds nil)
+    (make object ^name couch ^at 5-7 ^weight heavy ^on floor)
+    (make object ^name ladder ^at 9-5 ^weight light ^on floor)
+    (make object ^name bananas ^at 9-5 ^weight light ^on ladder)
+    (make object ^name blanket ^at 5-7 ^weight light ^on couch)
+    (make goal ^status active ^type holds ^object bananas)
+)
+
+(p Setup::SelectBlanket
+    {(ScenarioSelection ^choice blanket) <sel>}
+    -->
+    (remove <sel>)
+    (make Room ^x 10 ^y 10 ^z 10)
+    (make monkey ^at 5-7 ^on couch ^holds blanket)
+    (make object ^name couch ^at 5-7 ^weight heavy ^on floor)
+    (make object ^name ladder ^at 9-5 ^weight light ^on floor)
+    (make object ^name bananas ^at 2-2 ^weight light ^on ceiling)
+    (make object ^name blanket ^at 5-7 ^weight light)
+    (make goal ^status active ^type holds ^object bananas)
+)
+
+;; ============================================================================
+;; Parameterized Test Harness Productions (Section 2.5.2 Pattern)
+;; ============================================================================
+
+;; Test::Ceiling - Classic problem with bananas on ceiling
+(p Test::Ceiling
+    {(TestCase ^name ceiling) <tc>}
+    -->
+    (remove <tc>)
+    (make Room ^x 10 ^y 10 ^z 10)
+    (make monkey ^at 5-7 ^on couch ^holds nil)
+    (make object ^name couch ^at 5-7 ^weight heavy ^on floor)
+    (make object ^name ladder ^at 9-5 ^weight light ^on floor)
+    (make object ^name bananas ^at 2-2 ^weight light ^on ceiling)
+    (make object ^name blanket ^at 5-7 ^weight light ^on couch)
+    (make goal ^status active ^type holds ^object bananas)
+)
+
+;; Test::Floor - Bananas on floor at 2-2
+(p Test::Floor
+    {(TestCase ^name floor) <tc>}
+    -->
+    (remove <tc>)
+    (make Room ^x 10 ^y 10 ^z 10)
+    (make monkey ^at 5-7 ^on couch ^holds nil)
+    (make object ^name couch ^at 5-7 ^weight heavy ^on floor)
+    (make object ^name ladder ^at 9-5 ^weight light ^on floor)
+    (make object ^name bananas ^at 2-2 ^weight light ^on floor)
+    (make object ^name blanket ^at 5-7 ^weight light ^on couch)
+    (make goal ^status active ^type holds ^object bananas)
+)
+
+;; Test::Couch - Bananas on couch at 5-7, monkey at 1-1
+(p Test::Couch
+    {(TestCase ^name couch) <tc>}
+    -->
+    (remove <tc>)
+    (make Room ^x 10 ^y 10 ^z 10)
+    (make monkey ^at 1-1 ^on floor ^holds nil)
+    (make object ^name couch ^at 5-7 ^weight heavy ^on floor)
+    (make object ^name ladder ^at 9-5 ^weight light ^on floor)
+    (make object ^name bananas ^at 5-7 ^weight light ^on couch)
+    (make object ^name blanket ^at 5-7 ^weight light ^on couch)
+    (make goal ^status active ^type holds ^object bananas)
+)
+
+;; Test::Ladder - Bananas on ladder at 9-5
+(p Test::Ladder
+    {(TestCase ^name ladder) <tc>}
+    -->
+    (remove <tc>)
+    (make Room ^x 10 ^y 10 ^z 10)
+    (make monkey ^at 5-7 ^on couch ^holds nil)
+    (make object ^name couch ^at 5-7 ^weight heavy ^on floor)
+    (make object ^name ladder ^at 9-5 ^weight light ^on floor)
+    (make object ^name bananas ^at 9-5 ^weight light ^on ladder)
+    (make object ^name blanket ^at 5-7 ^weight light ^on couch)
+    (make goal ^status active ^type holds ^object bananas)
+)
+
+;; Test::Blanket - Monkey starts holding blanket, bananas on ceiling
+(p Test::Blanket
+    {(TestCase ^name blanket) <tc>}
+    -->
+    (remove <tc>)
+    (make Room ^x 10 ^y 10 ^z 10)
+    (make monkey ^at 5-7 ^on couch ^holds blanket)
+    (make object ^name couch ^at 5-7 ^weight heavy ^on floor)
+    (make object ^name ladder ^at 9-5 ^weight light ^on floor)
+    (make object ^name bananas ^at 2-2 ^weight light ^on ceiling)
+    (make object ^name blanket ^at 5-7 ^weight light)
+    (make goal ^status active ^type holds ^object bananas)
+)
+
+;; Test::CouchBlanket - Monkey starts on couch holding blanket, bananas on couch
+(p Test::CouchBlanket
+    {(TestCase ^name couch-blanket) <tc>}
+    -->
+    (remove <tc>)
+    (make Room ^x 10 ^y 10 ^z 10)
+    (make monkey ^at 5-7 ^on couch ^holds blanket)
+    (make object ^name couch ^at 5-7 ^weight heavy ^on floor)
+    (make object ^name ladder ^at 9-5 ^weight light ^on floor)
+    (make object ^name bananas ^at 5-7 ^weight light ^on couch)
+    (make goal ^status active ^type holds ^object bananas)
+)
+
+;; Test::HeavyCouch - Tests that hungry monkey cannot move heavy couch
+(p Test::HeavyCouch
+    {(TestCase ^name heavy-couch) <tc>}
+    -->
+    (remove <tc>)
+    (make Room ^x 10 ^y 10 ^z 10)
+    (make monkey ^at 5-7 ^on floor ^holds nil)
+    (make object ^name couch ^at 5-7 ^weight heavy ^on floor)
+    (make goal ^status active ^type move ^object couch ^to 2-2)
+)

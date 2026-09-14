@@ -482,7 +482,7 @@ func (p *Parser) isRHSFunction() bool {
 		return false
 	}
 	sub := strings.ToLower(p.peek.Value)
-	return sub == "compute" || sub == "accept" || sub == "acceptline" || sub == "genatom" || sub == "litval"
+	return sub == "compute" || sub == "accept" || sub == "acceptline" || sub == "genatom" || sub == "litval" || sub == "substr"
 }
 
 func (p *Parser) parseRHSFunction() (model.Value, error) {
@@ -498,9 +498,64 @@ func (p *Parser) parseRHSFunction() (model.Value, error) {
 		return p.parseGenatom()
 	case "litval":
 		return p.parseLitval()
+	case "substr":
+		return p.ParseSubstr()
 	default:
 		return model.NewSymbol("nil"), fmt.Errorf("unknown RHS function: %s", sub)
 	}
+}
+
+func (p *Parser) parseSubstrArg() (model.Value, error) {
+	if p.isRHSFunction() {
+		return p.parseRHSFunction()
+	}
+	if p.current.Type == TokenAttribute {
+		attr := model.NormalizeAttribute(p.current.Value)
+		if err := p.advance(); err != nil {
+			return model.NewSymbol("nil"), err
+		}
+		return model.NewSymbol(attr), nil
+	}
+	if p.current.Type == TokenVariable || p.current.Type == TokenSymbol || p.current.Type == TokenNumber || p.current.Type == TokenString {
+		val := TokenToValue(p.current)
+		if err := p.advance(); err != nil {
+			return model.NewSymbol("nil"), err
+		}
+		return val, nil
+	}
+	return model.NewSymbol("nil"), fmt.Errorf("unexpected token in substr at line %d: %s (%q)", p.current.Line, p.current.Type, p.current.Value)
+}
+
+// ParseSubstr parses a (substr elemRef start end) function call.
+func (p *Parser) ParseSubstr() (model.Value, error) {
+	if _, err := p.expect(TokenLParen); err != nil {
+		return model.NewSymbol("nil"), err
+	}
+	verbTok, err := p.expect(TokenSymbol)
+	if err != nil || !strings.EqualFold(verbTok.Value, "substr") {
+		return model.NewSymbol("nil"), fmt.Errorf("expected 'substr', got %v", verbTok.Value)
+	}
+
+	elemRef, err := p.parseSubstrArg()
+	if err != nil {
+		return model.NewSymbol("nil"), fmt.Errorf("error parsing element reference in substr: %w", err)
+	}
+
+	start, err := p.parseSubstrArg()
+	if err != nil {
+		return model.NewSymbol("nil"), fmt.Errorf("error parsing start index in substr: %w", err)
+	}
+
+	end, err := p.parseSubstrArg()
+	if err != nil {
+		return model.NewSymbol("nil"), fmt.Errorf("error parsing end index in substr: %w", err)
+	}
+
+	if _, err := p.expect(TokenRParen); err != nil {
+		return model.NewSymbol("nil"), fmt.Errorf("expected ')' closing substr at line %d: %w", verbTok.Line, err)
+	}
+
+	return model.NewSubstr(elemRef, start, end), nil
 }
 
 func (p *Parser) parseLitval() (model.Value, error) {
@@ -865,6 +920,9 @@ const (
 	StmtPM
 	StmtRemove
 	StmtWatch
+	StmtPPWM
+	StmtStrategy
+	StmtSubstr
 )
 
 func (st StatementType) String() string {
@@ -891,6 +949,12 @@ func (st StatementType) String() string {
 		return "remove"
 	case StmtWatch:
 		return "watch"
+	case StmtPPWM:
+		return "ppwm"
+	case StmtStrategy:
+		return "strategy"
+	case StmtSubstr:
+		return "substr"
 	default:
 		return "unknown"
 	}
@@ -914,6 +978,9 @@ type Statement struct {
 	RemoveWildcard  bool
 	RemoveTimetags  []int64
 	WatchLevel      *int
+	PPWMPattern     *model.ConditionElement
+	Strategy        string
+	Substr          *model.SubstrExpr
 }
 
 func (p *Parser) parseMakeBody(classTok Token) (string, map[string]model.Value, error) {
@@ -1338,7 +1405,209 @@ func (p *Parser) parseWatchBody() (*int, error) {
 	return &lvl, nil
 }
 
-// NextStatement parses the next top-level statement (Rule, Make, Literalize, VectorAttribute, OpenFile, CloseFile, Default, Excise, PM, Remove, or Watch).
+func checkPPWMForbiddenToken(tok Token) error {
+	if tok.Type == TokenVariable {
+		return fmt.Errorf("ppwm pattern cannot contain variables (found '<%s>')", tok.Value)
+	}
+	if tok.Type == TokenLBrace || tok.Type == TokenRBrace || tok.Value == "{" || tok.Value == "}" {
+		return fmt.Errorf("ppwm pattern cannot contain curly braces")
+	}
+	if tok.Value == "//" {
+		return fmt.Errorf("ppwm pattern cannot contain the quote operator '//'")
+	}
+	if tok.Type == TokenNegation {
+		return fmt.Errorf("ppwm pattern cannot contain negation '-'")
+	}
+	if tok.Type == TokenOperator && tok.Value != "*" {
+		return fmt.Errorf("ppwm pattern cannot contain predicates (found '%s')", tok.Value)
+	}
+	if strings.Contains(tok.Value, "<") || strings.Contains(tok.Value, ">") {
+		return fmt.Errorf("ppwm pattern cannot contain angle brackets (found '%s')", tok.Value)
+	}
+	return nil
+}
+
+// ParsePPWM parses a top-level (ppwm [pattern]) statement.
+// The pattern takes the form of an LHS condition element (e.g. City ^state Pennsylvania).
+// In accordance with classic OPS5 specifications, the pattern cannot contain variables,
+// predicates (i.e. <, >, !=, ...), the quote operator //, angle brackets or curly braces.
+func (p *Parser) ParsePPWM() (*model.ConditionElement, error) {
+	if _, err := p.expect(TokenLParen); err != nil {
+		return nil, err
+	}
+	verbTok, err := p.expect(TokenSymbol)
+	if err != nil || !strings.EqualFold(verbTok.Value, "ppwm") {
+		return nil, fmt.Errorf("expected 'ppwm', got %v", verbTok.Value)
+	}
+
+	// (ppwm) without arguments
+	if p.current.Type == TokenRParen {
+		if _, err := p.expect(TokenRParen); err != nil {
+			return nil, err
+		}
+		return model.NewPositiveCE("*"), nil
+	}
+
+	// (ppwm *)
+	if (p.current.Type == TokenOperator || p.current.Type == TokenSymbol) && p.current.Value == "*" {
+		if err := p.advance(); err != nil {
+			return nil, err
+		}
+		if p.current.Type == TokenRParen {
+			if _, err := p.expect(TokenRParen); err != nil {
+				return nil, err
+			}
+			return model.NewPositiveCE("*"), nil
+		}
+	}
+
+	// Check if user enclosed the pattern in inner parentheses: (ppwm (City ^state Pennsylvania))
+	hasInnerParens := false
+	if p.current.Type == TokenLParen {
+		hasInnerParens = true
+		if err := p.advance(); err != nil {
+			return nil, err
+		}
+	}
+
+	// Check for forbidden constructs before class name
+	if err := checkPPWMForbiddenToken(p.current); err != nil {
+		return nil, err
+	}
+
+	var className string
+	if (p.current.Type == TokenOperator || p.current.Type == TokenSymbol) && p.current.Value == "*" {
+		className = "*"
+		if err := p.advance(); err != nil {
+			return nil, err
+		}
+	} else if p.current.Type == TokenSymbol || p.current.Type == TokenString {
+		className = p.current.Value
+		if err := p.advance(); err != nil {
+			return nil, err
+		}
+	} else {
+		return nil, fmt.Errorf("expected class name in ppwm pattern, got %s (%q)", p.current.Type, p.current.Value)
+	}
+
+	ce := model.NewPositiveCE(className)
+	schema := p.getSchema(className)
+	posIndex := 0
+
+	// Loop over attributes and values until RParen or EOF
+	for p.current.Type != TokenRParen && p.current.Type != TokenEOF {
+		if err := checkPPWMForbiddenToken(p.current); err != nil {
+			return nil, err
+		}
+
+		if p.isAttributeToken(p.current, schema) {
+			attrName := model.NormalizeAttribute(p.current.Value)
+			if err := p.advance(); err != nil {
+				return nil, err
+			}
+
+			var vals []model.Value
+			for !p.isAttributeToken(p.current, schema) && p.current.Type != TokenRParen && p.current.Type != TokenEOF {
+				if err := checkPPWMForbiddenToken(p.current); err != nil {
+					return nil, err
+				}
+				vals = append(vals, TokenToValue(p.current))
+				if err := p.advance(); err != nil {
+					return nil, err
+				}
+			}
+
+			isVec := p.IsVectorAttribute(attrName) || (schema != nil && schema.IsVectorAttribute(attrName))
+			if len(vals) == 0 {
+				ce.AddEqualTest(attrName, model.NewSymbol("nil"))
+			} else if len(vals) == 1 && !isVec {
+				ce.AddEqualTest(attrName, vals[0])
+			} else {
+				ce.AddEqualTest(attrName, model.NewVector(vals))
+			}
+		} else {
+			// Positional attribute value
+			attrName := fmt.Sprintf("attr%d", posIndex+1)
+			if schema != nil && posIndex < len(schema.Attributes) {
+				attrName = schema.Attributes[posIndex]
+			}
+			isVec := p.IsVectorAttribute(attrName) || (schema != nil && schema.IsVectorAttribute(attrName))
+
+			val := TokenToValue(p.current)
+			if err := p.advance(); err != nil {
+				return nil, err
+			}
+
+			if isVec {
+				found := false
+				for i := range ce.Tests {
+					if ce.Tests[i].Attribute == attrName && len(ce.Tests[i].Constraints) > 0 {
+						curVal := ce.Tests[i].Constraints[0].Value
+						if curVal.IsVector() {
+							ce.Tests[i].Constraints[0].Value = model.NewVector(append(curVal.VectorElements(), val))
+						} else {
+							ce.Tests[i].Constraints[0].Value = model.NewVector([]model.Value{curVal, val})
+						}
+						found = true
+						break
+					}
+				}
+				if !found {
+					ce.AddEqualTest(attrName, val)
+				}
+				if schema == nil || posIndex != len(schema.Attributes)-1 {
+					posIndex++
+				}
+			} else {
+				posIndex++
+				ce.AddEqualTest(attrName, val)
+			}
+		}
+	}
+
+	if hasInnerParens {
+		if _, err := p.expect(TokenRParen); err != nil {
+			return nil, fmt.Errorf("expected ')' closing condition element in ppwm: %w", err)
+		}
+	}
+
+	if _, err := p.expect(TokenRParen); err != nil {
+		return nil, fmt.Errorf("expected ')' closing ppwm statement: %w", err)
+	}
+
+	return ce, nil
+}
+
+// ParseStrategy parses a top-level (strategy [LEX|MEA]) statement.
+func (p *Parser) ParseStrategy() (string, error) {
+	if _, err := p.expect(TokenLParen); err != nil {
+		return "", err
+	}
+	verbTok, err := p.expect(TokenSymbol)
+	if err != nil || strings.ToLower(verbTok.Value) != "strategy" {
+		return "", fmt.Errorf("expected 'strategy', got %v", verbTok.Value)
+	}
+	if p.current.Type == TokenRParen {
+		if _, err := p.expect(TokenRParen); err != nil {
+			return "", err
+		}
+		return "", nil
+	}
+	valTok, err := p.expect(TokenSymbol)
+	if err != nil {
+		return "", err
+	}
+	val := strings.ToUpper(valTok.Value)
+	if val != "LEX" && val != "MEA" {
+		return "", fmt.Errorf("unknown conflict resolution strategy %q (must be LEX or MEA)", valTok.Value)
+	}
+	if _, err := p.expect(TokenRParen); err != nil {
+		return "", fmt.Errorf("expected ')' closing strategy statement: %w", err)
+	}
+	return val, nil
+}
+
+// NextStatement parses the next top-level statement (Rule, Make, Literalize, VectorAttribute, OpenFile, CloseFile, Default, Excise, PM, Remove, Watch, PPWM, or Strategy).
 // Returns (nil, nil) when TokenEOF is reached.
 func (p *Parser) NextStatement() (*Statement, error) {
 	if p.current.Type == TokenEOF {
@@ -1454,6 +1723,36 @@ func (p *Parser) NextStatement() (*Statement, error) {
 		return &Statement{
 			Type:       StmtWatch,
 			WatchLevel: level,
+		}, nil
+
+	case "ppwm":
+		ce, err := p.ParsePPWM()
+		if err != nil {
+			return nil, err
+		}
+		return &Statement{
+			Type:        StmtPPWM,
+			PPWMPattern: ce,
+		}, nil
+
+	case "strategy":
+		strat, err := p.ParseStrategy()
+		if err != nil {
+			return nil, err
+		}
+		return &Statement{
+			Type:     StmtStrategy,
+			Strategy: strat,
+		}, nil
+
+	case "substr":
+		val, err := p.ParseSubstr()
+		if err != nil {
+			return nil, err
+		}
+		return &Statement{
+			Type:   StmtSubstr,
+			Substr: val.SubstrExpr(),
 		}, nil
 
 	default:

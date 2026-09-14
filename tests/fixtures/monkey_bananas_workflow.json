@@ -1,0 +1,43 @@
+{
+  "name": "monkey_bananas_ceiling_workflow",
+  "description": "Validates Section 3 Monkey and Bananas MEA workflow for ceiling bananas",
+  "strategy": "MEA",
+  "source_file": "integration/3_monkey_bananas.ops5",
+  "initial_wm": [
+    {
+      "class": "TestCase",
+      "attributes": {
+        "name": "ceiling"
+      }
+    }
+  ],
+  "max_cycles": 50,
+  "expected_cycles": 17,
+  "expected_wm": [
+    {
+      "class": "monkey",
+      "attributes": {
+        "holds": "bananas",
+        "on": "ladder"
+      }
+    },
+    {
+      "class": "goal",
+      "attributes": {
+        "status": "satisfied",
+        "type": "holds",
+        "object": "bananas"
+      }
+    }
+  ],
+  "expected_outputs": [
+    "jump onto the floor",
+    "walk to 9-5",
+    "grab ladder",
+    "walk to 2-2",
+    "drop ladder",
+    "climb onto ladder",
+    "grab bananas",
+    "SUCCESS: The monkey has grabbed the bananas!"
+  ]
+}

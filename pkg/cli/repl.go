@@ -175,6 +175,12 @@ func (r *REPL) handleCommand(input string) bool {
 		return false
 	}
 
+	// 11. S-expression ppwm: (ppwm ...)
+	if strings.HasPrefix(strings.ToLower(input), "(ppwm ") || strings.ToLower(strings.TrimSpace(input)) == "(ppwm)" || strings.ToLower(strings.TrimSpace(input)) == "(ppwm*)" || strings.HasPrefix(strings.ToLower(input), "(ppwm*") {
+		r.handlePPWM(input)
+		return false
+	}
+
 	// 11. S-expression remove: (remove ...)
 	if strings.HasPrefix(strings.ToLower(input), "(remove ") || strings.ToLower(strings.TrimSpace(input)) == "(remove)" || strings.ToLower(strings.TrimSpace(input)) == "(remove*)" || strings.HasPrefix(strings.ToLower(input), "(remove*") {
 		r.handleRemove(input)
@@ -184,6 +190,12 @@ func (r *REPL) handleCommand(input string) bool {
 	// 12. S-expression watch: (watch ...)
 	if strings.HasPrefix(strings.ToLower(input), "(watch ") || strings.ToLower(strings.TrimSpace(input)) == "(watch)" {
 		r.handleWatch(input)
+		return false
+	}
+
+	// 13. S-expression substr: (substr ...)
+	if strings.HasPrefix(strings.ToLower(input), "(substr ") || strings.ToLower(strings.TrimSpace(input)) == "(substr)" {
+		r.handleSubstr(input)
 		return false
 	}
 
@@ -265,6 +277,9 @@ func (r *REPL) handleCommand(input string) bool {
 	case "pm":
 		r.handlePM(input)
 
+	case "ppwm":
+		r.handlePPWM(input)
+
 	case "strategy":
 		if len(parts) == 1 {
 			fmt.Fprintf(r.out, "Current conflict resolution strategy: %s\n", r.engine.ConflictSet().Strategy().String())
@@ -317,6 +332,9 @@ func (r *REPL) handleCommand(input string) bool {
 
 	case "litval":
 		r.handleLitval(input)
+
+	case "substr":
+		r.handleSubstr(input)
 
 	case "reset":
 		r.engine.WorkingMemory().Reset()
@@ -689,6 +707,20 @@ func (r *REPL) LoadFile(path string) error {
 			} else {
 				_ = r.engine.SetWatchLevel(*stmt.WatchLevel)
 			}
+		case parser.StmtPPWM:
+			matches := r.engine.FindWMEsMatching(stmt.PPWMPattern)
+			for _, w := range matches {
+				fmt.Fprintln(r.out, w.String())
+			}
+		case parser.StmtStrategy:
+			if strings.ToUpper(stmt.Strategy) == "MEA" {
+				r.engine.ConflictSet().SetStrategy(conflict.StrategyMEA)
+			} else if strings.ToUpper(stmt.Strategy) == "LEX" {
+				r.engine.ConflictSet().SetStrategy(conflict.StrategyLEX)
+			}
+		case parser.StmtSubstr:
+			val := r.engine.EvaluateSubstr(stmt.Substr, nil)
+			fmt.Fprintln(r.out, val.String())
 		}
 	}
 
@@ -745,11 +777,13 @@ Commands:
   remove <tag...> | *       Retract WME(s) by timetag or all WMEs (*)
   excise <rule...>          Evict production rules from memory and conflict set
   pm [<rule...> | *]        Print production rules in memory
+  ppwm [<pattern>]          Print working memory elements matching pattern (e.g. ppwm City ^state PA)
   openfile <log> <f> <m>    Open a file stream (modes: in, out, append)
   closefile <log>           Close an open file stream
   default <log> <subsys>    Set default stream for accept, write, or trace
   genatom                   Generate a unique symbolic atom (e.g. atom1)
   litval [<cls>] <attr>     Display the numeric index assigned to an attribute
+  substr <elem> <start> <end> Extract a subsequence from a working memory element
   wm [class]                Display current working memory elements
   schemas [class]           Display declared class schemas
   cs                        Display conflict set (pending instantiations in salience order)
@@ -849,6 +883,76 @@ func (r *REPL) handlePM(input string) {
 			fmt.Fprintf(r.out, "Rule '%s' not found\n", name)
 		}
 	}
+}
+
+func (r *REPL) handlePPWM(input string) {
+	trimmed := strings.TrimSpace(input)
+	if strings.HasPrefix(strings.ToLower(trimmed), "(ppwm") {
+		// already has (ppwm
+	} else if strings.HasPrefix(trimmed, "(") && strings.HasSuffix(trimmed, ")") {
+		trimmed = "(ppwm " + trimmed[1:]
+	} else if strings.HasPrefix(strings.ToLower(trimmed), "ppwm ") || strings.ToLower(trimmed) == "ppwm" || strings.ToLower(trimmed) == "ppwm*" {
+		trimmed = "(" + trimmed + ")"
+	} else {
+		trimmed = "(ppwm " + trimmed + ")"
+	}
+
+	p, err := parser.NewParser(trimmed)
+	if err != nil {
+		fmt.Fprintf(r.out, "ppwm error: %v\n", err)
+		return
+	}
+	for _, va := range r.engine.VectorAttributes() {
+		p.RegisterVectorAttribute(va)
+	}
+	for _, s := range r.engine.Schemas() {
+		p.RegisterSchema(s)
+	}
+
+	pattern, err := p.ParsePPWM()
+	if err != nil {
+		fmt.Fprintf(r.out, "ppwm error: %v\n", err)
+		return
+	}
+
+	matches := r.engine.FindWMEsMatching(pattern)
+	for _, w := range matches {
+		fmt.Fprintln(r.out, w.String())
+	}
+}
+
+func (r *REPL) handleSubstr(input string) {
+	trimmed := strings.TrimSpace(input)
+	if strings.HasPrefix(strings.ToLower(trimmed), "(substr") {
+		// already has (substr
+	} else if strings.HasPrefix(trimmed, "(") && strings.HasSuffix(trimmed, ")") {
+		trimmed = "(substr " + trimmed[1:]
+	} else if strings.HasPrefix(strings.ToLower(trimmed), "substr ") || strings.ToLower(trimmed) == "substr" {
+		trimmed = "(" + trimmed + ")"
+	} else {
+		trimmed = "(substr " + trimmed + ")"
+	}
+
+	p, err := parser.NewParser(trimmed)
+	if err != nil {
+		fmt.Fprintf(r.out, "substr error: %v\n", err)
+		return
+	}
+	for _, va := range r.engine.VectorAttributes() {
+		p.RegisterVectorAttribute(va)
+	}
+	for _, s := range r.engine.Schemas() {
+		p.RegisterSchema(s)
+	}
+
+	val, err := p.ParseSubstr()
+	if err != nil {
+		fmt.Fprintf(r.out, "substr error: %v\n", err)
+		return
+	}
+
+	res := r.engine.EvaluateSubstr(val.SubstrExpr(), nil)
+	fmt.Fprintln(r.out, res.String())
 }
 
 func (r *REPL) handleOpenFile(input string) {
