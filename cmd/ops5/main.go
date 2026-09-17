@@ -17,6 +17,8 @@ func main() {
 	traceFlag := flag.Bool("trace", false, "Enable cycle tracing (sets watch=1)")
 	interactiveFlag := flag.Bool("i", false, "Drop into interactive REPL after loading file")
 	maxCyclesFlag := flag.Int("max-cycles", 1000, "Maximum number of cycles for batch run")
+	colorFlag := flag.String("color", "auto", "Terminal color output: 'auto', 'always', or 'never'")
+	tableFlag := flag.Bool("table", false, "Display working memory, conflict set, and schemas in boxed tables")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "OPS5 Production Rule System (Go)\n\n")
@@ -59,6 +61,18 @@ func main() {
 	}
 
 	repl := cli.NewREPL(os.Stdin, os.Stdout)
+	switch strings.ToLower(*colorFlag) {
+	case "always", "true", "1", "yes":
+		repl.SetColor(true)
+	case "never", "false", "0", "no":
+		repl.SetColor(false)
+	default: // "auto"
+		// Autodetected based on terminal capability
+	}
+	if *tableFlag {
+		repl.SetTableMode(true)
+	}
+
 	if strings.ToLower(*strategyFlag) == "mea" {
 		repl.Engine().SetStrategy(conflict.StrategyMEA)
 	} else {

@@ -82,11 +82,15 @@ The interactive CLI shell (`ops5`) supports both bare words and paren-enclosed c
 
 | Command | Arguments | Description |
 | :--- | :--- | :--- |
-| **`wm`** | `[class]` | Prints active Working Memory Elements (optionally filtered by class). |
-| **`cs`** | _none_ | Prints the active conflict set (agenda) sorted by salience. |
+| **`wm`** | `[class] [--table]` | Prints active Working Memory Elements (optionally filtered by class or in a boxed table). |
+| **`cs`** | `[--table]` | Prints the active conflict set (agenda) sorted by salience (optionally in a boxed table). |
+| **`schemas`** / **`schema`** | `[class] [--table]` | Prints registered class schemas and their vector attributes (optionally in a boxed table). |
+| **`status`** / **`info`** | _none_ | Displays runtime status overview (rules count, WME count, strategy, dominant rule, etc.). |
+| **`table`** | `[on\|off]` | Displays or toggles global boxed tabular formatting mode for `wm`, `cs`, and `schemas`. |
+| **`clear`** / **`cls`** | _none_ | Clears the terminal screen (also available via `Ctrl-L`). |
 | **`step`** | _none_ | Executes a single Match-Resolve-Act cycle. |
 | **`run`** | `[N]` | Runs rules until quiescence, `(halt)`, or `N` cycles. |
-| **`make`** | `<class> [^attr val ...]` | Asserts a new WME from the REPL prompt. |
+| **`make`** | `<class> [^attr val ...]` | Asserts a new WME from the REPL prompt with syntax highlighting. |
 | **`modify`** | `<timetag> [^attr val ...]` | Modifies an existing WME by its timetag. |
 | **`remove`** | `<timetag...> \| *` | Retracts specific WME(s) by timetag or all WMEs (`*`). |
 | **`openfile`** | `<logical-name> <filespec> <mode>` | Opens a file stream (`in`, `out`, `append`). Supports `\|...\|`. |
@@ -96,7 +100,6 @@ The interactive CLI shell (`ops5`) supports both bare words and paren-enclosed c
 | **`litval`** | `[<class>] <attr>` | Displays the numeric index assigned to an attribute name. |
 | **`substr`** | `<elem> <start> <end>` | Extracts a subsequence or value from a working memory element. See [`substr` Reference](substr.md). |
 | **`literalize`** | `<class> <attr1> ...` | Declares a class schema with positional attribute layout. |
-| **`schemas`** / **`schema`** | `[class]` | Prints registered class schemas and their vector attributes. |
 | **`vector-attribute`** | `<attr1> ...` | Declares attribute(s) as multi-valued vector attributes. |
 | **`vector-attributes`** | _none_ | Lists all registered vector attributes. |
 | **`strategy`** | `[lex\|mea]` | Displays or sets conflict resolution strategy (`LEX` or `MEA`). See [Selection Strategy Reference](conflict_resolution.md). |
@@ -110,6 +113,13 @@ The interactive CLI shell (`ops5`) supports both bare words and paren-enclosed c
 | **`reset`** | _none_ | Clears working memory, network state, and conflict set. |
 | **`help`** | _none_ | Displays interactive REPL help. |
 | **`exit`** / **`quit`** | _none_ | Exits the interactive shell. |
+
+### REPL GUI & Interactive Enhancements
+- **Syntax Highlighting & ANSI Colors**: Color-coded prompts, class identifiers, caret attributes (`^attr`), values (numbers, strings, booleans, symbols), and status headers. Supports automatic terminal detection, `NO_COLOR`, and `--color=auto|always|never`.
+- **Tab Auto-Completion**: Contextual tab completion for base commands, class schemas, attributes (`^...`), rules for `excise`/`pm`, strategies (`lex`/`mea`), trace levels (`0`, `1`, `2`), and file paths (`.ops`, `.json`).
+- **Command History**: Persistent command line history saved to `~/.ops5_history` with `Up`/`Down` arrow navigation and duplicate suppression.
+- **Readline Line Editor**: Full cursor navigation (`Left`/`Right`/`Home`/`End`), deletion (`Backspace`, `Delete`), and shortcuts (`Ctrl-A`, `Ctrl-E`, `Ctrl-K`, `Ctrl-U`, `Ctrl-L`, `Ctrl-C`, `Ctrl-D`).
+- **Boxed Tabular Mode**: Formatted Unicode/ASCII tables for `wm`, `cs`, and `schemas` with exact visual column width calculation (`wm --table`, `cs --table`, `schemas --table`, or global toggle `table on`).
 
 ---
 

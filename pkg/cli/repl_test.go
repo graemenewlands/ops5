@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"ops5/pkg/engine"
+	"ops5/pkg/model"
 )
 
 func TestREPLInteractiveSession(t *testing.T) {
@@ -727,6 +730,263 @@ func TestREPLLoadFileSubstrDirective(t *testing.T) {
 	}
 	if !strings.Contains(output, "beta gamma delta") {
 		t.Errorf("expected 'beta gamma delta' from (substr 1 3 inf), got:\n%s", output)
+	}
+}
+
+func TestREPLTableMode(t *testing.T) {
+	commands := `
+	(literalize Person name age occupation)
+	make Person ^name Alice ^age 30 ^occupation Engineer
+	make Person ^name Bob ^age 25 ^occupation Designer
+	wm --table
+	table on
+	wm
+	table off
+	wm -t Person
+	exit
+	`
+	in := strings.NewReader(commands)
+	var out bytes.Buffer
+	repl := NewREPL(in, &out)
+	repl.Start()
+
+	output := out.String()
+	if !strings.Contains(output, "Alice") || !strings.Contains(output, "Bob") {
+		t.Fatalf("expected WMEs in output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Timetag") || !strings.Contains(output, "Class") || !strings.Contains(output, "Attributes") {
+		t.Fatalf("expected table headers in output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Table mode enabled") || !strings.Contains(output, "Table mode disabled") {
+		t.Fatalf("expected table mode status messages, got:\n%s", output)
+	}
+}
+
+func TestREPLConflictSetTable(t *testing.T) {
+	commands := `
+	(p rule-1
+	   (goal ^status active)
+	   -->
+	   (write "rule 1")
+	)
+	(p rule-2
+	   (goal ^status active)
+	   -->
+	   (write "rule 2")
+	)
+	make goal ^status active
+	cs --table
+	exit
+	`
+	in := strings.NewReader(commands)
+	var out bytes.Buffer
+	repl := NewREPL(in, &out)
+	repl.Start()
+
+	output := out.String()
+	if !strings.Contains(output, "Conflict Set (2 activations") {
+		t.Fatalf("expected 2 activations, got:\n%s", output)
+	}
+	if !strings.Contains(output, "rule-1") || !strings.Contains(output, "rule-2") {
+		t.Fatalf("expected rules in table, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Specificity") || !strings.Contains(output, "Timetags") {
+		t.Fatalf("expected conflict set table columns, got:\n%s", output)
+	}
+}
+
+func TestREPLSchemasTable(t *testing.T) {
+	commands := `
+	(literalize inventory id item location)
+	(vector-attribute location)
+	schemas --table
+	exit
+	`
+	in := strings.NewReader(commands)
+	var out bytes.Buffer
+	repl := NewREPL(in, &out)
+	repl.Start()
+
+	output := out.String()
+	if !strings.Contains(output, "Class Schemas:") {
+		t.Fatalf("expected class schemas header, got:\n%s", output)
+	}
+	if !strings.Contains(output, "inventory") || !strings.Contains(output, "Vector Attributes") {
+		t.Fatalf("expected schemas table content, got:\n%s", output)
+	}
+}
+
+func TestREPLStatusCommand(t *testing.T) {
+	commands := `
+	(literalize Task id description)
+	(p sample-rule
+	   (Task ^id <id>)
+	   -->
+	   (write <id>)
+	)
+	make Task ^id 101 ^description "Do work"
+	status
+	exit
+	`
+	in := strings.NewReader(commands)
+	var out bytes.Buffer
+	repl := NewREPL(in, &out)
+	repl.Start()
+
+	output := out.String()
+	if !strings.Contains(output, "OPS5 Runtime Status") {
+		t.Fatalf("expected status header, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Strategy:") || !strings.Contains(output, "Production Rules:  1") {
+		t.Fatalf("expected status details, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Working Memory:    1 WMEs") {
+		t.Fatalf("expected WME count in status, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Conflict Set:      1 activations") {
+		t.Fatalf("expected activation count in status, got:\n%s", output)
+	}
+}
+
+func TestREPLClearCommand(t *testing.T) {
+	commands := "clear\nexit\n"
+	in := strings.NewReader(commands)
+	var out bytes.Buffer
+	repl := NewREPL(in, &out)
+	repl.Start()
+
+	output := out.String()
+	if !strings.Contains(output, "\033[H\033[2J") {
+		t.Fatalf("expected clear escape sequence, got:\n%s", output)
+	}
+}
+
+func TestStylerColor(t *testing.T) {
+	styler := &Styler{Enabled: true}
+	prompt := styler.Prompt()
+	if !strings.Contains(prompt, "\033[") {
+		t.Errorf("expected ANSI sequence in prompt, got: %q", prompt)
+	}
+
+	w := styler.Wrap(ansiBold, "test")
+	if w != "\033[1mtest\033[0m" {
+		t.Errorf("unexpected wrap output: %q", w)
+	}
+	if StripANSI(w) != "test" {
+		t.Errorf("expected 'test', got %q", StripANSI(w))
+	}
+	if VisualWidth(w) != 4 {
+		t.Errorf("expected visual width 4, got %d", VisualWidth(w))
+	}
+
+	styler.Enabled = false
+	if styler.Wrap(ansiBold, "test") != "test" {
+		t.Errorf("expected plain text when disabled")
+	}
+	if styler.Prompt() != "ops5> " {
+		t.Errorf("expected plain prompt when disabled, got %q", styler.Prompt())
+	}
+}
+
+func TestCompleter(t *testing.T) {
+	eng := engine.New()
+	eng.DeclareClass("goal", []string{"status", "priority"})
+	eng.DeclareClass("person", []string{"name", "age"})
+	eng.AddRule(&model.Rule{Name: "find-person"})
+
+	completer := NewCompleter(eng)
+
+	// Command completion
+	candidates, prefix := completer.Complete("st")
+	if prefix != "st" {
+		t.Errorf("expected prefix 'st', got %q", prefix)
+	}
+	expectedCmds := []string{"status", "step", "strategy"}
+	for _, exp := range expectedCmds {
+		found := false
+		for _, c := range candidates {
+			if c == exp {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected candidate %q for 'st', got %v", exp, candidates)
+		}
+	}
+
+	// Strategy options completion
+	candidates, prefix = completer.Complete("strategy m")
+	if prefix != "m" || len(candidates) != 1 || candidates[0] != "mea" {
+		t.Errorf("expected ['mea'], got %v with prefix %q", candidates, prefix)
+	}
+
+	// Class completion
+	candidates, prefix = completer.Complete("make p")
+	if prefix != "p" || len(candidates) != 1 || candidates[0] != "person" {
+		t.Errorf("expected ['person'], got %v with prefix %q", candidates, prefix)
+	}
+
+	// Attribute completion with caret
+	candidates, prefix = completer.Complete("make person ^a")
+	if prefix != "^a" || len(candidates) != 1 || candidates[0] != "^age" {
+		t.Errorf("expected ['^age'], got %v with prefix %q", candidates, prefix)
+	}
+
+	// Rule completion
+	candidates, prefix = completer.Complete("excise find-")
+	if prefix != "find-" || len(candidates) != 1 || candidates[0] != "find-person" {
+		t.Errorf("expected ['find-person'], got %v with prefix %q", candidates, prefix)
+	}
+}
+
+func TestHistory(t *testing.T) {
+	h := &History{
+		entries: make([]string, 0),
+		cursor:  0,
+		maxSize: 5,
+	}
+
+	h.Add("cmd1")
+	h.Add("cmd2")
+	h.Add("cmd3")
+	// Consecutive duplicate should be ignored
+	h.Add("cmd3")
+
+	if len(h.Entries()) != 3 {
+		t.Errorf("expected 3 entries, got %d", len(h.Entries()))
+	}
+
+	// Navigate backwards (Up arrow)
+	val, ok := h.Previous()
+	if !ok || val != "cmd3" {
+		t.Errorf("expected 'cmd3', got %q (ok=%t)", val, ok)
+	}
+
+	val, ok = h.Previous()
+	if !ok || val != "cmd2" {
+		t.Errorf("expected 'cmd2', got %q (ok=%t)", val, ok)
+	}
+
+	val, ok = h.Previous()
+	if !ok || val != "cmd1" {
+		t.Errorf("expected 'cmd1', got %q (ok=%t)", val, ok)
+	}
+
+	// Navigate forwards (Down arrow)
+	val, ok = h.Next()
+	if !ok || val != "cmd2" {
+		t.Errorf("expected 'cmd2', got %q (ok=%t)", val, ok)
+	}
+
+	val, ok = h.Next()
+	if !ok || val != "cmd3" {
+		t.Errorf("expected 'cmd3', got %q (ok=%t)", val, ok)
+	}
+
+	val, ok = h.Next()
+	if ok {
+		t.Errorf("expected end of history, got %q", val)
 	}
 }
 

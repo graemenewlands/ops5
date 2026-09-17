@@ -618,6 +618,8 @@ go build -o ops5 ./cmd/ops5
 | Flag | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `-i` | boolean | `false` | Drop into interactive REPL after loading input file |
+| `-color` | string | `"auto"` | Terminal color output: `auto` (autodetect), `always`, or `never` |
+| `-table` | boolean | `false` | Enable boxed tabular mode by default for `wm`, `cs`, and `schemas` |
 | `-watch` | integer | `1` | Set trace watch level: `0` (silent), `1` (rule firings), `2` (firings + WM changes) |
 | `-trace` | boolean | `false` | Enable cycle-by-cycle execution tracing to stdout (alias for `-watch 1`) |
 | `-strategy` | string | `"lex"` | Conflict resolution strategy: `lex` or `mea` |
@@ -644,9 +646,9 @@ Defined rule 'classify-alert' (conditions=1, specificity=3)
 | `(literalize ...)` / `literalize` | `<class> <attrs...>` | Declare attribute schema for positional mapping | `literalize point x y` |
 | `(vector-attribute ...)` / `vector-attribute` | `<attrs...>` | Declare multi-valued vector attributes | `vector-attribute location` |
 | `vector-attributes` | *none* | Display declared vector attributes | `vector-attributes` |
-| `schemas` | `[class]` | Display registered schemas (all or specific class) | `schemas point` |
+| `schemas` | `[class] [--table]` | Display registered schemas (optionally in a boxed table) | `schemas point --table` |
 | `(p ...)` | `<rule-definition>` | Compile a production rule into the active Rete network | `(p r1 (goal ^status active) --> (halt))` |
-| `make` | `<class> [^<attr> <val> ...]` | Assert a new WME | `make goal ^type batch ^status start` |
+| `make` | `<class> [^<attr> <val> ...]` | Assert a new WME (syntax highlighted) | `make goal ^type batch ^status start` |
 | `modify` | `<timetag> [^<attr> <val> ...]` | Modify an existing WME by timetag | `modify 1 ^status in-progress` |
 | `remove` / `(remove ...)` | `<timetag...> \| *` | Retract WME(s) by timetag or all WMEs (`*`) | `remove *`<br>`(remove 1)` |
 | `openfile` | `<log-name> <filespec> <mode>` | Open file stream (`in`, `out`, `append`) | `(openfile ruletrace \|RuleTrace.ops\| out)` |
@@ -655,8 +657,11 @@ Defined rule 'classify-alert' (conditions=1, specificity=3)
 | `genatom` / `(genatom)` | *none* | Generate and display a unique symbolic atom | `(genatom)` |
 | `litval` / `(litval ...)` | `[<class>] <attr>` | Display numeric index assigned to an attribute | `(litval name)` |
 | `substr` / `(substr ...)` | `<elem> <start> <end>` | Extract a subsequence or value from a WME | `(substr 1 sequence sequence)` |
-| `wm` | `[class]` | Display active WMEs (optionally filtered by class) | `wm item` |
-| `cs` | *none* | Display conflict set in current salience order (`*` indicates dominant) | `cs` |
+| `wm` | `[class] [--table]` | Display active WMEs (optionally filtered by class or in a boxed table) | `wm item --table` |
+| `cs` | `[--table]` | Display conflict set agenda (optionally in a boxed table) | `cs --table` |
+| `status` / `info` | *none* | Display comprehensive engine status overview | `status` |
+| `table` | `[on \| off]` | Display or toggle global boxed tabular formatting mode | `table on` |
+| `clear` / `cls` | *none* | Clear the terminal screen (or `Ctrl-L`) | `clear` |
 | `step` | *none* | Execute exactly one Match-Resolve-Act cycle | `step` |
 | `run` | `[max_cycles]` | Execute until quiescence, halt, or max cycles | `run 10` |
 | `strategy` | `[lex \| mea]` | View or switch conflict resolution strategy | `strategy mea` |
@@ -670,6 +675,13 @@ Defined rule 'classify-alert' (conditions=1, specificity=3)
 | `reset` | *none* | Clear working memory and conflict set | `reset` |
 | `help` | *none* | Display interactive help menu | `help` |
 | `exit` / `quit` | *none* | Terminate the REPL session | `exit` |
+
+#### REPL GUI & Interactive Features
+- **ANSI Syntax Highlighting**: Colorizes WME timetags (yellow), element classes (magenta), caret attributes (cyan), values (numbers, strings, booleans, symbols), and status headers. Respects `NO_COLOR` standard and terminal detection.
+- **Contextual Tab Completion**: Auto-completes commands, registered class schemas, caret attributes (`^attr`), rule names for `excise`/`pm`, strategies (`lex`/`mea`), trace levels (`0`, `1`, `2`), and file paths.
+- **Persistent Command History**: Automatically saves session command history to `~/.ops5_history` with Up/Down arrow recall and duplicate filtering.
+- **Readline Editing**: In-terminal line editing with left/right cursor navigation, Home (`Ctrl-A`), End (`Ctrl-E`), Kill (`Ctrl-K`), Clear Line (`Ctrl-U`), Clear Screen (`Ctrl-L`), and cancel (`Ctrl-C`).
+- **Boxed Table Renderer**: Formatted tables using Unicode box-drawing characters (`┌─┬┐`, `│`, `├─┼┤`, `└─┴┘`) with ANSI-aware visual column alignment for `wm`, `cs`, and `schemas`.
 
 > [!TIP]
 > For interactive walkthroughs demonstrating rule development, conflict resolution, testing paradigms, and halting controls, see:

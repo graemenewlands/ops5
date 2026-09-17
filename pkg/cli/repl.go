@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -17,10 +18,15 @@ import (
 
 // REPL provides an interactive command line interface for the OPS5 runtime.
 type REPL struct {
-	engine *engine.Engine
-	runner *harness.Runner
-	in     *bufio.Reader
-	out    io.Writer
+	engine     *engine.Engine
+	runner     *harness.Runner
+	in         *bufio.Reader
+	out        io.Writer
+	styler     *Styler
+	history    *History
+	completer  *Completer
+	lineEditor *LineEditor
+	tableMode  bool
 }
 
 // NewREPL creates a new REPL instance.
@@ -30,11 +36,23 @@ func NewREPL(in io.Reader, out io.Writer) *REPL {
 	eng.SetTraceWriter(out)
 	bufIn := bufio.NewReader(in)
 	eng.SetInputReader(bufIn)
+
+	styler := NewStyler(out)
+	history := NewHistory(1000)
+	completer := NewCompleter(eng)
+	editor := NewLineEditor(in, out, styler, history, completer)
+	editor.SetBufReader(bufIn)
+
 	return &REPL{
-		engine: eng,
-		runner: harness.NewRunner(),
-		in:     bufIn,
-		out:    out,
+		engine:     eng,
+		runner:     harness.NewRunner(),
+		in:         bufIn,
+		out:        out,
+		styler:     styler,
+		history:    history,
+		completer:  completer,
+		lineEditor: editor,
+		tableMode:  false,
 	}
 }
 
@@ -43,21 +61,59 @@ func (r *REPL) Engine() *engine.Engine {
 	return r.engine
 }
 
+// SetColor enables or disables ANSI color styling.
+func (r *REPL) SetColor(enabled bool) {
+	r.styler.Enabled = enabled
+}
+
+// SetTableMode enables or disables tabular display mode for wm, cs, and schemas.
+func (r *REPL) SetTableMode(enabled bool) {
+	r.tableMode = enabled
+}
+
+// Styler returns the REPL's styler.
+func (r *REPL) Styler() *Styler {
+	return r.styler
+}
+
+// History returns the REPL's history manager.
+func (r *REPL) History() *History {
+	return r.history
+}
+
+// Completer returns the REPL's autocompletion engine.
+func (r *REPL) Completer() *Completer {
+	return r.completer
+}
+
+func (r *REPL) printWelcomeBanner() {
+	if r.styler.Enabled {
+		banner := r.styler.Bold(r.styler.BrightCyan("OPS5 Interactive Production System Runtime")) + "\n" +
+			r.styler.Dim("Type ") + r.styler.Bold("help") + r.styler.Dim(" for command list, ") +
+			r.styler.Bold("exit") + r.styler.Dim(" or Ctrl-D to quit. Tab for autocompletion.")
+		fmt.Fprintln(r.out, banner)
+	} else {
+		fmt.Fprintln(r.out, "OPS5 Interactive Runtime (type 'help' for commands, 'exit' to quit)")
+	}
+}
+
 // Start launches the interactive REPL loop.
 func (r *REPL) Start() {
-	fmt.Fprintln(r.out, "OPS5 Interactive Runtime (type 'help' for commands, 'exit' to quit)")
+	r.printWelcomeBanner()
+	defer r.history.Save()
 
 	var multilineBuf strings.Builder
 	openParens := 0
 
 	for {
+		var prompt string
 		if openParens == 0 {
-			fmt.Fprint(r.out, "ops5> ")
+			prompt = r.styler.Prompt()
 		} else {
-			fmt.Fprint(r.out, "...   ")
+			prompt = r.styler.ContinuationPrompt()
 		}
 
-		line, err := r.in.ReadString('\n')
+		line, err := r.lineEditor.ReadLine(prompt)
 		if err != nil {
 			if err == io.EOF {
 				fmt.Fprintln(r.out, "\nGoodbye!")
@@ -93,6 +149,10 @@ func (r *REPL) Start() {
 
 		if input == "" {
 			continue
+		}
+
+		if !r.lineEditor.IsTerminal() {
+			r.history.Add(input)
 		}
 
 		// Handle command
@@ -233,21 +293,39 @@ func (r *REPL) handleCommand(input string) bool {
 		r.printVectorAttributes()
 
 	case "schemas", "schema":
-		classFilter := ""
-		if len(parts) > 1 {
-			classFilter = parts[1]
-		}
-		r.printSchemas(classFilter)
+		r.printSchemas(parts[1:]...)
 
 	case "wm":
-		classFilter := ""
-		if len(parts) > 1 {
-			classFilter = parts[1]
-		}
-		r.printWorkingMemory(classFilter)
+		r.printWorkingMemory(parts[1:]...)
 
 	case "cs":
-		r.printConflictSet()
+		r.printConflictSet(parts[1:]...)
+
+	case "status", "info":
+		r.printStatus()
+
+	case "clear", "cls":
+		fmt.Fprint(r.out, "\033[H\033[2J")
+
+	case "table":
+		if len(parts) > 1 {
+			arg := strings.ToLower(parts[1])
+			if arg == "on" || arg == "true" || arg == "1" {
+				r.tableMode = true
+				fmt.Fprintln(r.out, "Table mode enabled")
+			} else if arg == "off" || arg == "false" || arg == "0" {
+				r.tableMode = false
+				fmt.Fprintln(r.out, "Table mode disabled")
+			} else {
+				fmt.Fprintln(r.out, "Usage: table [on|off]")
+			}
+		} else {
+			if r.tableMode {
+				fmt.Fprintln(r.out, "Table mode is on")
+			} else {
+				fmt.Fprintln(r.out, "Table mode is off")
+			}
+		}
 
 	case "run":
 		maxCycles := 0
@@ -409,7 +487,7 @@ func (r *REPL) handleMake(src string) {
 		}
 	}
 	wme := r.engine.Make(class, attrs)
-	fmt.Fprintf(r.out, "Asserted: %s\n", wme.String())
+	fmt.Fprintf(r.out, "Asserted: %s\n", r.styler.FormatWME(wme))
 }
 
 func (r *REPL) handleLiteralize(src string) {
@@ -503,35 +581,81 @@ func (r *REPL) printVectorAttributes() {
 	}
 }
 
-func (r *REPL) printSchemas(classFilter string) {
+func (r *REPL) printSchemas(args ...string) {
 	schemas := r.engine.Schemas()
 	if len(schemas) == 0 {
 		fmt.Fprintln(r.out, "No class schemas declared.")
 		return
 	}
 
+	useTable := r.tableMode
+	classFilter := ""
+	for _, arg := range args {
+		if arg == "--table" || arg == "-t" {
+			useTable = true
+		} else if !strings.HasPrefix(arg, "-") && classFilter == "" {
+			classFilter = arg
+		}
+	}
+
 	filter := strings.ToLower(classFilter)
 	count := 0
+	var matched []*model.ClassSchema
 	for _, s := range schemas {
 		if filter == "" || s.Class == filter {
-			if count == 0 {
-				fmt.Fprintln(r.out, "Class Schemas:")
-			}
-			vecs := s.VectorAttributeNames()
-			if len(vecs) > 0 {
-				fmt.Fprintf(r.out, "  %s: %v (vector: %v)\n", s.Class, s.Attributes, vecs)
-			} else {
-				fmt.Fprintf(r.out, "  %s: %v\n", s.Class, s.Attributes)
-			}
+			matched = append(matched, s)
 			count++
 		}
 	}
 	if count == 0 {
 		fmt.Fprintf(r.out, "No schema found for class '%s'.\n", classFilter)
+		return
+	}
+
+	if useTable {
+		tbl := NewTable(r.styler)
+		tbl.SetHeaders("Class", "Attributes", "Vector Attributes")
+		for _, s := range matched {
+			attrsStr := strings.Join(s.Attributes, ", ")
+			if attrsStr == "" {
+				attrsStr = r.styler.Dim("(none)")
+			}
+			vecs := s.VectorAttributeNames()
+			vecsStr := strings.Join(vecs, ", ")
+			if vecsStr == "" {
+				vecsStr = r.styler.Dim("(none)")
+			} else {
+				vecsStr = r.styler.Wrap(ansiBrightCyan, vecsStr)
+			}
+			tbl.AddRow(r.styler.Wrap(ansiBold+ansiBrightMagenta, s.Class), attrsStr, vecsStr)
+		}
+		fmt.Fprintln(r.out, "Class Schemas:")
+		fmt.Fprint(r.out, tbl.Render())
+		return
+	}
+
+	fmt.Fprintln(r.out, "Class Schemas:")
+	for _, s := range matched {
+		vecs := s.VectorAttributeNames()
+		if len(vecs) > 0 {
+			fmt.Fprintf(r.out, "  %s: %v (vector: %v)\n", r.styler.Wrap(ansiBold+ansiBrightMagenta, s.Class), s.Attributes, vecs)
+		} else {
+			fmt.Fprintf(r.out, "  %s: %v\n", r.styler.Wrap(ansiBold+ansiBrightMagenta, s.Class), s.Attributes)
+		}
 	}
 }
 
-func (r *REPL) printWorkingMemory(classFilter string) {
+func (r *REPL) printWorkingMemory(args ...string) {
+	useTable := r.tableMode
+	classFilter := ""
+	for _, arg := range args {
+		if arg == "--table" || arg == "-t" {
+			useTable = true
+		} else if !strings.HasPrefix(arg, "-") && classFilter == "" {
+			classFilter = arg
+		}
+	}
+
 	var wmes []*model.WME
 	if classFilter != "" {
 		wmes = r.engine.WorkingMemory().FindByClass(classFilter)
@@ -544,29 +668,120 @@ func (r *REPL) printWorkingMemory(classFilter string) {
 		return
 	}
 
+	if useTable {
+		fmt.Fprintf(r.out, "Working Memory (%d elements):\n", len(wmes))
+		r.printWorkingMemoryTable(wmes)
+		return
+	}
+
 	fmt.Fprintf(r.out, "Working Memory (%d elements):\n", len(wmes))
 	for _, w := range wmes {
-		fmt.Fprintf(r.out, "  %s\n", w.String())
+		fmt.Fprintf(r.out, "  %s\n", r.styler.FormatWME(w))
 	}
 }
 
-func (r *REPL) printConflictSet() {
+func (r *REPL) printWorkingMemoryTable(wmes []*model.WME) {
+	tbl := NewTable(r.styler)
+	tbl.SetHeaders("Timetag", "Class", "Attributes")
+
+	for _, w := range wmes {
+		var keys []string
+		for k := range w.Attributes {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+
+		var attrPairs []string
+		for _, k := range keys {
+			attrPairs = append(attrPairs, fmt.Sprintf("%s %s", r.styler.Wrap(ansiBrightCyan, "^"+k), r.styler.FormatValue(w.Attributes[k])))
+		}
+		attrStr := strings.Join(attrPairs, " ")
+		if attrStr == "" {
+			attrStr = r.styler.Dim("(none)")
+		}
+
+		tbl.AddRow(
+			r.styler.Wrap(ansiBrightYellow, fmt.Sprintf("%d", w.Timetag)),
+			r.styler.Wrap(ansiBold+ansiBrightMagenta, w.Class),
+			attrStr,
+		)
+	}
+
+	fmt.Fprint(r.out, tbl.Render())
+}
+
+func (r *REPL) printConflictSet(args ...string) {
 	acts := r.engine.ConflictSet().All()
 	if len(acts) == 0 {
 		fmt.Fprintln(r.out, "Conflict set is empty.")
 		return
 	}
 
+	useTable := r.tableMode
+	for _, arg := range args {
+		if arg == "--table" || arg == "-t" {
+			useTable = true
+		}
+	}
+
 	dom, _ := r.engine.ConflictSet().SelectDominant()
 
 	fmt.Fprintf(r.out, "Conflict Set (%d activations, strategy: %s):\n", len(acts), r.engine.ConflictSet().Strategy().String())
+	if useTable {
+		r.printConflictSetTable(acts, dom)
+		return
+	}
+
 	for i, act := range acts {
 		marker := "  "
 		if dom != nil && act.Key() == dom.Key() {
 			marker = "* " // Dominant activation
 		}
-		fmt.Fprintf(r.out, "%s%d. %s  WMEs: %v  (specificity: %d)\n", marker, i+1, act.Rule.Name, act.Timetags, act.Specificity())
+		fmt.Fprintf(r.out, "%s%d. %s  WMEs: %v  (specificity: %d)\n", marker, i+1, r.styler.Bold(act.Rule.Name), act.Timetags, act.Specificity())
 	}
+}
+
+func (r *REPL) printConflictSetTable(acts []*conflict.Activation, dom *conflict.Activation) {
+	tbl := NewTable(r.styler)
+	tbl.SetHeaders("#", "Sel", "Rule", "Timetags", "Specificity")
+
+	for i, act := range acts {
+		sel := " "
+		ruleName := act.Rule.Name
+		if dom != nil && act.Key() == dom.Key() {
+			sel = r.styler.BrightYellow("*")
+			ruleName = r.styler.Bold(r.styler.BrightYellow(ruleName))
+		}
+		timetagsStr := fmt.Sprintf("%v", act.Timetags)
+		tbl.AddRow(
+			fmt.Sprintf("%d", i+1),
+			sel,
+			ruleName,
+			timetagsStr,
+			fmt.Sprintf("%d", act.Specificity()),
+		)
+	}
+
+	fmt.Fprint(r.out, tbl.Render())
+}
+
+func (r *REPL) printStatus() {
+	header := r.styler.Header("OPS5 Runtime Status")
+	fmt.Fprintln(r.out, header)
+	fmt.Fprintf(r.out, "  Strategy:          %s\n", r.styler.Bold(r.engine.ConflictSet().Strategy().String()))
+	fmt.Fprintf(r.out, "  Watch Level:       %d\n", r.engine.WatchLevel())
+	fmt.Fprintf(r.out, "  Production Rules:  %d\n", len(r.engine.Rules()))
+	fmt.Fprintf(r.out, "  Working Memory:    %d WMEs\n", len(r.engine.WorkingMemory().All()))
+	fmt.Fprintf(r.out, "  Conflict Set:      %d activations\n", len(r.engine.ConflictSet().All()))
+	if dom, ok := r.engine.ConflictSet().SelectDominant(); ok {
+		fmt.Fprintf(r.out, "  Dominant Rule:     %s (timetags: %v)\n", r.styler.BrightYellow(dom.Rule.Name), dom.Timetags)
+	} else {
+		fmt.Fprintf(r.out, "  Dominant Rule:     %s\n", r.styler.Dim("none (quiescence)"))
+	}
+	fmt.Fprintf(r.out, "  Class Schemas:     %d\n", len(r.engine.Schemas()))
+	fmt.Fprintf(r.out, "  Vector Attributes: %d\n", len(r.engine.VectorAttributes()))
+	fmt.Fprintf(r.out, "  Table Mode:        %t\n", r.tableMode)
+	fmt.Fprintf(r.out, "  Color Enabled:     %t\n", r.styler.Enabled)
 }
 
 func (r *REPL) stepCycle() {
@@ -710,7 +925,7 @@ func (r *REPL) LoadFile(path string) error {
 		case parser.StmtPPWM:
 			matches := r.engine.FindWMEsMatching(stmt.PPWMPattern)
 			for _, w := range matches {
-				fmt.Fprintln(r.out, w.String())
+				fmt.Fprintln(r.out, r.styler.FormatWME(w))
 			}
 		case parser.StmtStrategy:
 			if strings.ToUpper(stmt.Strategy) == "MEA" {
@@ -766,6 +981,60 @@ func (r *REPL) runTestCase(path string) {
 }
 
 func (r *REPL) printHelp() {
+	if r.styler.Enabled {
+		h := func(s string) string { return r.styler.Header(s) }
+		c := func(s string) string { return r.styler.BrightCyan(s) }
+		d := func(s string) string { return r.styler.Dim(s) }
+
+		var b strings.Builder
+		b.WriteString("\n" + h("OPS5 Production System - Interactive Commands") + "\n\n")
+
+		b.WriteString(h("Production Rules & Schemas:") + "\n")
+		b.WriteString(fmt.Sprintf("  %-32s %s\n", c("(p <name> ...)"), "Define a production rule (multiline supported)"))
+		b.WriteString(fmt.Sprintf("  %-32s %s\n", c("(literalize <c> ...)"), "Declare an element class schema with attributes"))
+		b.WriteString(fmt.Sprintf("  %-32s %s\n", c("(vector-attribute <a...>)"), "Declare attribute(s) as multi-valued vector attributes"))
+		b.WriteString(fmt.Sprintf("  %-32s %s\n", c("vector-attributes"), "Display declared vector attributes"))
+		b.WriteString(fmt.Sprintf("  %-32s %s\n", c("schemas [class] [--table]"), "Display declared class schemas"))
+		b.WriteString(fmt.Sprintf("  %-32s %s\n", c("pm [<rule...> | *]"), "Print production rules in memory"))
+		b.WriteString(fmt.Sprintf("  %-32s %s\n", c("excise <rule...>"), "Evict production rules from memory and conflict set"))
+
+		b.WriteString("\n" + h("Working Memory:") + "\n")
+		b.WriteString(fmt.Sprintf("  %-32s %s\n", c("make <class> [^a v]"), "Assert a new Working Memory Element"))
+		b.WriteString(fmt.Sprintf("  %-32s %s\n", c("wm [class] [--table]"), "Display current working memory elements"))
+		b.WriteString(fmt.Sprintf("  %-32s %s\n", c("ppwm [<pattern>]"), "Print WMEs matching pattern (e.g. ppwm City ^state PA)"))
+		b.WriteString(fmt.Sprintf("  %-32s %s\n", c("remove <tag...> | *"), "Retract WME(s) by timetag or all WMEs (*)"))
+
+		b.WriteString("\n" + h("Execution & Conflict Resolution:") + "\n")
+		b.WriteString(fmt.Sprintf("  %-32s %s\n", c("step"), "Execute one Match-Resolve-Act cycle"))
+		b.WriteString(fmt.Sprintf("  %-32s %s\n", c("run [N]"), "Run until quiescence, halt, or N cycles"))
+		b.WriteString(fmt.Sprintf("  %-32s %s\n", c("cs [--table]"), "Display conflict set in salience order"))
+		b.WriteString(fmt.Sprintf("  %-32s %s\n", c("strategy [lex|mea]"), "View or switch conflict resolution strategy"))
+		b.WriteString(fmt.Sprintf("  %-32s %s\n", c("watch [0|1|2]"), "Display or set watch trace level (0=none, 1=firings, 2=firings+WM)"))
+		b.WriteString(fmt.Sprintf("  %-32s %s\n", c("trace on|off"), "Toggle cycle execution tracing"))
+
+		b.WriteString("\n" + h("REPL & GUI Enhancements:") + "\n")
+		b.WriteString(fmt.Sprintf("  %-32s %s\n", c("status / info"), "Display runtime status overview"))
+		b.WriteString(fmt.Sprintf("  %-32s %s\n", c("table [on|off]"), "Toggle or view boxed table formatting mode"))
+		b.WriteString(fmt.Sprintf("  %-32s %s\n", c("clear / cls"), "Clear the terminal screen (or Ctrl-L)"))
+
+		b.WriteString("\n" + h("I/O & Expressions:") + "\n")
+		b.WriteString(fmt.Sprintf("  %-32s %s\n", c("openfile <log> <f> <m>"), "Open a file stream (modes: in, out, append)"))
+		b.WriteString(fmt.Sprintf("  %-32s %s\n", c("closefile <log>"), "Close an open file stream"))
+		b.WriteString(fmt.Sprintf("  %-32s %s\n", c("default <log> <subsys>"), "Set default stream for accept, write, or trace"))
+		b.WriteString(fmt.Sprintf("  %-32s %s\n", c("genatom"), "Generate a unique symbolic atom (e.g. atom1)"))
+		b.WriteString(fmt.Sprintf("  %-32s %s\n", c("litval [<cls>] <attr>"), "Display numeric index assigned to attribute"))
+		b.WriteString(fmt.Sprintf("  %-32s %s\n", c("substr <elem> <start> <end>"), "Extract subsequence from WME vector"))
+		b.WriteString(fmt.Sprintf("  %-32s %s\n", c("load <file.ops>"), "Load rules and makes from an OPS5 source file"))
+		b.WriteString(fmt.Sprintf("  %-32s %s\n", c("test <file.json>"), "Execute an external test case file"))
+		b.WriteString(fmt.Sprintf("  %-32s %s\n", c("reset"), "Reset working memory, conflict set, and genatom"))
+		b.WriteString(fmt.Sprintf("  %-32s %s\n", c("help"), "Show this help text"))
+		b.WriteString(fmt.Sprintf("  %-32s %s\n", c("exit / quit"), "Exit the REPL (or Ctrl-D)"))
+		b.WriteString("\n" + d("Keyboard: Tab=autocomplete, Up/Down=history, Ctrl-A/E=Home/End, Ctrl-K=kill to EOL") + "\n")
+
+		fmt.Fprint(r.out, b.String())
+		return
+	}
+
 	helpText := `
 Commands:
   (p <name> ...)            Define a production rule (multiline supported)
@@ -784,9 +1053,12 @@ Commands:
   genatom                   Generate a unique symbolic atom (e.g. atom1)
   litval [<cls>] <attr>     Display the numeric index assigned to an attribute
   substr <elem> <start> <end> Extract a subsequence from a working memory element
-  wm [class]                Display current working memory elements
-  schemas [class]           Display declared class schemas
-  cs                        Display conflict set (pending instantiations in salience order)
+  wm [class] [--table]      Display current working memory elements
+  schemas [class] [--table] Display declared class schemas
+  cs [--table]              Display conflict set (pending instantiations in salience order)
+  status / info             Display system status overview
+  table [on|off]            Toggle or view boxed table formatting mode
+  clear / cls               Clear the terminal screen
   step                      Execute one Match-Resolve-Act cycle
   run [N]                   Run until quiescence, halt, or N cycles
   strategy [lex|mea]        View or switch conflict resolution strategy
@@ -832,7 +1104,7 @@ func (r *REPL) handleRemove(input string) {
 		if err != nil {
 			fmt.Fprintf(r.out, "Error: %v\n", err)
 		} else {
-			fmt.Fprintf(r.out, "Removed: %s\n", removed.String())
+			fmt.Fprintf(r.out, "Removed: %s\n", r.styler.FormatWME(removed))
 		}
 	}
 }
@@ -917,7 +1189,7 @@ func (r *REPL) handlePPWM(input string) {
 
 	matches := r.engine.FindWMEsMatching(pattern)
 	for _, w := range matches {
-		fmt.Fprintln(r.out, w.String())
+		fmt.Fprintln(r.out, r.styler.FormatWME(w))
 	}
 }
 
