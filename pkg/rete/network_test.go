@@ -247,3 +247,168 @@ func TestNetworkRemoveRule(t *testing.T) {
 	}
 }
 
+func TestCanonicalValueKeys(t *testing.T) {
+	// Int and whole float should hash to same canonical key
+	kInt := CanonicalValueKey(model.NewInt(42))
+	kFloat := CanonicalValueKey(model.NewFloat(42.0))
+	if kInt != kFloat {
+		t.Errorf("expected int 42 and float 42.0 to have same key, got %q vs %q", kInt, kFloat)
+	}
+
+	// Boolean and symbol equivalents
+	kBool := CanonicalValueKey(model.NewBoolean(true))
+	kSym := CanonicalValueKey(model.NewSymbol("true"))
+	kSymCaps := CanonicalValueKey(model.NewSymbol("TRUE"))
+	if kBool != kSym || kBool != kSymCaps {
+		t.Errorf("expected boolean and symbol 'true' to have same key, got %q vs %q", kBool, kSym)
+	}
+
+	// Distinct types should not collide
+	kStr := CanonicalValueKey(model.NewString("42"))
+	if kStr == kInt {
+		t.Errorf("string '42' should not collide with integer 42")
+	}
+}
+
+func TestHashedJoinMultiAttribute(t *testing.T) {
+	net := NewNetwork()
+	mem := wm.New()
+	mem.AddListener(net)
+
+	listener := &recordListener{}
+
+	// Rule joining on two variables: <dept> and <role>
+	rule := model.NewRule("staff-allocation")
+	ce1 := model.NewPositiveCE("worker").
+		AddEqualTest("dept", model.NewVariable("<d>")).
+		AddEqualTest("role", model.NewVariable("<r>")).
+		AddEqualTest("name", model.NewVariable("<wname>"))
+	ce2 := model.NewPositiveCE("task").
+		AddEqualTest("dept", model.NewVariable("<d>")).
+		AddEqualTest("role", model.NewVariable("<r>")).
+		AddEqualTest("title", model.NewVariable("<ttitle>"))
+	rule.AddCondition(ce1).AddCondition(ce2)
+	net.AddRule(rule, listener)
+
+	// Assert workers
+	w1 := mem.Make("worker", map[string]model.Value{
+		"dept": model.NewSymbol("engineering"),
+		"role": model.NewSymbol("lead"),
+		"name": model.NewString("Alice"),
+	})
+	mem.Make("worker", map[string]model.Value{
+		"dept": model.NewSymbol("sales"),
+		"role": model.NewSymbol("lead"),
+		"name": model.NewString("Bob"),
+	})
+
+	// Assert task matching only Alice (engineering, lead)
+	t1 := mem.Make("task", map[string]model.Value{
+		"dept":  model.NewSymbol("engineering"),
+		"role":  model.NewSymbol("lead"),
+		"title": model.NewString("Architect System"),
+	})
+
+	if len(listener.adds) != 1 {
+		t.Fatalf("expected 1 activation, got %d", len(listener.adds))
+	}
+
+	// Retract Alice -> activation should be removed
+	mem.Remove(w1.Timetag)
+	if len(listener.removes) != 1 {
+		t.Fatalf("expected 1 remove activation, got %d", len(listener.removes))
+	}
+
+	// Retract task
+	mem.Remove(t1.Timetag)
+}
+
+func TestHashedJoinNegativeCondition(t *testing.T) {
+	net := NewNetwork()
+	mem := wm.New()
+	mem.AddListener(net)
+
+	listener := &recordListener{}
+
+	// Rule:
+	// (order ^id <oid> ^status pending)
+	// -(cancellation ^order-id <oid>)
+	rule := model.NewRule("process-uncancelled-order")
+	ce1 := model.NewPositiveCE("order").
+		AddEqualTest("id", model.NewVariable("<oid>")).
+		AddEqualTest("status", model.NewSymbol("pending"))
+	ce2 := model.NewNegativeCE("cancellation").
+		AddEqualTest("order-id", model.NewVariable("<oid>"))
+	rule.AddCondition(ce1).AddCondition(ce2)
+	net.AddRule(rule, listener)
+
+	// Assert order 101 -> immediately satisfies rule because no cancellation exists
+	mem.Make("order", map[string]model.Value{
+		"id":     model.NewInt(101),
+		"status": model.NewSymbol("pending"),
+	})
+	if len(listener.adds) != 1 {
+		t.Fatalf("expected 1 activation, got %d", len(listener.adds))
+	}
+
+	// Assert cancellation for a DIFFERENT order (999) -> should NOT affect order 101!
+	c999 := mem.Make("cancellation", map[string]model.Value{
+		"order-id": model.NewInt(999),
+	})
+	if len(listener.removes) != 0 {
+		t.Fatalf("expected 0 removes when unrelated cancellation asserted, got %d", len(listener.removes))
+	}
+
+	// Assert cancellation for order 101 -> should retract the activation!
+	c101 := mem.Make("cancellation", map[string]model.Value{
+		"order-id": model.NewInt(101),
+	})
+	if len(listener.removes) != 1 {
+		t.Fatalf("expected 1 remove when matching cancellation asserted, got %d", len(listener.removes))
+	}
+
+	// Retract cancellation for order 101 -> rule should reactivate!
+	mem.Remove(c101.Timetag)
+	if len(listener.adds) != 2 {
+		t.Fatalf("expected 2 total add activations after unblocking, got %d", len(listener.adds))
+	}
+
+	// Cleanup
+	mem.Remove(c999.Timetag)
+}
+
+func BenchmarkHashedJoinScaling(b *testing.B) {
+	for n := 0; n < b.N; n++ {
+		net := NewNetwork()
+		mem := wm.New()
+		mem.AddListener(net)
+
+		listener := &recordListener{}
+
+		// 2-condition join rule on id
+		rule := model.NewRule("join-benchmark")
+		ce1 := model.NewPositiveCE("goal").
+			AddEqualTest("id", model.NewVariable("<gid>"))
+		ce2 := model.NewPositiveCE("task").
+			AddEqualTest("goal-id", model.NewVariable("<gid>"))
+		rule.AddCondition(ce1).AddCondition(ce2)
+		net.AddRule(rule, listener)
+
+		const count = 1000
+		for i := 0; i < count; i++ {
+			mem.Make("goal", map[string]model.Value{
+				"id": model.NewInt(int64(i)),
+			})
+		}
+		for i := 0; i < count; i++ {
+			mem.Make("task", map[string]model.Value{
+				"goal-id": model.NewInt(int64(i)),
+			})
+		}
+
+		if len(listener.adds) != count {
+			b.Fatalf("expected %d activations, got %d", count, len(listener.adds))
+		}
+	}
+}
+

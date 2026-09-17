@@ -21,6 +21,7 @@ type AlphaMemory struct {
 	mu         sync.RWMutex
 	items      map[int64]*model.WME
 	successors []RightActivatable
+	indexes    []*AlphaIndex
 }
 
 // NewAlphaMemory creates a new AlphaMemory.
@@ -28,6 +29,7 @@ func NewAlphaMemory() *AlphaMemory {
 	return &AlphaMemory{
 		items:      make(map[int64]*model.WME),
 		successors: make([]RightActivatable, 0),
+		indexes:    make([]*AlphaIndex, 0),
 	}
 }
 
@@ -36,6 +38,37 @@ func (am *AlphaMemory) AddSuccessor(node RightActivatable) {
 	am.mu.Lock()
 	defer am.mu.Unlock()
 	am.successors = append(am.successors, node)
+}
+
+// GetOrCreateIndex returns an existing AlphaIndex matching specs or creates and populates a new one.
+func (am *AlphaMemory) GetOrCreateIndex(specs []AlphaIndexSpec) *AlphaIndex {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+
+	for _, idx := range am.indexes {
+		if alphaSpecsEqual(idx.specs, specs) {
+			return idx
+		}
+	}
+
+	idx := NewAlphaIndex(specs)
+	for _, wme := range am.items {
+		idx.Add(wme)
+	}
+	am.indexes = append(am.indexes, idx)
+	return idx
+}
+
+func alphaSpecsEqual(a, b []AlphaIndexSpec) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].Attribute != b[i].Attribute || a[i].VectorIndex != b[i].VectorIndex {
+			return false
+		}
+	}
+	return true
 }
 
 // Items returns a snapshot of all WMEs currently stored.
@@ -54,8 +87,14 @@ func (am *AlphaMemory) Activation(wme *model.WME, tag PropagationTag) {
 	am.mu.Lock()
 	if tag == TagAdd {
 		am.items[wme.Timetag] = wme
+		for _, idx := range am.indexes {
+			idx.Add(wme)
+		}
 	} else {
 		delete(am.items, wme.Timetag)
+		for _, idx := range am.indexes {
+			idx.Remove(wme)
+		}
 	}
 	succs := append([]RightActivatable(nil), am.successors...)
 	am.mu.Unlock()

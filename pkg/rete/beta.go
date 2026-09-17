@@ -23,6 +23,7 @@ type BetaMemory struct {
 	mu         sync.RWMutex
 	tokens     map[string]*Token // Keyed by token signature
 	successors []LeftActivatable
+	indexes    []*BetaIndex
 }
 
 // NewBetaMemory creates a new BetaMemory.
@@ -30,12 +31,44 @@ func NewBetaMemory() *BetaMemory {
 	return &BetaMemory{
 		tokens:     make(map[string]*Token),
 		successors: make([]LeftActivatable, 0),
+		indexes:    make([]*BetaIndex, 0),
 	}
 }
 
 func tokenSignature(t *Token) string {
 	tags := t.Timetags()
 	return fmt.Sprintf("%v", tags)
+}
+
+// GetOrCreateIndex returns an existing BetaIndex matching variables or creates and populates a new one.
+func (bm *BetaMemory) GetOrCreateIndex(variables []string) *BetaIndex {
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+
+	for _, idx := range bm.indexes {
+		if strSliceEqual(idx.variables, variables) {
+			return idx
+		}
+	}
+
+	idx := NewBetaIndex(variables)
+	for _, tok := range bm.tokens {
+		idx.Add(tok)
+	}
+	bm.indexes = append(bm.indexes, idx)
+	return idx
+}
+
+func strSliceEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // AddSuccessor registers a child beta node.
@@ -67,8 +100,14 @@ func (bm *BetaMemory) LeftActivation(token *Token, tag PropagationTag) {
 	sig := tokenSignature(token)
 	if tag == TagAdd {
 		bm.tokens[sig] = token
+		for _, idx := range bm.indexes {
+			idx.Add(token)
+		}
 	} else {
 		delete(bm.tokens, sig)
+		for _, idx := range bm.indexes {
+			idx.Remove(token)
+		}
 	}
 	succs := append([]LeftActivatable(nil), bm.successors...)
 	bm.mu.Unlock()
@@ -92,16 +131,43 @@ type JoinNode struct {
 	betaMemory  *BetaMemory
 	alphaMemory *AlphaMemory
 	joinTests   []JoinTest
+	betaIndex   *BetaIndex
+	alphaIndex  *AlphaIndex
 	ce          *model.ConditionElement
 	successors  []LeftActivatable
 }
 
 // NewJoinNode creates a new two-input join node.
 func NewJoinNode(betaMem *BetaMemory, alphaMem *AlphaMemory, ce *model.ConditionElement, tests []JoinTest) *JoinNode {
+	var leftVars []string
+	var rightSpecs []AlphaIndexSpec
+
+	for _, t := range tests {
+		if t.Op == model.OpEqual {
+			leftVars = append(leftVars, t.Variable)
+			rightSpecs = append(rightSpecs, AlphaIndexSpec{
+				Attribute:   t.Attribute,
+				VectorIndex: t.VectorIndex,
+			})
+		}
+	}
+
+	var bi *BetaIndex
+	if betaMem != nil {
+		bi = betaMem.GetOrCreateIndex(leftVars)
+	}
+
+	var ai *AlphaIndex
+	if alphaMem != nil {
+		ai = alphaMem.GetOrCreateIndex(rightSpecs)
+	}
+
 	return &JoinNode{
 		betaMemory:  betaMem,
 		alphaMemory: alphaMem,
 		joinTests:   tests,
+		betaIndex:   bi,
+		alphaIndex:  ai,
 		ce:          ce,
 		successors:  make([]LeftActivatable, 0),
 	}
@@ -269,11 +335,12 @@ func (jn *JoinNode) extractBindings(token *Token, wme *model.WME) (map[string]mo
 
 // LeftActivation handles an incoming token from the parent BetaMemory.
 func (jn *JoinNode) LeftActivation(token *Token, tag PropagationTag) {
-	if jn.alphaMemory == nil {
+	if jn.alphaIndex == nil {
 		return
 	}
 
-	wmes := jn.alphaMemory.Items()
+	key := jn.betaIndex.KeyForToken(token)
+	wmes := jn.alphaIndex.Lookup(key)
 	for _, wme := range wmes {
 		if jn.matches(token, wme) {
 			newBindings, ok := jn.extractBindings(token, wme)
@@ -287,17 +354,26 @@ func (jn *JoinNode) LeftActivation(token *Token, tag PropagationTag) {
 
 // RightActivation handles an incoming WME from the AlphaMemory.
 func (jn *JoinNode) RightActivation(wme *model.WME, tag PropagationTag) {
-	if jn.betaMemory == nil {
+	if jn.betaIndex == nil {
 		return
 	}
 
-	tokens := jn.betaMemory.Tokens()
-	for _, token := range tokens {
-		if jn.matches(token, wme) {
-			newBindings, ok := jn.extractBindings(token, wme)
-			if ok {
-				childToken := NewToken(token, wme, newBindings)
-				jn.propagate(childToken, tag)
+	keys := jn.alphaIndex.KeysForWME(wme)
+	seen := make(map[string]bool)
+	for _, key := range keys {
+		tokens := jn.betaIndex.Lookup(key)
+		for _, token := range tokens {
+			sig := tokenSignature(token)
+			if seen[sig] {
+				continue
+			}
+			seen[sig] = true
+			if jn.matches(token, wme) {
+				newBindings, ok := jn.extractBindings(token, wme)
+				if ok {
+					childToken := NewToken(token, wme, newBindings)
+					jn.propagate(childToken, tag)
+				}
 			}
 		}
 	}
@@ -320,6 +396,8 @@ type NegativeJoinNode struct {
 	betaMemory  *BetaMemory
 	alphaMemory *AlphaMemory
 	joinTests   []JoinTest
+	alphaIndex  *AlphaIndex
+	tokensIndex *BetaIndex
 	ce          *model.ConditionElement
 	// matches stores matching WME timetags per token signature
 	matches    map[string]map[int64]bool
@@ -329,10 +407,30 @@ type NegativeJoinNode struct {
 
 // NewNegativeJoinNode creates a new NegativeJoinNode.
 func NewNegativeJoinNode(betaMem *BetaMemory, alphaMem *AlphaMemory, ce *model.ConditionElement, tests []JoinTest) *NegativeJoinNode {
+	var leftVars []string
+	var rightSpecs []AlphaIndexSpec
+
+	for _, t := range tests {
+		if t.Op == model.OpEqual {
+			leftVars = append(leftVars, t.Variable)
+			rightSpecs = append(rightSpecs, AlphaIndexSpec{
+				Attribute:   t.Attribute,
+				VectorIndex: t.VectorIndex,
+			})
+		}
+	}
+
+	var ai *AlphaIndex
+	if alphaMem != nil {
+		ai = alphaMem.GetOrCreateIndex(rightSpecs)
+	}
+
 	return &NegativeJoinNode{
 		betaMemory:  betaMem,
 		alphaMemory: alphaMem,
 		joinTests:   tests,
+		alphaIndex:  ai,
+		tokensIndex: NewBetaIndex(leftVars),
 		ce:          ce,
 		matches:     make(map[string]map[int64]bool),
 		tokens:      make(map[string]*Token),
@@ -381,10 +479,13 @@ func (njn *NegativeJoinNode) LeftActivation(token *Token, tag PropagationTag) {
 
 	if tag == TagAdd {
 		njn.tokens[sig] = token
+		njn.tokensIndex.Add(token)
 		matchedWmes := make(map[int64]bool)
 
-		if njn.alphaMemory != nil {
-			for _, wme := range njn.alphaMemory.Items() {
+		if njn.alphaIndex != nil {
+			key := njn.tokensIndex.KeyForToken(token)
+			candidates := njn.alphaIndex.Lookup(key)
+			for _, wme := range candidates {
 				if njn.match(token, wme) {
 					matchedWmes[wme.Timetag] = true
 				}
@@ -405,6 +506,7 @@ func (njn *NegativeJoinNode) LeftActivation(token *Token, tag PropagationTag) {
 	} else {
 		matchedWmes := njn.matches[sig]
 		delete(njn.tokens, sig)
+		njn.tokensIndex.Remove(token)
 		delete(njn.matches, sig)
 
 		if len(matchedWmes) == 0 {
@@ -424,10 +526,30 @@ func (njn *NegativeJoinNode) RightActivation(wme *model.WME, tag PropagationTag)
 	njn.mu.Lock()
 	defer njn.mu.Unlock()
 
-	for sig, token := range njn.tokens {
+	var candidateTokens []*Token
+	if njn.alphaIndex != nil {
+		keys := njn.alphaIndex.KeysForWME(wme)
+		seen := make(map[string]bool)
+		for _, key := range keys {
+			for _, tok := range njn.tokensIndex.Lookup(key) {
+				sig := tokenSignature(tok)
+				if !seen[sig] {
+					seen[sig] = true
+					candidateTokens = append(candidateTokens, tok)
+				}
+			}
+		}
+	} else {
+		for _, tok := range njn.tokens {
+			candidateTokens = append(candidateTokens, tok)
+		}
+	}
+
+	for _, token := range candidateTokens {
 		if !njn.match(token, wme) {
 			continue
 		}
+		sig := tokenSignature(token)
 
 		matchedWmes := njn.matches[sig]
 		if matchedWmes == nil {

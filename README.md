@@ -26,6 +26,7 @@ This engine provides a complete, modern execution environment for rule-based sys
 3. [Rete Pattern Matching Engine](#rete-pattern-matching-engine)
    - [Alpha Network Mechanics](#alpha-network-mechanics)
    - [Beta Network & Join Mechanics](#beta-network--join-mechanics)
+   - [Hashed Beta & Alpha Join Indexing](#hashed-beta--alpha-join-indexing)
    - [Negative Condition Elements](#negative-condition-elements)
    - [Dynamic & Retroactive Compilation](#dynamic--retroactive-compilation)
 4. [Conflict Resolution & Execution Lifecycle](#conflict-resolution--execution-lifecycle)
@@ -472,6 +473,14 @@ flowchart LR
 4. **Activation Propagation**:
    - Left activations (new tokens from parent beta memory) join with right WMEs stored in alpha memory.
    - Right activations (new WMEs from alpha memory) join with left tokens stored in beta memory.
+
+### Hashed Beta & Alpha Join Indexing
+To prevent $O(N_{\alpha} \times N_{\beta})$ linear cross-product scans during join evaluation, the Rete network employs **dual-sided hash indexing** on equality join variables:
+- **`BetaIndex` (Left Side)**: Indexes tokens in `BetaMemory` by canonical composite keys derived from bound variable values. When a right WME arrives, candidate tokens are retrieved in $O(1)$ average time.
+- **`AlphaIndex` (Right Side)**: Indexes WMEs in `AlphaMemory` by canonical composite keys of the joined attributes. When a left token arrives, matching WMEs are retrieved in $O(1)$ average time.
+- **Composite Keys & Type Normalization**: Multi-variable joins form composite keys using unit separators (`\x1f`), while `CanonicalValueKey` normalizes cross-types (e.g. integer `42` and float `42.0` share the same hash bucket `i:42`, and symbol/boolean `'true'` share `b:true`).
+- **Residual Filtering**: Non-equality constraints (`<`, `>`, `<=`, `>=`, `<>`) and vector membership tests are evaluated as residual predicates against the bucket candidates.
+- **Hashed Negative Joins**: `NegativeJoinNode` indexes tokens and alpha WMEs so that satisfiability checks and blocking invalidations operate strictly on matching hash buckets rather than scanning entire memories.
 
 ### Negative Condition Elements
 Negated conditions are implemented via `NegativeJoinNode`:
