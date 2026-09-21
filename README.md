@@ -525,6 +525,13 @@ To prevent $O(N_{\alpha} \times N_{\beta})$ linear cross-product scans during jo
 - **Residual Filtering**: Non-equality constraints (`<`, `>`, `<=`, `>=`, `<>`) and vector membership tests are evaluated as residual predicates against the bucket candidates.
 - **Hashed Negative Joins**: `NegativeJoinNode` indexes tokens and alpha WMEs so that satisfiability checks and blocking invalidations operate strictly on matching hash buckets rather than scanning entire memories.
 
+### Structural Beta Node Sharing
+In addition to shared Alpha memories, the Rete engine implements **Structural Beta Node Sharing**:
+- **Common Condition Prefix Sharing**: When multiple rules share identical initial condition sequences (e.g. `Rule 1: (A) (B) (C)` and `Rule 2: (A) (B) (D)`), the engine shares both the `JoinNode` and downstream `BetaMemory` across rules.
+- **Order-Independent Canonical Signatures**: Attributes within condition elements and join constraints are canonically sorted, guaranteeing structural sharing even if attributes appear in different orders across rules.
+- **Single Partial Match Evaluation**: Partial matches (such as `[A, B]`) are computed and stored only once in the shared `BetaMemory`. Multiple downstream nodes (e.g. `JoinNode(C)` and `JoinNode(D)`) fork from the shared memory.
+- **Reference-Counted Pruning on Excise**: Shared beta nodes maintain rule reference sets. When a rule is excised, shared nodes remain active for other rules that still depend on them. When the last rule referencing a branch is excised, unreferenced beta nodes are automatically pruned bottom-up to prevent memory leaks.
+
 ### Negative Condition Elements
 Negated conditions are implemented via `NegativeJoinNode`:
 - For each left token, the node maintains a count of matching right WMEs.

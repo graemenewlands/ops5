@@ -2,6 +2,7 @@ package rete
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 
@@ -13,6 +14,16 @@ type terminalInfo struct {
 	parent   interface {
 		RemoveSuccessor(node LeftActivatable)
 	}
+}
+
+// betaNodeEntry tracks a shared beta node and its downstream BetaMemory.
+type betaNodeEntry struct {
+	key       string
+	parentMem *BetaMemory
+	node      LeftActivatable
+	alphaMem  *AlphaMemory
+	betaMem   *BetaMemory
+	rules     map[string]bool
 }
 
 // RuleNodeInfo tracks the compiled Rete nodes associated with a rule for diagnostic inspection (e.g. matches).
@@ -29,6 +40,9 @@ type Network struct {
 	alphaRoot     *AlphaRootNode
 	rootBetaMem   *BetaMemory
 	alphaMemPool  map[string]*AlphaMemory
+	betaNodePool  map[string]*betaNodeEntry
+	ruleBetaNodes map[string][]*betaNodeEntry
+	nextBetaMemID int
 	terminals     map[string]terminalInfo
 	ruleNodeInfos map[string]*RuleNodeInfo
 }
@@ -39,9 +53,13 @@ func NewNetwork() *Network {
 		alphaRoot:     NewAlphaRootNode(),
 		rootBetaMem:   NewBetaMemory(),
 		alphaMemPool:  make(map[string]*AlphaMemory),
+		betaNodePool:  make(map[string]*betaNodeEntry),
+		ruleBetaNodes: make(map[string][]*betaNodeEntry),
+		nextBetaMemID: 1,
 		terminals:     make(map[string]terminalInfo),
 		ruleNodeInfos: make(map[string]*RuleNodeInfo),
 	}
+	net.rootBetaMem.id = 0
 	// Seed the root BetaMemory with the dummy token
 	net.rootBetaMem.LeftActivation(DummyRootToken(), TagAdd)
 	return net
@@ -92,6 +110,107 @@ func getAlphaKey(ce *model.ConditionElement) string {
 		}
 	}
 	return key
+}
+
+func canonicalCEString(ce *model.ConditionElement) string {
+	if ce == nil {
+		return ""
+	}
+	if ce.IsTest {
+		return ce.String()
+	}
+	if ce.IsNCC {
+		var parts []string
+		for _, sub := range ce.NCCConditions {
+			parts = append(parts, canonicalCEString(sub))
+		}
+		return "-(" + strings.Join(parts, " ") + ")"
+	}
+	var sb strings.Builder
+	if ce.ElementVariable != "" {
+		sb.WriteString(fmt.Sprintf("<%s> ", ce.ElementVariable))
+	}
+	if ce.IsNegative {
+		sb.WriteString("-(")
+	} else if ce.IsExistential {
+		sb.WriteString("(exists (")
+	} else if ce.IsAccumulate && ce.Accumulate != nil {
+		sb.WriteString("(accumulate (")
+	} else {
+		sb.WriteString("(")
+	}
+	sb.WriteString(ce.Class)
+
+	// Collect and sort attribute tests by attribute name for canonical matching
+	type attrEntry struct {
+		name string
+		repr string
+	}
+	var entries []attrEntry
+	for _, at := range ce.Tests {
+		var b strings.Builder
+		b.WriteString(fmt.Sprintf("^%s", at.Attribute))
+		for _, c := range at.Constraints {
+			b.WriteString(" ")
+			b.WriteString(c.String())
+		}
+		entries = append(entries, attrEntry{name: at.Attribute, repr: b.String()})
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].name != entries[j].name {
+			return entries[i].name < entries[j].name
+		}
+		return entries[i].repr < entries[j].repr
+	})
+	for _, e := range entries {
+		sb.WriteString(" ")
+		sb.WriteString(e.repr)
+	}
+
+	if ce.IsExistential {
+		sb.WriteString("))")
+	} else if ce.IsAccumulate && ce.Accumulate != nil {
+		sb.WriteString(fmt.Sprintf(") %s", ce.Accumulate.Op.String()))
+		if ce.Accumulate.Target.String() != "" && ce.Accumulate.Target.String() != "nil" && ce.Accumulate.Target.String() != `""` {
+			sb.WriteString(" ")
+			sb.WriteString(ce.Accumulate.Target.String())
+		}
+		sb.WriteString(fmt.Sprintf(" <%s>)", ce.Accumulate.ResultVar))
+	} else {
+		sb.WriteString(")")
+	}
+	return sb.String()
+}
+
+func joinTestsKey(tests []JoinTest) string {
+	if len(tests) == 0 {
+		return ""
+	}
+	var parts []string
+	for _, jt := range tests {
+		if len(jt.Disjunction) > 0 {
+			var djs []string
+			for _, d := range jt.Disjunction {
+				djs = append(djs, fmt.Sprintf("%s%s", d.Op.String(), d.Value.String()))
+			}
+			parts = append(parts, fmt.Sprintf("%s[%d]<<%s>>", jt.Attribute, jt.VectorIndex, strings.Join(djs, ",")))
+		} else {
+			parts = append(parts, fmt.Sprintf("%s[%d]%s<%s>", jt.Attribute, jt.VectorIndex, jt.Op.String(), jt.Variable))
+		}
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, ";")
+}
+
+func betaStepKey(parentID int, ce *model.ConditionElement, joinTests []JoinTest) string {
+	return fmt.Sprintf("bm%d|%s|jt:%s", parentID, canonicalCEString(ce), joinTestsKey(joinTests))
+}
+
+func (net *Network) newBetaMemoryLocked() *BetaMemory {
+	bm := NewBetaMemory()
+	bm.id = net.nextBetaMemID
+	net.nextBetaMemID++
+	return bm
 }
 
 func matchesCEConstants(ce *model.ConditionElement, wme *model.WME) bool {
@@ -211,13 +330,9 @@ func (net *Network) AddRuleWithWMEs(rule *model.Rule, listener ConflictSetListen
 		return
 	}
 
-	// If rule already exists in Rete network, remove previous terminal
-	if prev, exists := net.terminals[rule.Name]; exists {
-		prev.terminal.Deactivate()
-		if prev.parent != nil {
-			prev.parent.RemoveSuccessor(prev.terminal)
-		}
-		delete(net.terminals, rule.Name)
+	// If rule already exists in Rete network, remove previous version cleanly
+	if _, exists := net.terminals[rule.Name]; exists {
+		net.removeRuleLocked(rule.Name)
 	}
 
 	boundVariables := make(map[string]bool)
@@ -227,165 +342,186 @@ func (net *Network) AddRuleWithWMEs(rule *model.Rule, listener ConflictSetListen
 	}
 
 	for i, ce := range rule.Conditions {
-		isLast := (i == len(rule.Conditions)-1)
+		isLast := (i == len(rule.Conditions) - 1)
 
 		if ce.IsTest {
 			ruleNodeInfo.AlphaMems = append(ruleNodeInfo.AlphaMems, nil)
-			var nextBetaNode LeftActivatable
-			var terminal *TerminalNode
+			stepKey := betaStepKey(currBetaMem.id, ce, nil)
 
-			if isLast {
-				terminal = NewTerminalNode(rule, listener)
-				nextBetaNode = terminal
-				ruleNodeInfo.Terminal = terminal
+			var nextBetaMem *BetaMemory
+			if entry, ok := net.betaNodePool[stepKey]; ok {
+				entry.rules[rule.Name] = true
+				net.ruleBetaNodes[rule.Name] = append(net.ruleBetaNodes[rule.Name], entry)
+				nextBetaMem = entry.betaMem
 			} else {
-				nextBetaMem := NewBetaMemory()
-				nextBetaNode = nextBetaMem
-				ruleNodeInfo.BetaMems = append(ruleNodeInfo.BetaMems, nextBetaMem)
+				evalNode := NewEvalNode(ce.EvalTest)
+				nextBetaMem = net.newBetaMemoryLocked()
+				evalNode.AddSuccessor(nextBetaMem)
+				currBetaMem.AddSuccessor(evalNode)
+
+				entry := &betaNodeEntry{
+					key:       stepKey,
+					parentMem: currBetaMem,
+					node:      evalNode,
+					alphaMem:  nil,
+					betaMem:   nextBetaMem,
+					rules:     map[string]bool{rule.Name: true},
+				}
+				net.betaNodePool[stepKey] = entry
+				net.ruleBetaNodes[rule.Name] = append(net.ruleBetaNodes[rule.Name], entry)
 			}
 
-			evalNode := NewEvalNode(ce.EvalTest)
-			evalNode.AddSuccessor(nextBetaNode)
-			currBetaMem.AddSuccessor(evalNode)
-
 			if isLast {
+				terminal := NewTerminalNode(rule, listener)
+				ruleNodeInfo.Terminal = terminal
+				nextBetaMem.AddSuccessor(terminal)
 				net.terminals[rule.Name] = terminalInfo{
 					terminal: terminal,
-					parent:   evalNode,
+					parent:   nextBetaMem,
 				}
 			} else {
-				currBetaMem = nextBetaNode.(*BetaMemory)
+				ruleNodeInfo.BetaMems = append(ruleNodeInfo.BetaMems, nextBetaMem)
+				currBetaMem = nextBetaMem
 			}
 			continue
 		}
 
 		if ce.IsNCC {
-			subConditions := ce.NCCConditions
-			partner := NewNccPartnerNode(len(subConditions))
-			nccNode := NewNccNode(currBetaMem, partner, ce)
+			ruleNodeInfo.AlphaMems = append(ruleNodeInfo.AlphaMems, nil)
+			stepKey := betaStepKey(currBetaMem.id, ce, nil)
 
-			subBetaMem := currBetaMem
-			subBoundVars := make(map[string]bool)
-			for k, v := range boundVariables {
-				subBoundVars[k] = v
-			}
+			var nextBetaMem *BetaMemory
+			if entry, ok := net.betaNodePool[stepKey]; ok {
+				entry.rules[rule.Name] = true
+				net.ruleBetaNodes[rule.Name] = append(net.ruleBetaNodes[rule.Name], entry)
+				nextBetaMem = entry.betaMem
+			} else {
+				subConditions := ce.NCCConditions
+				partner := NewNccPartnerNode(len(subConditions))
+				nccNode := NewNccNode(currBetaMem, partner, ce)
 
-			for subIdx, subCE := range subConditions {
-				subIsLast := (subIdx == len(subConditions)-1)
-
-				var subNextNode LeftActivatable
-				if subIsLast {
-					subNextNode = partner
-				} else {
-					subNextBetaMem := NewBetaMemory()
-					subNextNode = subNextBetaMem
+				subBetaMem := currBetaMem
+				subBoundVars := make(map[string]bool)
+				for k, v := range boundVariables {
+					subBoundVars[k] = v
 				}
 
-				if subCE.IsTest {
-					evalNode := NewEvalNode(subCE.EvalTest)
-					evalNode.AddSuccessor(subNextNode)
-					subBetaMem.AddSuccessor(evalNode)
+				for subIdx, subCE := range subConditions {
+					subIsLast := (subIdx == len(subConditions) - 1)
+
+					var subNextNode LeftActivatable
+					if subIsLast {
+						subNextNode = partner
+					} else {
+						subNextBetaMem := net.newBetaMemoryLocked()
+						subNextNode = subNextBetaMem
+					}
+
+					if subCE.IsTest {
+						evalNode := NewEvalNode(subCE.EvalTest)
+						evalNode.AddSuccessor(subNextNode)
+						subBetaMem.AddSuccessor(evalNode)
+						if !subIsLast {
+							subBetaMem = subNextNode.(*BetaMemory)
+						}
+						continue
+					}
+
+					subAlphaMem := net.buildAlphaMemory(subCE, existingWMEs)
+
+					var subJoinTests []JoinTest
+					for _, at := range subCE.Tests {
+						isMulti := len(at.Constraints) > 1
+						for idx, c := range at.Constraints {
+							vecIdx := -1
+							if isMulti {
+								vecIdx = idx
+							}
+							if len(c.Disjunction) > 0 {
+								hasBoundVar := false
+								for _, dj := range c.Disjunction {
+									if dj.Value.IsVariable() && subBoundVars[dj.Value.VariableName()] {
+										hasBoundVar = true
+										break
+									}
+								}
+								if hasBoundVar {
+									subJoinTests = append(subJoinTests, JoinTest{
+										Attribute:   at.Attribute,
+										VectorIndex: vecIdx,
+										Disjunction: c.Disjunction,
+									})
+								}
+							} else if c.Value.IsVariable() {
+								varName := c.Value.VariableName()
+								if subBoundVars[varName] {
+									subJoinTests = append(subJoinTests, JoinTest{
+										Attribute:   at.Attribute,
+										Op:          c.Op,
+										Variable:    varName,
+										VectorIndex: vecIdx,
+									})
+								}
+							}
+						}
+					}
+
+					if subCE.IsNegative {
+						negNode := NewNegativeJoinNode(subBetaMem, subAlphaMem, subCE, subJoinTests)
+						negNode.AddSuccessor(subNextNode)
+						negNode.Attach()
+					} else if subCE.IsExistential {
+						existNode := NewExistentialJoinNode(subBetaMem, subAlphaMem, subCE, subJoinTests)
+						existNode.AddSuccessor(subNextNode)
+						existNode.Attach()
+					} else if subCE.IsAccumulate {
+						accNode := NewAccumulateNode(subBetaMem, subAlphaMem, subCE, subCE.Accumulate, subJoinTests)
+						accNode.AddSuccessor(subNextNode)
+						accNode.Attach()
+					} else {
+						joinNode := NewJoinNode(subBetaMem, subAlphaMem, subCE, subJoinTests)
+						joinNode.AddSuccessor(subNextNode)
+						joinNode.Attach()
+					}
+
+					if !subCE.IsNegative && !subCE.IsExistential {
+						for _, v := range subCE.Variables() {
+							subBoundVars[v] = true
+						}
+					}
+
 					if !subIsLast {
 						subBetaMem = subNextNode.(*BetaMemory)
 					}
-					continue
 				}
 
-				subAlphaMem := net.buildAlphaMemory(subCE, existingWMEs)
+				nextBetaMem = net.newBetaMemoryLocked()
+				nccNode.AddSuccessor(nextBetaMem)
+				currBetaMem.AddSuccessor(nccNode)
 
-				var subJoinTests []JoinTest
-				for _, at := range subCE.Tests {
-					isMulti := len(at.Constraints) > 1
-					for idx, c := range at.Constraints {
-						vecIdx := -1
-						if isMulti {
-							vecIdx = idx
-						}
-						if len(c.Disjunction) > 0 {
-							hasBoundVar := false
-							for _, dj := range c.Disjunction {
-								if dj.Value.IsVariable() && subBoundVars[dj.Value.VariableName()] {
-									hasBoundVar = true
-									break
-								}
-							}
-							if hasBoundVar {
-								subJoinTests = append(subJoinTests, JoinTest{
-									Attribute:   at.Attribute,
-									VectorIndex: vecIdx,
-									Disjunction: c.Disjunction,
-								})
-							}
-						} else if c.Value.IsVariable() {
-							varName := c.Value.VariableName()
-							if subBoundVars[varName] {
-								subJoinTests = append(subJoinTests, JoinTest{
-									Attribute:   at.Attribute,
-									Op:          c.Op,
-									Variable:    varName,
-									VectorIndex: vecIdx,
-								})
-							}
-						}
-					}
+				entry := &betaNodeEntry{
+					key:       stepKey,
+					parentMem: currBetaMem,
+					node:      nccNode,
+					alphaMem:  nil,
+					betaMem:   nextBetaMem,
+					rules:     map[string]bool{rule.Name: true},
 				}
-
-				if subCE.IsNegative {
-					negNode := NewNegativeJoinNode(subBetaMem, subAlphaMem, subCE, subJoinTests)
-					negNode.AddSuccessor(subNextNode)
-					negNode.Attach()
-				} else if subCE.IsExistential {
-					existNode := NewExistentialJoinNode(subBetaMem, subAlphaMem, subCE, subJoinTests)
-					existNode.AddSuccessor(subNextNode)
-					existNode.Attach()
-				} else if subCE.IsAccumulate {
-					accNode := NewAccumulateNode(subBetaMem, subAlphaMem, subCE, subCE.Accumulate, subJoinTests)
-					accNode.AddSuccessor(subNextNode)
-					accNode.Attach()
-					if subCE.Accumulate != nil && subCE.Accumulate.ResultVar != "" {
-						subBoundVars[subCE.Accumulate.ResultVar] = true
-					}
-				} else {
-					joinNode := NewJoinNode(subBetaMem, subAlphaMem, subCE, subJoinTests)
-					joinNode.AddSuccessor(subNextNode)
-					joinNode.Attach()
-				}
-
-				if !subCE.IsNegative && !subCE.IsExistential {
-					for _, v := range subCE.Variables() {
-						subBoundVars[v] = true
-					}
-				}
-
-				if !subIsLast {
-					subBetaMem = subNextNode.(*BetaMemory)
-				}
+				net.betaNodePool[stepKey] = entry
+				net.ruleBetaNodes[rule.Name] = append(net.ruleBetaNodes[rule.Name], entry)
 			}
 
-			ruleNodeInfo.AlphaMems = append(ruleNodeInfo.AlphaMems, nil)
-			var nextBetaNode LeftActivatable
-			var terminal *TerminalNode
-
 			if isLast {
-				terminal = NewTerminalNode(rule, listener)
-				nextBetaNode = terminal
+				terminal := NewTerminalNode(rule, listener)
 				ruleNodeInfo.Terminal = terminal
-			} else {
-				nextBetaMem := NewBetaMemory()
-				nextBetaNode = nextBetaMem
-				ruleNodeInfo.BetaMems = append(ruleNodeInfo.BetaMems, nextBetaMem)
-			}
-
-			nccNode.AddSuccessor(nextBetaNode)
-			currBetaMem.AddSuccessor(nccNode)
-
-			if isLast {
+				nextBetaMem.AddSuccessor(terminal)
 				net.terminals[rule.Name] = terminalInfo{
 					terminal: terminal,
-					parent:   nccNode,
+					parent:   nextBetaMem,
 				}
 			} else {
-				currBetaMem = nextBetaNode.(*BetaMemory)
+				ruleNodeInfo.BetaMems = append(ruleNodeInfo.BetaMems, nextBetaMem)
+				currBetaMem = nextBetaMem
 			}
 			continue
 		}
@@ -431,50 +567,62 @@ func (net *Network) AddRuleWithWMEs(rule *model.Rule, listener ConflictSetListen
 			}
 		}
 
-		var nextBetaNode LeftActivatable
-		var terminal *TerminalNode
+		stepKey := betaStepKey(currBetaMem.id, ce, joinTests)
+		var nextBetaMem *BetaMemory
+
+		if entry, ok := net.betaNodePool[stepKey]; ok {
+			entry.rules[rule.Name] = true
+			net.ruleBetaNodes[rule.Name] = append(net.ruleBetaNodes[rule.Name], entry)
+			nextBetaMem = entry.betaMem
+		} else {
+			nextBetaMem = net.newBetaMemoryLocked()
+
+			var joinNode LeftActivatable
+			if ce.IsNegative {
+				njn := NewNegativeJoinNode(currBetaMem, alphaMem, ce, joinTests)
+				njn.AddSuccessor(nextBetaMem)
+				njn.Attach()
+				joinNode = njn
+			} else if ce.IsExistential {
+				ejn := NewExistentialJoinNode(currBetaMem, alphaMem, ce, joinTests)
+				ejn.AddSuccessor(nextBetaMem)
+				ejn.Attach()
+				joinNode = ejn
+			} else if ce.IsAccumulate {
+				an := NewAccumulateNode(currBetaMem, alphaMem, ce, ce.Accumulate, joinTests)
+				an.AddSuccessor(nextBetaMem)
+				an.Attach()
+				joinNode = an
+			} else {
+				jn := NewJoinNode(currBetaMem, alphaMem, ce, joinTests)
+				jn.AddSuccessor(nextBetaMem)
+				jn.Attach()
+				joinNode = jn
+			}
+
+			entry := &betaNodeEntry{
+				key:       stepKey,
+				parentMem: currBetaMem,
+				node:      joinNode,
+				alphaMem:  alphaMem,
+				betaMem:   nextBetaMem,
+				rules:     map[string]bool{rule.Name: true},
+			}
+			net.betaNodePool[stepKey] = entry
+			net.ruleBetaNodes[rule.Name] = append(net.ruleBetaNodes[rule.Name], entry)
+		}
 
 		if isLast {
-			terminal = NewTerminalNode(rule, listener)
-			nextBetaNode = terminal
+			terminal := NewTerminalNode(rule, listener)
 			ruleNodeInfo.Terminal = terminal
-		} else {
-			nextBetaMem := NewBetaMemory()
-			nextBetaNode = nextBetaMem
-			ruleNodeInfo.BetaMems = append(ruleNodeInfo.BetaMems, nextBetaMem)
-		}
-
-		var parentNode interface {
-			RemoveSuccessor(node LeftActivatable)
-		}
-
-		if ce.IsNegative {
-			negNode := NewNegativeJoinNode(currBetaMem, alphaMem, ce, joinTests)
-			negNode.AddSuccessor(nextBetaNode)
-			negNode.Attach()
-			parentNode = negNode
-		} else if ce.IsExistential {
-			existNode := NewExistentialJoinNode(currBetaMem, alphaMem, ce, joinTests)
-			existNode.AddSuccessor(nextBetaNode)
-			existNode.Attach()
-			parentNode = existNode
-		} else if ce.IsAccumulate {
-			accNode := NewAccumulateNode(currBetaMem, alphaMem, ce, ce.Accumulate, joinTests)
-			accNode.AddSuccessor(nextBetaNode)
-			accNode.Attach()
-			parentNode = accNode
-		} else {
-			joinNode := NewJoinNode(currBetaMem, alphaMem, ce, joinTests)
-			joinNode.AddSuccessor(nextBetaNode)
-			joinNode.Attach()
-			parentNode = joinNode
-		}
-
-		if isLast {
+			nextBetaMem.AddSuccessor(terminal)
 			net.terminals[rule.Name] = terminalInfo{
 				terminal: terminal,
-				parent:   parentNode,
+				parent:   nextBetaMem,
 			}
+		} else {
+			ruleNodeInfo.BetaMems = append(ruleNodeInfo.BetaMems, nextBetaMem)
+			currBetaMem = nextBetaMem
 		}
 
 		// Update bound variables for subsequent condition elements
@@ -487,20 +635,20 @@ func (net *Network) AddRuleWithWMEs(rule *model.Rule, listener ConflictSetListen
 				boundVariables[v] = true
 			}
 		}
-
-		if !isLast {
-			currBetaMem = nextBetaNode.(*BetaMemory)
-		}
 	}
 	net.ruleNodeInfos[rule.Name] = ruleNodeInfo
 }
 
-// RemoveRule detaches and deactivates the terminal node for the specified rule.
+// RemoveRule detaches and deactivates the terminal node for the specified rule,
+// and prunes unreferenced shared beta nodes.
 // Returns true if the rule was registered in the network and removed, false otherwise.
 func (net *Network) RemoveRule(ruleName string) bool {
 	net.mu.Lock()
 	defer net.mu.Unlock()
+	return net.removeRuleLocked(ruleName)
+}
 
+func (net *Network) removeRuleLocked(ruleName string) bool {
 	info, ok := net.terminals[ruleName]
 	if !ok {
 		return false
@@ -512,7 +660,34 @@ func (net *Network) RemoveRule(ruleName string) bool {
 	}
 	delete(net.terminals, ruleName)
 	delete(net.ruleNodeInfos, ruleName)
+
+	// Clean up shared beta nodes used by this rule (in reverse order from bottom up)
+	entries := net.ruleBetaNodes[ruleName]
+	delete(net.ruleBetaNodes, ruleName)
+
+	for i := len(entries) - 1; i >= 0; i-- {
+		entry := entries[i]
+		delete(entry.rules, ruleName)
+		if len(entry.rules) == 0 {
+			if entry.parentMem != nil && entry.node != nil {
+				entry.parentMem.RemoveSuccessor(entry.node)
+			}
+			if entry.alphaMem != nil && entry.node != nil {
+				if ra, ok := entry.node.(RightActivatable); ok {
+					entry.alphaMem.RemoveSuccessor(ra)
+				}
+			}
+			delete(net.betaNodePool, entry.key)
+		}
+	}
 	return true
+}
+
+// BetaNodeCount returns the total number of shared beta nodes currently compiled in the Rete network.
+func (net *Network) BetaNodeCount() int {
+	net.mu.RLock()
+	defer net.mu.RUnlock()
+	return len(net.betaNodePool)
 }
 
 // RuleNodeInfo returns diagnostic node information for a rule.

@@ -292,6 +292,11 @@ func (e *Engine) Rule(name string) *model.Rule {
 	return nil
 }
 
+// BetaNodeCount returns the total number of shared beta nodes currently compiled in the Rete network.
+func (e *Engine) BetaNodeCount() int {
+	return e.network.BetaNodeCount()
+}
+
 // PrintRule returns the pretty-printed OPS5 source text of a production rule by name.
 // Returns (text, true) if the rule exists, or ("", false) if not found.
 func (e *Engine) PrintRule(name string) (string, bool) {

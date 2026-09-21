@@ -314,6 +314,9 @@ func (v Value) VariableName() string {
 
 // String returns the string representation.
 func (v Value) String() string {
+	if v.val == nil {
+		return ""
+	}
 	switch v.typ {
 	case TypeSymbol:
 		return v.val.(string)

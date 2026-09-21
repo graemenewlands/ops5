@@ -40,6 +40,19 @@ func (am *AlphaMemory) AddSuccessor(node RightActivatable) {
 	am.successors = append(am.successors, node)
 }
 
+// RemoveSuccessor unregisters a beta node from receiving right activations.
+func (am *AlphaMemory) RemoveSuccessor(node RightActivatable) {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+	var newSuccs []RightActivatable
+	for _, s := range am.successors {
+		if s != node {
+			newSuccs = append(newSuccs, s)
+		}
+	}
+	am.successors = newSuccs
+}
+
 // GetOrCreateIndex returns an existing AlphaIndex matching specs or creates and populates a new one.
 func (am *AlphaMemory) GetOrCreateIndex(specs []AlphaIndexSpec) *AlphaIndex {
 	am.mu.Lock()

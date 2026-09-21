@@ -21,6 +21,7 @@ type ConflictSetListener interface {
 // BetaMemory stores beta tokens and propagates them to child beta nodes.
 type BetaMemory struct {
 	mu         sync.RWMutex
+	id         int
 	tokens     map[string]*Token // Keyed by token signature
 	successors []LeftActivatable
 	indexes    []*BetaIndex
@@ -33,6 +34,20 @@ func NewBetaMemory() *BetaMemory {
 		successors: make([]LeftActivatable, 0),
 		indexes:    make([]*BetaIndex, 0),
 	}
+}
+
+// ID returns the unique ID of this BetaMemory.
+func (bm *BetaMemory) ID() int {
+	bm.mu.RLock()
+	defer bm.mu.RUnlock()
+	return bm.id
+}
+
+// TokenCount returns the number of tokens currently stored in this BetaMemory.
+func (bm *BetaMemory) TokenCount() int {
+	bm.mu.RLock()
+	defer bm.mu.RUnlock()
+	return len(bm.tokens)
 }
 
 func tokenSignature(t *Token) string {

@@ -412,3 +412,146 @@ func BenchmarkHashedJoinScaling(b *testing.B) {
 	}
 }
 
+func TestStructuralBetaSharingInitialConditions(t *testing.T) {
+	net := NewNetwork()
+	mem := wm.New()
+	mem.AddListener(net)
+
+	listener := &recordListener{}
+
+	// Rule 1: (A ^id <x>) (B ^a-id <x>) (C ^val 10)
+	r1 := model.NewRule("r1")
+	r1.AddCondition(model.NewPositiveCE("A").AddEqualTest("id", model.NewVariable("<x>")))
+	r1.AddCondition(model.NewPositiveCE("B").AddEqualTest("a-id", model.NewVariable("<x>")))
+	r1.AddCondition(model.NewPositiveCE("C").AddEqualTest("val", model.NewInt(10)))
+	net.AddRule(r1, listener)
+
+	// Rule 2: (A ^id <x>) (B ^a-id <x>) (D ^val 20)
+	r2 := model.NewRule("r2")
+	r2.AddCondition(model.NewPositiveCE("A").AddEqualTest("id", model.NewVariable("<x>")))
+	r2.AddCondition(model.NewPositiveCE("B").AddEqualTest("a-id", model.NewVariable("<x>")))
+	r2.AddCondition(model.NewPositiveCE("D").AddEqualTest("val", model.NewInt(20)))
+	net.AddRule(r2, listener)
+
+	info1 := net.RuleNodeInfo("r1")
+	info2 := net.RuleNodeInfo("r2")
+	if info1 == nil || info2 == nil {
+		t.Fatalf("expected node infos for both rules")
+	}
+
+	// CE 1 (A): shared BetaMemory
+	if info1.BetaMems[0] != info2.BetaMems[0] {
+		t.Fatalf("expected BetaMems[0] to be structurally shared across r1 and r2")
+	}
+
+	// CE 2 (B): shared BetaMemory
+	if info1.BetaMems[1] != info2.BetaMems[1] {
+		t.Fatalf("expected BetaMems[1] to be structurally shared across r1 and r2")
+	}
+
+	// Total unique beta nodes: 4 (A, B, C, D) instead of 6
+	if net.BetaNodeCount() != 4 {
+		t.Fatalf("expected 4 beta nodes in pool, got %d", net.BetaNodeCount())
+	}
+
+	// Assert WMEs for A and B
+	mem.Make("A", map[string]model.Value{"id": model.NewInt(1)})
+	mem.Make("B", map[string]model.Value{"a-id": model.NewInt(1)})
+
+	// Partial match [A, B] should be stored exactly once in the shared BetaMemory
+	sharedBM := info1.BetaMems[1]
+	if sharedBM.TokenCount() != 1 {
+		t.Fatalf("expected 1 token in shared BetaMemory, got %d", sharedBM.TokenCount())
+	}
+
+	// Assert C -> r1 should activate, r2 should not
+	mem.Make("C", map[string]model.Value{"val": model.NewInt(10)})
+	if len(listener.adds) != 1 || listener.adds[0][:2] != "r1" {
+		t.Fatalf("expected r1 activation, got: %v", listener.adds)
+	}
+
+	// Assert D -> r2 should activate
+	mem.Make("D", map[string]model.Value{"val": model.NewInt(20)})
+	if len(listener.adds) != 2 || listener.adds[1][:2] != "r2" {
+		t.Fatalf("expected r2 activation, got: %v", listener.adds)
+	}
+}
+
+func TestStructuralBetaSharingPruningOnExcise(t *testing.T) {
+	net := NewNetwork()
+	mem := wm.New()
+	mem.AddListener(net)
+
+	listener := &recordListener{}
+
+	// Rule 1: (A ^id 1) (B ^val 2)
+	r1 := model.NewRule("r1")
+	r1.AddCondition(model.NewPositiveCE("A").AddEqualTest("id", model.NewInt(1)))
+	r1.AddCondition(model.NewPositiveCE("B").AddEqualTest("val", model.NewInt(2)))
+	net.AddRule(r1, listener)
+
+	// Rule 2: (A ^id 1) (B ^val 2)
+	r2 := model.NewRule("r2")
+	r2.AddCondition(model.NewPositiveCE("A").AddEqualTest("id", model.NewInt(1)))
+	r2.AddCondition(model.NewPositiveCE("B").AddEqualTest("val", model.NewInt(2)))
+	net.AddRule(r2, listener)
+
+	// Both rules share all 2 beta steps (A and B)
+	if net.BetaNodeCount() != 2 {
+		t.Fatalf("expected 2 shared beta nodes, got %d", net.BetaNodeCount())
+	}
+
+	// Remove r1: shared nodes should stay active because r2 is still using them
+	removed := net.RemoveRule("r1")
+	if !removed {
+		t.Fatalf("expected r1 to be removed")
+	}
+	if net.BetaNodeCount() != 2 {
+		t.Fatalf("expected 2 beta nodes to remain for r2, got %d", net.BetaNodeCount())
+	}
+
+	// Assert matching WMEs: r2 should still activate properly!
+	mem.Make("A", map[string]model.Value{"id": model.NewInt(1)})
+	mem.Make("B", map[string]model.Value{"val": model.NewInt(2)})
+
+	if len(listener.adds) != 1 || listener.adds[0][:2] != "r2" {
+		t.Fatalf("expected r2 to activate, got: %v", listener.adds)
+	}
+
+	// Remove r2: now no rules use the beta nodes -> all 2 pruned!
+	removed = net.RemoveRule("r2")
+	if !removed {
+		t.Fatalf("expected r2 to be removed")
+	}
+	if net.BetaNodeCount() != 0 {
+		t.Fatalf("expected 0 beta nodes in pool after all rules excised, got %d", net.BetaNodeCount())
+	}
+}
+
+func TestStructuralBetaSharingAttributeOrder(t *testing.T) {
+	net := NewNetwork()
+	listener := &recordListener{}
+
+	// Rule 1: attributes specified as (color, shape)
+	r1 := model.NewRule("r1")
+	ce1 := model.NewPositiveCE("item").
+		AddEqualTest("color", model.NewSymbol("red")).
+		AddEqualTest("shape", model.NewSymbol("square"))
+	r1.AddCondition(ce1)
+	net.AddRule(r1, listener)
+
+	// Rule 2: attributes specified in reverse order (shape, color)
+	r2 := model.NewRule("r2")
+	ce2 := model.NewPositiveCE("item").
+		AddEqualTest("shape", model.NewSymbol("square")).
+		AddEqualTest("color", model.NewSymbol("red"))
+	r2.AddCondition(ce2)
+	net.AddRule(r2, listener)
+
+	// Despite different attribute order in source, canonical sorting ensures sharing!
+	if net.BetaNodeCount() != 1 {
+		t.Fatalf("expected 1 shared beta node for different attribute order, got %d", net.BetaNodeCount())
+	}
+}
+
+
