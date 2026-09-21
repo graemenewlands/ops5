@@ -15,22 +15,32 @@ type terminalInfo struct {
 	}
 }
 
+// RuleNodeInfo tracks the compiled Rete nodes associated with a rule for diagnostic inspection (e.g. matches).
+type RuleNodeInfo struct {
+	Rule      *model.Rule
+	AlphaMems []*AlphaMemory // 1 per condition element (nil if IsTest or IsNCC)
+	BetaMems  []*BetaMemory  // 1 after each condition element except the last
+	Terminal  *TerminalNode
+}
+
 // Network coordinates the Alpha and Beta networks and compiles rules into Rete nodes.
 type Network struct {
-	mu           sync.RWMutex
-	alphaRoot    *AlphaRootNode
-	rootBetaMem  *BetaMemory
-	alphaMemPool map[string]*AlphaMemory
-	terminals    map[string]terminalInfo
+	mu            sync.RWMutex
+	alphaRoot     *AlphaRootNode
+	rootBetaMem   *BetaMemory
+	alphaMemPool  map[string]*AlphaMemory
+	terminals     map[string]terminalInfo
+	ruleNodeInfos map[string]*RuleNodeInfo
 }
 
 // NewNetwork creates an initialized Rete network.
 func NewNetwork() *Network {
 	net := &Network{
-		alphaRoot:    NewAlphaRootNode(),
-		rootBetaMem:  NewBetaMemory(),
-		alphaMemPool: make(map[string]*AlphaMemory),
-		terminals:    make(map[string]terminalInfo),
+		alphaRoot:     NewAlphaRootNode(),
+		rootBetaMem:   NewBetaMemory(),
+		alphaMemPool:  make(map[string]*AlphaMemory),
+		terminals:     make(map[string]terminalInfo),
+		ruleNodeInfos: make(map[string]*RuleNodeInfo),
 	}
 	// Seed the root BetaMemory with the dummy token
 	net.rootBetaMem.LeftActivation(DummyRootToken(), TagAdd)
@@ -212,20 +222,26 @@ func (net *Network) AddRuleWithWMEs(rule *model.Rule, listener ConflictSetListen
 
 	boundVariables := make(map[string]bool)
 	currBetaMem := net.rootBetaMem
+	ruleNodeInfo := &RuleNodeInfo{
+		Rule: rule,
+	}
 
 	for i, ce := range rule.Conditions {
 		isLast := (i == len(rule.Conditions)-1)
 
 		if ce.IsTest {
+			ruleNodeInfo.AlphaMems = append(ruleNodeInfo.AlphaMems, nil)
 			var nextBetaNode LeftActivatable
 			var terminal *TerminalNode
 
 			if isLast {
 				terminal = NewTerminalNode(rule, listener)
 				nextBetaNode = terminal
+				ruleNodeInfo.Terminal = terminal
 			} else {
 				nextBetaMem := NewBetaMemory()
 				nextBetaNode = nextBetaMem
+				ruleNodeInfo.BetaMems = append(ruleNodeInfo.BetaMems, nextBetaMem)
 			}
 
 			evalNode := NewEvalNode(ce.EvalTest)
@@ -346,15 +362,18 @@ func (net *Network) AddRuleWithWMEs(rule *model.Rule, listener ConflictSetListen
 				}
 			}
 
+			ruleNodeInfo.AlphaMems = append(ruleNodeInfo.AlphaMems, nil)
 			var nextBetaNode LeftActivatable
 			var terminal *TerminalNode
 
 			if isLast {
 				terminal = NewTerminalNode(rule, listener)
 				nextBetaNode = terminal
+				ruleNodeInfo.Terminal = terminal
 			} else {
 				nextBetaMem := NewBetaMemory()
 				nextBetaNode = nextBetaMem
+				ruleNodeInfo.BetaMems = append(ruleNodeInfo.BetaMems, nextBetaMem)
 			}
 
 			nccNode.AddSuccessor(nextBetaNode)
@@ -372,6 +391,7 @@ func (net *Network) AddRuleWithWMEs(rule *model.Rule, listener ConflictSetListen
 		}
 
 		alphaMem := net.buildAlphaMemory(ce, existingWMEs)
+		ruleNodeInfo.AlphaMems = append(ruleNodeInfo.AlphaMems, alphaMem)
 
 		// Determine join tests: compare right WME attributes against variables already bound in previous CEs
 		var joinTests []JoinTest
@@ -417,9 +437,11 @@ func (net *Network) AddRuleWithWMEs(rule *model.Rule, listener ConflictSetListen
 		if isLast {
 			terminal = NewTerminalNode(rule, listener)
 			nextBetaNode = terminal
+			ruleNodeInfo.Terminal = terminal
 		} else {
 			nextBetaMem := NewBetaMemory()
 			nextBetaNode = nextBetaMem
+			ruleNodeInfo.BetaMems = append(ruleNodeInfo.BetaMems, nextBetaMem)
 		}
 
 		var parentNode interface {
@@ -470,6 +492,7 @@ func (net *Network) AddRuleWithWMEs(rule *model.Rule, listener ConflictSetListen
 			currBetaMem = nextBetaNode.(*BetaMemory)
 		}
 	}
+	net.ruleNodeInfos[rule.Name] = ruleNodeInfo
 }
 
 // RemoveRule detaches and deactivates the terminal node for the specified rule.
@@ -488,7 +511,15 @@ func (net *Network) RemoveRule(ruleName string) bool {
 		info.parent.RemoveSuccessor(info.terminal)
 	}
 	delete(net.terminals, ruleName)
+	delete(net.ruleNodeInfos, ruleName)
 	return true
+}
+
+// RuleNodeInfo returns diagnostic node information for a rule.
+func (net *Network) RuleNodeInfo(ruleName string) *RuleNodeInfo {
+	net.mu.RLock()
+	defer net.mu.RUnlock()
+	return net.ruleNodeInfos[ruleName]
 }
 
 // HasRule returns true if a rule with the specified name is compiled into the Rete network.

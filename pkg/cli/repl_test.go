@@ -990,6 +990,60 @@ func TestHistory(t *testing.T) {
 	}
 }
 
+func TestREPLMatchesAndPBreak(t *testing.T) {
+	commands := `
+	(p r1
+	   (stage ^val 1)
+	   -->
+	   (make stage ^val 2)
+	)
+	(p r2
+	   (stage ^val 2)
+	   -->
+	   (make stage ^val 3)
+	   (halt)
+	)
+	make stage ^val 1
+	matches r1
+	pbreak r2
+	pbreak
+	run
+	step
+	matches r2
+	unpbreak *
+	pbreak
+	exit
+	`
+
+	in := strings.NewReader(commands)
+	var out bytes.Buffer
+
+	repl := NewREPL(in, &out)
+	repl.Start()
+
+	output := out.String()
+
+	if !strings.Contains(output, "** Matches for rule 'r1' **") {
+		t.Fatalf("expected matches header for r1, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Breakpoint set on rule 'r2'") {
+		t.Fatalf("expected breakpoint confirmation, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Breakpoints (1):") {
+		t.Fatalf("expected breakpoints list, got:\n%s", output)
+	}
+	if !strings.Contains(output, "** Break on rule 'r2' after 1 cycles **") {
+		t.Fatalf("expected break output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "All rule breakpoints cleared.") {
+		t.Fatalf("expected all breakpoints cleared, got:\n%s", output)
+	}
+	if !strings.Contains(output, "No breakpoints set.") {
+		t.Fatalf("expected no breakpoints set confirmation, got:\n%s", output)
+	}
+}
+
+
 
 
 

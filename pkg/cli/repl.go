@@ -259,6 +259,25 @@ func (r *REPL) handleCommand(input string) bool {
 		return false
 	}
 
+	// 14. S-expression matches: (matches ...)
+	if strings.HasPrefix(strings.ToLower(input), "(matches ") || strings.ToLower(strings.TrimSpace(input)) == "(matches)" || strings.ToLower(strings.TrimSpace(input)) == "(matches*)" || strings.HasPrefix(strings.ToLower(input), "(matches*") {
+		r.handleMatches(input)
+		return false
+	}
+
+	// 15. S-expression pbreak: (pbreak ...)
+	if strings.HasPrefix(strings.ToLower(input), "(pbreak ") || strings.ToLower(strings.TrimSpace(input)) == "(pbreak)" {
+		r.handlePBreak(input)
+		return false
+	}
+
+	// 16. S-expression unpbreak / unbreak: (unpbreak ...) or (unbreak ...)
+	if strings.HasPrefix(strings.ToLower(input), "(unpbreak ") || strings.ToLower(strings.TrimSpace(input)) == "(unpbreak)" ||
+		strings.HasPrefix(strings.ToLower(input), "(unbreak ") || strings.ToLower(strings.TrimSpace(input)) == "(unbreak)" {
+		r.handleUnpbreak(input)
+		return false
+	}
+
 	// Strip outer parentheses for command convenience if present: e.g. (wm) -> wm
 	cmd := input
 	if strings.HasPrefix(cmd, "(") && strings.HasSuffix(cmd, ")") && !strings.Contains(cmd, "^") {
@@ -357,6 +376,15 @@ func (r *REPL) handleCommand(input string) bool {
 
 	case "ppwm":
 		r.handlePPWM(input)
+
+	case "matches":
+		r.handleMatches(input)
+
+	case "pbreak":
+		r.handlePBreak(input)
+
+	case "unpbreak", "unbreak":
+		r.handleUnpbreak(input)
 
 	case "strategy":
 		if len(parts) == 1 {
@@ -810,6 +838,8 @@ func (r *REPL) runCycles(maxCycles int) {
 	r.engine.EnsureNewline()
 	if r.engine.IsHalted() {
 		fmt.Fprintf(r.out, "Execution halted by rule action after %d cycles.\n", cycles)
+	} else if r.engine.HitBreakpoint() != "" {
+		fmt.Fprintf(r.out, "** Break on rule '%s' after %d cycles **\n", r.engine.HitBreakpoint(), cycles)
 	} else {
 		fmt.Fprintf(r.out, "Reached quiescence after %d cycles.\n", cycles)
 	}
@@ -936,6 +966,30 @@ func (r *REPL) LoadFile(path string) error {
 		case parser.StmtSubstr:
 			val := r.engine.EvaluateSubstr(stmt.Substr, nil)
 			fmt.Fprintln(r.out, val.String())
+		case parser.StmtMatches:
+			fmt.Fprint(r.out, r.engine.FormatMatches(stmt.MatchesRules...))
+		case parser.StmtPBreak:
+			if len(stmt.PBreakRules) == 0 {
+				r.printBreakpoints()
+			} else {
+				for _, name := range stmt.PBreakRules {
+					r.engine.SetBreakpoint(name)
+					fmt.Fprintf(r.out, "Breakpoint set on rule '%s'\n", name)
+				}
+			}
+		case parser.StmtUnpbreak:
+			if len(stmt.UnpbreakRules) == 0 || stmt.UnpbreakRules[0] == "*" || strings.ToLower(stmt.UnpbreakRules[0]) == "nil" {
+				r.engine.ClearBreakpoints()
+				fmt.Fprintln(r.out, "All rule breakpoints cleared.")
+			} else {
+				for _, name := range stmt.UnpbreakRules {
+					if r.engine.RemoveBreakpoint(name) {
+						fmt.Fprintf(r.out, "Breakpoint removed for rule '%s'\n", name)
+					} else {
+						fmt.Fprintf(r.out, "No breakpoint was set for rule '%s'\n", name)
+					}
+				}
+			}
 		}
 	}
 
@@ -1012,6 +1066,11 @@ func (r *REPL) printHelp() {
 		b.WriteString(fmt.Sprintf("  %-32s %s\n", c("watch [0|1|2]"), "Display or set watch trace level (0=none, 1=firings, 2=firings+WM)"))
 		b.WriteString(fmt.Sprintf("  %-32s %s\n", c("trace on|off"), "Toggle cycle execution tracing"))
 
+		b.WriteString("\n" + h("Diagnostic & Breakpoint Tools:") + "\n")
+		b.WriteString(fmt.Sprintf("  %-32s %s\n", c("matches [<rule...> | *]"), "Display partial Rete matches and activations for rule(s)"))
+		b.WriteString(fmt.Sprintf("  %-32s %s\n", c("pbreak [<rule...>]"), "Set breakpoint on rule(s) or list active breakpoints"))
+		b.WriteString(fmt.Sprintf("  %-32s %s\n", c("unpbreak [<rule...> | *]"), "Remove breakpoint on rule(s) or clear all breakpoints"))
+
 		b.WriteString("\n" + h("REPL & GUI Enhancements:") + "\n")
 		b.WriteString(fmt.Sprintf("  %-32s %s\n", c("status / info"), "Display runtime status overview"))
 		b.WriteString(fmt.Sprintf("  %-32s %s\n", c("table [on|off]"), "Toggle or view boxed table formatting mode"))
@@ -1047,6 +1106,9 @@ Commands:
   excise <rule...>          Evict production rules from memory and conflict set
   pm [<rule...> | *]        Print production rules in memory
   ppwm [<pattern>]          Print working memory elements matching pattern (e.g. ppwm City ^state PA)
+  matches [<rule...> | *]   Display partial Rete matches and activations for rule(s)
+  pbreak [<rule...>]        Set breakpoint on rule(s) or list active breakpoints
+  unpbreak [<rule...> | *]  Remove breakpoint on rule(s) or clear all breakpoints
   openfile <log> <f> <m>    Open a file stream (modes: in, out, append)
   closefile <log>           Close an open file stream
   default <log> <subsys>    Set default stream for accept, write, or trace
@@ -1351,5 +1413,205 @@ func (r *REPL) handleWatch(input string) {
 		return
 	}
 	fmt.Fprintln(r.out, "Usage: watch [0|1|2]")
+}
+
+func (r *REPL) handleMatches(input string) {
+	tokens, err := tokenizeLine(input)
+	if err != nil {
+		fmt.Fprintf(r.out, "Parse error: %v\n", err)
+		return
+	}
+	ruleNames := tokens[1:]
+	if len(ruleNames) == 0 || (len(ruleNames) == 1 && ruleNames[0] == "*") {
+		reports := r.engine.Matches("*")
+		if len(reports) == 0 {
+			fmt.Fprintln(r.out, "No production rules in memory.")
+			return
+		}
+		for i, rep := range reports {
+			if i > 0 {
+				fmt.Fprintln(r.out)
+			}
+			r.printRuleMatchReport(rep)
+		}
+		return
+	}
+
+	for i, name := range ruleNames {
+		rep, ok := r.engine.RuleMatches(name)
+		if !ok {
+			fmt.Fprintf(r.out, "Rule '%s' not found\n", name)
+			continue
+		}
+		if i > 0 {
+			fmt.Fprintln(r.out)
+		}
+		r.printRuleMatchReport(rep)
+	}
+}
+
+func (r *REPL) printRuleMatchReport(rep *engine.RuleMatchReport) {
+	if rep == nil {
+		return
+	}
+	header := fmt.Sprintf("** Matches for rule '%s' **", rep.RuleName)
+	if r.styler.Enabled {
+		fmt.Fprintln(r.out, r.styler.Header(header))
+	} else {
+		fmt.Fprintln(r.out, header)
+	}
+
+	for _, cond := range rep.Conditions {
+		fmt.Fprintf(r.out, "Matches for Condition %d: %s\n", cond.Index, cond.Condition)
+		if cond.IsTest {
+			if r.styler.Enabled {
+				fmt.Fprintf(r.out, "  %s\n", r.styler.Cyan("[Predicate Test]"))
+			} else {
+				fmt.Fprintln(r.out, "  [Predicate Test]")
+			}
+		} else if cond.IsNCC {
+			if r.styler.Enabled {
+				fmt.Fprintf(r.out, "  %s\n", r.styler.Yellow("[Negated Conjunction]"))
+			} else {
+				fmt.Fprintln(r.out, "  [Negated Conjunction]")
+			}
+		} else if cond.IsNegative {
+			if len(cond.WMEs) == 0 {
+				if r.styler.Enabled {
+					fmt.Fprintf(r.out, "  %s\n", r.styler.Dim("None (no blocking WMEs)"))
+				} else {
+					fmt.Fprintln(r.out, "  None (no blocking WMEs)")
+				}
+			} else {
+				for _, w := range cond.WMEs {
+					if r.styler.Enabled {
+						fmt.Fprintf(r.out, "  [%d] %s %s\n", w.Timetag, r.styler.FormatWME(w), r.styler.Red("(blocking WME)"))
+					} else {
+						fmt.Fprintf(r.out, "  [%d] %s (blocking WME)\n", w.Timetag, w.String())
+					}
+				}
+			}
+		} else {
+			if len(cond.WMEs) == 0 {
+				if r.styler.Enabled {
+					fmt.Fprintf(r.out, "  %s\n", r.styler.Dim("None"))
+				} else {
+					fmt.Fprintln(r.out, "  None")
+				}
+			} else {
+				for _, w := range cond.WMEs {
+					if r.styler.Enabled {
+						fmt.Fprintf(r.out, "  [%d] %s\n", w.Timetag, r.styler.FormatWME(w))
+					} else {
+						fmt.Fprintf(r.out, "  [%d] %s\n", w.Timetag, w.String())
+					}
+				}
+			}
+		}
+	}
+
+	if len(rep.PartialMatches) > 0 {
+		if r.styler.Enabled {
+			fmt.Fprintln(r.out, r.styler.Dim("--------------------------------------------------"))
+		} else {
+			fmt.Fprintln(r.out, "--------------------------------------------------")
+		}
+		for _, pm := range rep.PartialMatches {
+			fmt.Fprintf(r.out, "Partial matches for CEs %s:\n", pm.CESpan)
+			if len(pm.Timetags) == 0 {
+				if r.styler.Enabled {
+					fmt.Fprintf(r.out, "  %s\n", r.styler.Dim("None"))
+				} else {
+					fmt.Fprintln(r.out, "  None")
+				}
+			} else {
+				for _, tags := range pm.Timetags {
+					if r.styler.Enabled {
+						fmt.Fprintf(r.out, "  %s\n", r.styler.BrightYellow(fmt.Sprintf("%v", tags)))
+					} else {
+						fmt.Fprintf(r.out, "  %v\n", tags)
+					}
+				}
+			}
+		}
+	}
+
+	if r.styler.Enabled {
+		fmt.Fprintln(r.out, r.styler.Dim("--------------------------------------------------"))
+	} else {
+		fmt.Fprintln(r.out, "--------------------------------------------------")
+	}
+	fmt.Fprintln(r.out, "Activations:")
+	if len(rep.Activations) == 0 {
+		if r.styler.Enabled {
+			fmt.Fprintf(r.out, "  %s\n", r.styler.Dim("None"))
+		} else {
+			fmt.Fprintln(r.out, "  None")
+		}
+	} else {
+		for _, act := range rep.Activations {
+			if r.styler.Enabled {
+				fmt.Fprintf(r.out, "  %s\n", r.styler.BrightGreen(fmt.Sprintf("%v", act)))
+			} else {
+				fmt.Fprintf(r.out, "  %v\n", act)
+			}
+		}
+	}
+}
+
+func (r *REPL) handlePBreak(input string) {
+	tokens, err := tokenizeLine(input)
+	if err != nil {
+		fmt.Fprintf(r.out, "Parse error: %v\n", err)
+		return
+	}
+	ruleNames := tokens[1:]
+	if len(ruleNames) == 0 {
+		r.printBreakpoints()
+		return
+	}
+
+	for _, name := range ruleNames {
+		if r.engine.Rule(name) == nil {
+			fmt.Fprintf(r.out, "Warning: rule '%s' not found in production memory\n", name)
+		}
+		r.engine.SetBreakpoint(name)
+		fmt.Fprintf(r.out, "Breakpoint set on rule '%s'\n", name)
+	}
+}
+
+func (r *REPL) handleUnpbreak(input string) {
+	tokens, err := tokenizeLine(input)
+	if err != nil {
+		fmt.Fprintf(r.out, "Parse error: %v\n", err)
+		return
+	}
+	ruleNames := tokens[1:]
+	if len(ruleNames) == 0 || (len(ruleNames) == 1 && (ruleNames[0] == "*" || strings.ToLower(ruleNames[0]) == "nil")) {
+		r.engine.ClearBreakpoints()
+		fmt.Fprintln(r.out, "All rule breakpoints cleared.")
+		return
+	}
+
+	for _, name := range ruleNames {
+		r.engine.RemoveBreakpoint(name)
+		fmt.Fprintf(r.out, "Breakpoint removed from rule '%s'\n", name)
+	}
+}
+
+func (r *REPL) printBreakpoints() {
+	bps := r.engine.Breakpoints()
+	if len(bps) == 0 {
+		fmt.Fprintln(r.out, "No breakpoints set.")
+		return
+	}
+	fmt.Fprintf(r.out, "Breakpoints (%d):\n", len(bps))
+	for _, bp := range bps {
+		if r.styler.Enabled {
+			fmt.Fprintf(r.out, "  %s\n", r.styler.Bold(bp))
+		} else {
+			fmt.Fprintf(r.out, "  %s\n", bp)
+		}
+	}
 }
 

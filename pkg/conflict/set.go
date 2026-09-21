@@ -135,6 +135,30 @@ func (cs *Set) All() []*Activation {
 	return list
 }
 
+// RuleActivations returns all pending activations for a specific rule name, sorted by decreasing salience.
+func (cs *Set) RuleActivations(ruleName string) []*Activation {
+	cs.mu.RLock()
+	defer cs.mu.RUnlock()
+
+	var list []*Activation
+	for _, act := range cs.activations {
+		if act.Rule.Name == ruleName {
+			list = append(list, act)
+		}
+	}
+
+	compareFn := LexCompare
+	if cs.strategy == StrategyMEA {
+		compareFn = MeaCompare
+	}
+
+	sort.Slice(list, func(i, j int) bool {
+		return compareFn(list[i], list[j]) > 0
+	})
+
+	return list
+}
+
 // Reset clears all activations and refracted history.
 func (cs *Set) Reset() {
 	cs.mu.Lock()

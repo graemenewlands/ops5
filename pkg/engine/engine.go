@@ -54,6 +54,11 @@ type Engine struct {
 	defaultTraceStream  string // logical name or "" for outputWriter
 	inputReader         io.Reader
 	stdinReader         *bufio.Reader
+
+	// Debugging & Breakpoints
+	breakpoints   map[string]bool
+	hitBreakpoint string
+	resumingRule  string
 }
 
 // New creates a new Engine instance.
@@ -89,6 +94,7 @@ func New() *Engine {
 		defaultTraceStream:  "",
 		inputReader:         os.Stdin,
 		stdinReader:         bufio.NewReader(os.Stdin),
+		breakpoints:         make(map[string]bool),
 	}
 }
 
@@ -315,6 +321,302 @@ func (e *Engine) PrintRules(names ...string) []string {
 		}
 	}
 	return res
+}
+
+func (e *Engine) ruleLocked(name string) *model.Rule {
+	for _, r := range e.rules {
+		if r.Name == name {
+			return r
+		}
+	}
+	return nil
+}
+
+func (e *Engine) ruleExistsLocked(name string) bool {
+	return e.ruleLocked(name) != nil
+}
+
+// SetBreakpoint sets a breakpoint on a production rule.
+// Returns true if the rule currently exists in production memory.
+func (e *Engine) SetBreakpoint(ruleName string) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	e.breakpoints[ruleName] = true
+	return e.ruleExistsLocked(ruleName)
+}
+
+// RemoveBreakpoint removes a breakpoint from a production rule.
+// If ruleName is "*" or "nil", all breakpoints are removed.
+// Returns true if a breakpoint was removed.
+func (e *Engine) RemoveBreakpoint(ruleName string) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if ruleName == "*" || strings.ToLower(ruleName) == "nil" {
+		if len(e.breakpoints) == 0 {
+			return false
+		}
+		e.breakpoints = make(map[string]bool)
+		return true
+	}
+
+	if e.breakpoints[ruleName] {
+		delete(e.breakpoints, ruleName)
+		return true
+	}
+	return false
+}
+
+// ClearBreakpoints removes all rule breakpoints.
+func (e *Engine) ClearBreakpoints() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	e.breakpoints = make(map[string]bool)
+	e.hitBreakpoint = ""
+	e.resumingRule = ""
+}
+
+// Breakpoints returns a sorted slice of all rules that currently have breakpoints set.
+func (e *Engine) Breakpoints() []string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	res := make([]string, 0, len(e.breakpoints))
+	for r := range e.breakpoints {
+		res = append(res, r)
+	}
+	sort.Strings(res)
+	return res
+}
+
+// HasBreakpoint returns true if a breakpoint is set for the specified rule.
+func (e *Engine) HasBreakpoint(ruleName string) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	return e.breakpoints[ruleName]
+}
+
+// HitBreakpoint returns the name of the rule that caused the most recent breakpoint pause, or empty string.
+func (e *Engine) HitBreakpoint() string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	return e.hitBreakpoint
+}
+
+// ClearHitBreakpoint resets the hit breakpoint indicator.
+func (e *Engine) ClearHitBreakpoint() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	e.hitBreakpoint = ""
+}
+
+// RuleMatchReport contains diagnostic matching information for a production rule.
+type RuleMatchReport struct {
+	RuleName       string
+	Conditions     []CEConditionMatch
+	PartialMatches []PartialMatchReport
+	Activations    [][]int64
+}
+
+// CEConditionMatch describes the matching WMEs for an individual condition element.
+type CEConditionMatch struct {
+	Index      int          // 1-based CE index
+	Condition  string       // Text representation
+	IsNegative bool
+	IsTest     bool
+	IsNCC      bool
+	WMEs       []*model.WME // Matching WMEs in AlphaMemory (sorted by timetag)
+}
+
+// PartialMatchReport describes partial match tokens joining condition elements.
+type PartialMatchReport struct {
+	CESpan   string    // e.g. "1-2"
+	Timetags [][]int64 // Slice of timetags for each partial match token
+}
+
+// RuleMatches returns the diagnostic match report for the given rule name, or (nil, false) if the rule is not found.
+func (e *Engine) RuleMatches(ruleName string) (*RuleMatchReport, bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	rule := e.ruleLocked(ruleName)
+	if rule == nil {
+		return nil, false
+	}
+
+	nodeInfo := e.network.RuleNodeInfo(ruleName)
+	if nodeInfo == nil {
+		return nil, false
+	}
+
+	report := &RuleMatchReport{
+		RuleName: ruleName,
+	}
+
+	// 1. Alpha matches for each condition element
+	for i, ce := range rule.Conditions {
+		cm := CEConditionMatch{
+			Index:      i + 1,
+			Condition:  ce.String(),
+			IsNegative: ce.IsNegative,
+			IsTest:     ce.IsTest,
+			IsNCC:      ce.IsNCC,
+		}
+		if i < len(nodeInfo.AlphaMems) && nodeInfo.AlphaMems[i] != nil {
+			items := nodeInfo.AlphaMems[i].Items()
+			sort.Slice(items, func(a, b int) bool {
+				return items[a].Timetag < items[b].Timetag
+			})
+			cm.WMEs = items
+		}
+		report.Conditions = append(report.Conditions, cm)
+	}
+
+	// 2. Partial matches across BetaMemories
+	// For N conditions:
+	// BetaMems[0] is after CE 1 (joins root dummy token and CE 1)
+	// BetaMems[1] is after CE 2 (joins CE 1 and CE 2) -> "1-2"
+	// BetaMems[k] is after CE k+1 -> "1-(k+1)"
+	for k := 1; k < len(nodeInfo.BetaMems); k++ {
+		bm := nodeInfo.BetaMems[k]
+		tokens := bm.Tokens()
+		var tagLists [][]int64
+		for _, tok := range tokens {
+			tagLists = append(tagLists, tok.Timetags())
+		}
+		sortTagLists(tagLists)
+		report.PartialMatches = append(report.PartialMatches, PartialMatchReport{
+			CESpan:   fmt.Sprintf("1-%d", k+1),
+			Timetags: tagLists,
+		})
+	}
+
+	// 3. Activations currently in the conflict set
+	acts := e.conflictSet.RuleActivations(ruleName)
+	for _, act := range acts {
+		report.Activations = append(report.Activations, act.Timetags)
+	}
+
+	return report, true
+}
+
+func sortTagLists(lists [][]int64) {
+	sort.Slice(lists, func(i, j int) bool {
+		a, b := lists[i], lists[j]
+		minLen := len(a)
+		if len(b) < minLen {
+			minLen = len(b)
+		}
+		for k := 0; k < minLen; k++ {
+			if a[k] != b[k] {
+				return a[k] < b[k]
+			}
+		}
+		return len(a) < len(b)
+	})
+}
+
+// Matches returns diagnostic match reports for the specified rule names.
+// If names is empty or contains "*", reports for all production rules are returned.
+func (e *Engine) Matches(names ...string) []*RuleMatchReport {
+	var targetNames []string
+	if len(names) == 0 || (len(names) == 1 && names[0] == "*") {
+		for _, r := range e.Rules() {
+			targetNames = append(targetNames, r.Name)
+		}
+	} else {
+		targetNames = names
+	}
+
+	var reports []*RuleMatchReport
+	for _, name := range targetNames {
+		if report, ok := e.RuleMatches(name); ok {
+			reports = append(reports, report)
+		}
+	}
+	return reports
+}
+
+// FormatMatches formats diagnostic match reports for the specified rule names.
+func (e *Engine) FormatMatches(names ...string) string {
+	reports := e.Matches(names...)
+	if len(reports) == 0 {
+		if len(names) == 1 && names[0] != "*" {
+			return fmt.Sprintf("Rule '%s' not found in production memory.\n", names[0])
+		}
+		return "No rules found in production memory.\n"
+	}
+	var parts []string
+	for _, rep := range reports {
+		parts = append(parts, FormatRuleMatchReport(rep))
+	}
+	return strings.Join(parts, "\n")
+}
+
+// FormatRuleMatchReport formats a RuleMatchReport into standard OPS5 diagnostic output text.
+func FormatRuleMatchReport(report *RuleMatchReport) string {
+	if report == nil {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("** Matches for rule '%s' **\n", report.RuleName))
+
+	for _, cond := range report.Conditions {
+		if cond.IsTest {
+			sb.WriteString(fmt.Sprintf("Matches for Condition %d: %s\n  [Predicate Test]\n", cond.Index, cond.Condition))
+		} else if cond.IsNCC {
+			sb.WriteString(fmt.Sprintf("Matches for Condition %d: %s\n  [Negated Conjunction]\n", cond.Index, cond.Condition))
+		} else if cond.IsNegative {
+			sb.WriteString(fmt.Sprintf("Matches for Condition %d: %s\n", cond.Index, cond.Condition))
+			if len(cond.WMEs) == 0 {
+				sb.WriteString("  None (no blocking WMEs)\n")
+			} else {
+				for _, w := range cond.WMEs {
+					sb.WriteString(fmt.Sprintf("  [%d] %s (blocking WME)\n", w.Timetag, w.String()))
+				}
+			}
+		} else {
+			sb.WriteString(fmt.Sprintf("Matches for Condition %d: %s\n", cond.Index, cond.Condition))
+			if len(cond.WMEs) == 0 {
+				sb.WriteString("  None\n")
+			} else {
+				for _, w := range cond.WMEs {
+					sb.WriteString(fmt.Sprintf("  [%d] %s\n", w.Timetag, w.String()))
+				}
+			}
+		}
+	}
+
+	if len(report.PartialMatches) > 0 {
+		sb.WriteString("--------------------------------------------------\n")
+		for _, pm := range report.PartialMatches {
+			sb.WriteString(fmt.Sprintf("Partial matches for CEs %s:\n", pm.CESpan))
+			if len(pm.Timetags) == 0 {
+				sb.WriteString("  None\n")
+			} else {
+				for _, tags := range pm.Timetags {
+					sb.WriteString(fmt.Sprintf("  %v\n", tags))
+				}
+			}
+		}
+	}
+
+	sb.WriteString("--------------------------------------------------\n")
+	sb.WriteString("Activations:\n")
+	if len(report.Activations) == 0 {
+		sb.WriteString("  None\n")
+	} else {
+		for _, act := range report.Activations {
+			sb.WriteString(fmt.Sprintf("  %v\n", act))
+		}
+	}
+
+	return sb.String()
 }
 
 // FindWMEsMatching returns all active WMEs matching the given condition element pattern, ordered by timetag.
@@ -1064,6 +1366,9 @@ func (e *Engine) Step() (bool, error) {
 		return false, nil
 	}
 
+	e.hitBreakpoint = ""
+	e.resumingRule = ""
+
 	dominant, ok := e.conflictSet.SelectDominant()
 	if !ok {
 		// Conflict set empty -> quiescence reached
@@ -1465,8 +1770,8 @@ func substituteValue(val model.Value, bindings map[string]model.Value) model.Val
 	return val
 }
 
-// Run executes cycles until quiescence, halt, or maxCycles limit.
-// If maxCycles <= 0, runs until quiescence or halt.
+// Run executes cycles until quiescence, halt, breakpoint, or maxCycles limit.
+// If maxCycles <= 0, runs until quiescence, halt, or breakpoint.
 // Returns the number of cycles executed.
 func (e *Engine) Run(maxCycles int) (int, error) {
 	startCycle := e.cycleCount
@@ -1474,6 +1779,39 @@ func (e *Engine) Run(maxCycles int) (int, error) {
 		if maxCycles > 0 && (e.cycleCount-startCycle) >= maxCycles {
 			break
 		}
+
+		// Check if dominant activation has a breakpoint set
+		e.mu.Lock()
+		if e.halted {
+			e.mu.Unlock()
+			break
+		}
+
+		dominant, ok := e.conflictSet.SelectDominant()
+		if !ok {
+			e.mu.Unlock()
+			break
+		}
+
+		if e.breakpoints[dominant.Rule.Name] {
+			if e.resumingRule == dominant.Rule.Name {
+				// We broke on this rule on the previous cycle; resume past it
+				e.resumingRule = ""
+			} else {
+				// Breakpoint hit! Pause before firing.
+				e.hitBreakpoint = dominant.Rule.Name
+				e.resumingRule = dominant.Rule.Name
+				tw := e.traceWriterLocked()
+				if tw != nil {
+					fmt.Fprintf(tw, "** Break on rule '%s' **\n", dominant.Rule.Name)
+				}
+				e.mu.Unlock()
+				return e.cycleCount - startCycle, nil
+			}
+		} else {
+			e.resumingRule = ""
+		}
+		e.mu.Unlock()
 
 		fired, err := e.Step()
 		if err != nil {

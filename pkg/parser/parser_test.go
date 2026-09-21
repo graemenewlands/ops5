@@ -2289,6 +2289,114 @@ func TestParseBuildAction(t *testing.T) {
 	}
 }
 
+func TestParseMatchesStatement(t *testing.T) {
+	src := `
+(matches)
+(matches *)
+(matches rule1 rule2)
+`
+	p, err := NewParser(src)
+	if err != nil {
+		t.Fatalf("NewParser error: %v", err)
+	}
+
+	s1, err := p.NextStatement()
+	if err != nil || s1.Type != StmtMatches {
+		t.Fatalf("expected StmtMatches, got %+v (err: %v)", s1, err)
+	}
+	if len(s1.MatchesRules) != 0 {
+		t.Errorf("expected 0 rules for (matches), got %v", s1.MatchesRules)
+	}
+
+	s2, err := p.NextStatement()
+	if err != nil || s2.Type != StmtMatches {
+		t.Fatalf("expected StmtMatches, got %+v (err: %v)", s2, err)
+	}
+	if len(s2.MatchesRules) != 1 || s2.MatchesRules[0] != "*" {
+		t.Errorf("expected [*] for (matches *), got %v", s2.MatchesRules)
+	}
+
+	s3, err := p.NextStatement()
+	if err != nil || s3.Type != StmtMatches {
+		t.Fatalf("expected StmtMatches, got %+v (err: %v)", s3, err)
+	}
+	if len(s3.MatchesRules) != 2 || s3.MatchesRules[0] != "rule1" || s3.MatchesRules[1] != "rule2" {
+		t.Errorf("expected [rule1, rule2], got %v", s3.MatchesRules)
+	}
+}
+
+func TestParsePBreakStatement(t *testing.T) {
+	src := `
+(pbreak)
+(pbreak ruleA ruleB)
+`
+	p, err := NewParser(src)
+	if err != nil {
+		t.Fatalf("NewParser error: %v", err)
+	}
+
+	s1, err := p.NextStatement()
+	if err != nil || s1.Type != StmtPBreak {
+		t.Fatalf("expected StmtPBreak, got %+v (err: %v)", s1, err)
+	}
+	if len(s1.PBreakRules) != 0 {
+		t.Errorf("expected 0 rules for (pbreak), got %v", s1.PBreakRules)
+	}
+
+	s2, err := p.NextStatement()
+	if err != nil || s2.Type != StmtPBreak {
+		t.Fatalf("expected StmtPBreak, got %+v (err: %v)", s2, err)
+	}
+	if len(s2.PBreakRules) != 2 || s2.PBreakRules[0] != "ruleA" || s2.PBreakRules[1] != "ruleB" {
+		t.Errorf("expected [ruleA, ruleB], got %v", s2.PBreakRules)
+	}
+}
+
+func TestParseUnpbreakStatement(t *testing.T) {
+	src := `
+(unpbreak)
+(unbreak *)
+(unpbreak nil)
+(unbreak rule1 rule2)
+`
+	p, err := NewParser(src)
+	if err != nil {
+		t.Fatalf("NewParser error: %v", err)
+	}
+
+	s1, err := p.NextStatement()
+	if err != nil || s1.Type != StmtUnpbreak {
+		t.Fatalf("expected StmtUnpbreak, got %+v (err: %v)", s1, err)
+	}
+	if len(s1.UnpbreakRules) != 0 {
+		t.Errorf("expected 0 rules, got %v", s1.UnpbreakRules)
+	}
+
+	s2, err := p.NextStatement()
+	if err != nil || s2.Type != StmtUnpbreak {
+		t.Fatalf("expected StmtUnpbreak for unbreak *, got %+v (err: %v)", s2, err)
+	}
+	if len(s2.UnpbreakRules) != 1 || s2.UnpbreakRules[0] != "*" {
+		t.Errorf("expected [*], got %v", s2.UnpbreakRules)
+	}
+
+	s3, err := p.NextStatement()
+	if err != nil || s3.Type != StmtUnpbreak {
+		t.Fatalf("expected StmtUnpbreak for unpbreak nil, got %+v (err: %v)", s3, err)
+	}
+	if len(s3.UnpbreakRules) != 1 || s3.UnpbreakRules[0] != "nil" {
+		t.Errorf("expected [nil], got %v", s3.UnpbreakRules)
+	}
+
+	s4, err := p.NextStatement()
+	if err != nil || s4.Type != StmtUnpbreak {
+		t.Fatalf("expected StmtUnpbreak for unbreak rule1 rule2, got %+v (err: %v)", s4, err)
+	}
+	if len(s4.UnpbreakRules) != 2 || s4.UnpbreakRules[0] != "rule1" || s4.UnpbreakRules[1] != "rule2" {
+		t.Errorf("expected [rule1, rule2], got %v", s4.UnpbreakRules)
+	}
+}
+
 
 
 

@@ -22,6 +22,9 @@ These keywords appear at the root level of `.ops` source files or directly withi
 | **`ppwm`** | `(ppwm [<class> [^<attr> <val> ...]] \| *)` | Filters and prints active working memory elements matching an LHS condition pattern. See [`ppwm` Reference](ppwm.md). | `(ppwm City ^state Pennsylvania)` |
 | **`remove`** | `(remove [<timetag...> \| *])` | Retracts specific WME(s) by timetag or all WMEs (`*`) from working memory. | `(remove *)`<br>`(remove 1 2)` |
 | **`build`** | `(build (p <name> ...))` | Dynamically parses and compiles a production rule into the Rete network at the top level or REPL. | `(build (p rule1 (task) --> (halt)))` |
+| **`matches`** | `(matches [<rule1> ... <ruleN> \| *])` | Displays partial Rete matches (alpha condition matches, intermediate beta join tokens, and conflict set activations) for production rules. | `(matches detect-item)`<br>`(matches *)` |
+| **`pbreak`** | `(pbreak [<rule1> ... <ruleN>])` | Sets execution breakpoints on specified production rules, suspending `run` execution prior to firing. If called with no arguments, lists active breakpoints. | `(pbreak detect-item)`<br>`(pbreak)` |
+| **`unpbreak`** / **`unbreak`** | `(unpbreak [<rule1> ... \| *])` | Removes execution breakpoints from specified rules, or clears all breakpoints (`*` or no arguments). | `(unpbreak detect-item)`<br>`(unpbreak *)` |
 | **`watch`** | `(watch [0 \| 1 \| 2])` | Configures or displays the engine trace level (0=silent, 1=rule firings with timetags, 2=rule firings and WM assertions/retractions). Default is 1. | `(watch)`<br>`(watch 2)` |
 
 ---
@@ -113,6 +116,9 @@ The interactive CLI shell (`ops5`) supports both bare words and paren-enclosed c
 | **`excise`** | `<rule1> [rule2 ...]` | Evicts production rule(s) by name from production memory, detaches terminal nodes from Rete network, and purges pending activations from the conflict set. See [`excise` Reference](excise.md). |
 | **`pm`** | `[<rule1> ... \| *]` | Pretty-prints the source text of specified production rule(s) or all rules (`*`). See [`pm` Reference](pm.md). |
 | **`ppwm`** | `[<class> [^attr val...]] \| *` | Prints active working memory elements matching an LHS condition pattern. See [`ppwm` Reference](ppwm.md). |
+| **`matches`** | `[<rule1> ... \| *]` | Displays diagnostic partial matches (alpha WMEs, beta join tokens, conflict set activations) for rules. |
+| **`pbreak`** | `[<rule1> ...]` | Sets execution breakpoints on production rules, or lists breakpoints if no arguments are given. |
+| **`unpbreak`** / **`unbreak`** | `[<rule1> ... \| *]` | Removes rule breakpoints or clears all breakpoints (`*` or no arguments). |
 | **`test`** | `<file.json>` | Executes a JSON test harness case. |
 | **`reset`** | _none_ | Clears working memory, network state, and conflict set. |
 | **`help`** | _none_ | Displays interactive REPL help. |
@@ -120,18 +126,15 @@ The interactive CLI shell (`ops5`) supports both bare words and paren-enclosed c
 
 ### REPL GUI & Interactive Enhancements
 - **Syntax Highlighting & ANSI Colors**: Color-coded prompts, class identifiers, caret attributes (`^attr`), values (numbers, strings, booleans, symbols), and status headers. Supports automatic terminal detection, `NO_COLOR`, and `--color=auto|always|never`.
-- **Tab Auto-Completion**: Contextual tab completion for base commands, class schemas, attributes (`^...`), rules for `excise`/`pm`, strategies (`lex`/`mea`), trace levels (`0`, `1`, `2`), and file paths (`.ops`, `.json`).
+- **Tab Auto-Completion**: Contextual tab completion for base commands, class schemas, attributes (`^...`), rules for `excise`/`pm`/`matches`/`pbreak`/`unpbreak`, strategies (`lex`/`mea`), trace levels (`0`, `1`, `2`), and file paths (`.ops`, `.json`).
 - **Command History**: Persistent command line history saved to `~/.ops5_history` with `Up`/`Down` arrow navigation and duplicate suppression.
 - **Readline Line Editor**: Full cursor navigation (`Left`/`Right`/`Home`/`End`), deletion (`Backspace`, `Delete`), and shortcuts (`Ctrl-A`, `Ctrl-E`, `Ctrl-K`, `Ctrl-U`, `Ctrl-L`, `Ctrl-C`, `Ctrl-D`).
 - **Boxed Tabular Mode**: Formatted Unicode/ASCII tables for `wm`, `cs`, and `schemas` with exact visual column width calculation (`wm --table`, `cs --table`, `schemas --table`, or global toggle `table on`).
 
 ---
 
-## 5. Classic OPS5 Keywords Not Yet Implemented (Roadmap)
+## 5. Classic OPS5 Keywords & Roadmap Status
 
-For reference and future engine development, the following standard OPS5 constructs from the classic Charles Forgy specification are planned or tracked for future implementation:
+All core language features, RHS action verbs, I/O subsystems, pattern matching constructs (including disjunctions, conjunctions, negative conditions, NCC blocks, and existential quantification), and developer diagnostic tools (`pm`, `ppwm`, `matches`, `pbreak`, `unpbreak`, `watch`, `excise`) from the classic Charles Forgy OPS5 specification are fully implemented.
 
-### Control & Diagnostic Directives
-- **`matches`**: Displays partial Rete matches for a specific rule.
-- **`pbreak`**: Sets a breakpoint on a production rule.
 

@@ -1715,6 +1715,9 @@ const (
 	StmtPPWM
 	StmtStrategy
 	StmtSubstr
+	StmtMatches
+	StmtPBreak
+	StmtUnpbreak
 )
 
 func (st StatementType) String() string {
@@ -1747,6 +1750,12 @@ func (st StatementType) String() string {
 		return "strategy"
 	case StmtSubstr:
 		return "substr"
+	case StmtMatches:
+		return "matches"
+	case StmtPBreak:
+		return "pbreak"
+	case StmtUnpbreak:
+		return "unpbreak"
 	default:
 		return "unknown"
 	}
@@ -1773,6 +1782,9 @@ type Statement struct {
 	PPWMPattern     *model.ConditionElement
 	Strategy        string
 	Substr          *model.SubstrExpr
+	MatchesRules    []string
+	PBreakRules     []string
+	UnpbreakRules   []string
 }
 
 func (p *Parser) parseMakeBody(classTok Token) (string, map[string]model.Value, error) {
@@ -2399,6 +2411,94 @@ func (p *Parser) ParseStrategy() (string, error) {
 	return val, nil
 }
 
+// ParseMatches parses a standalone (matches [rule-name-1 ... | *]) statement.
+func (p *Parser) ParseMatches() ([]string, error) {
+	if _, err := p.expect(TokenLParen); err != nil {
+		return nil, err
+	}
+	verbTok, err := p.expect(TokenSymbol)
+	if err != nil || strings.ToLower(verbTok.Value) != "matches" {
+		return nil, fmt.Errorf("expected 'matches', got %v", verbTok.Value)
+	}
+	var names []string
+	for p.current.Type != TokenRParen && p.current.Type != TokenEOF {
+		if p.current.Type == TokenOperator && p.current.Value == "*" {
+			names = append(names, "*")
+			if err := p.advance(); err != nil {
+				return nil, err
+			}
+		} else if p.current.Type == TokenSymbol {
+			names = append(names, p.current.Value)
+			if err := p.advance(); err != nil {
+				return nil, err
+			}
+		} else {
+			return nil, fmt.Errorf("expected rule name or '*' in matches statement, got %s (%q)", p.current.Type, p.current.Value)
+		}
+	}
+	if _, err := p.expect(TokenRParen); err != nil {
+		return nil, fmt.Errorf("expected ')' closing matches statement: %w", err)
+	}
+	return names, nil
+}
+
+// ParsePBreak parses a standalone (pbreak [rule-name-1 ...]) statement.
+func (p *Parser) ParsePBreak() ([]string, error) {
+	if _, err := p.expect(TokenLParen); err != nil {
+		return nil, err
+	}
+	verbTok, err := p.expect(TokenSymbol)
+	if err != nil || strings.ToLower(verbTok.Value) != "pbreak" {
+		return nil, fmt.Errorf("expected 'pbreak', got %v", verbTok.Value)
+	}
+	var names []string
+	for p.current.Type != TokenRParen && p.current.Type != TokenEOF {
+		if p.current.Type == TokenSymbol {
+			names = append(names, p.current.Value)
+			if err := p.advance(); err != nil {
+				return nil, err
+			}
+		} else {
+			return nil, fmt.Errorf("expected rule name in pbreak statement, got %s (%q)", p.current.Type, p.current.Value)
+		}
+	}
+	if _, err := p.expect(TokenRParen); err != nil {
+		return nil, fmt.Errorf("expected ')' closing pbreak statement: %w", err)
+	}
+	return names, nil
+}
+
+// ParseUnpbreak parses a standalone (unpbreak [rule-name-1 ... | * | nil]) statement.
+func (p *Parser) ParseUnpbreak() ([]string, error) {
+	if _, err := p.expect(TokenLParen); err != nil {
+		return nil, err
+	}
+	verbTok, err := p.expect(TokenSymbol)
+	if err != nil || (strings.ToLower(verbTok.Value) != "unpbreak" && strings.ToLower(verbTok.Value) != "unbreak") {
+		return nil, fmt.Errorf("expected 'unpbreak' or 'unbreak', got %v", verbTok.Value)
+	}
+	var names []string
+	for p.current.Type != TokenRParen && p.current.Type != TokenEOF {
+		if p.current.Type == TokenOperator && p.current.Value == "*" {
+			names = append(names, "*")
+			if err := p.advance(); err != nil {
+				return nil, err
+			}
+		} else if p.current.Type == TokenSymbol {
+			names = append(names, p.current.Value)
+			if err := p.advance(); err != nil {
+				return nil, err
+			}
+		} else {
+			return nil, fmt.Errorf("expected rule name, '*', or 'nil' in unpbreak statement, got %s (%q)", p.current.Type, p.current.Value)
+		}
+	}
+	if _, err := p.expect(TokenRParen); err != nil {
+		return nil, fmt.Errorf("expected ')' closing unpbreak statement: %w", err)
+	}
+	return names, nil
+}
+
 // NextStatement parses the next top-level statement (Rule, Make, Literalize, VectorAttribute, OpenFile, CloseFile, Default, Excise, PM, Remove, Watch, PPWM, or Strategy).
 // Returns (nil, nil) when TokenEOF is reached.
 func (p *Parser) NextStatement() (*Statement, error) {
@@ -2561,6 +2661,36 @@ func (p *Parser) NextStatement() (*Statement, error) {
 		return &Statement{
 			Type:   StmtSubstr,
 			Substr: val.SubstrExpr(),
+		}, nil
+
+	case "matches":
+		rules, err := p.ParseMatches()
+		if err != nil {
+			return nil, err
+		}
+		return &Statement{
+			Type:         StmtMatches,
+			MatchesRules: rules,
+		}, nil
+
+	case "pbreak":
+		rules, err := p.ParsePBreak()
+		if err != nil {
+			return nil, err
+		}
+		return &Statement{
+			Type:        StmtPBreak,
+			PBreakRules: rules,
+		}, nil
+
+	case "unpbreak", "unbreak":
+		rules, err := p.ParseUnpbreak()
+		if err != nil {
+			return nil, err
+		}
+		return &Statement{
+			Type:          StmtUnpbreak,
+			UnpbreakRules: rules,
 		}, nil
 
 	default:

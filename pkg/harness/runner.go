@@ -228,6 +228,20 @@ func (r *Runner) Run(tc *TestCase) *Result {
 			case parser.StmtSubstr:
 				val := eng.EvaluateSubstr(stmt.Substr, nil)
 				fmt.Fprintln(&outBuf, val.String())
+			case parser.StmtMatches:
+				fmt.Fprint(&outBuf, eng.FormatMatches(stmt.MatchesRules...))
+			case parser.StmtPBreak:
+				for _, name := range stmt.PBreakRules {
+					eng.SetBreakpoint(name)
+				}
+			case parser.StmtUnpbreak:
+				if len(stmt.UnpbreakRules) == 0 || stmt.UnpbreakRules[0] == "*" || strings.ToLower(stmt.UnpbreakRules[0]) == "nil" {
+					eng.ClearBreakpoints()
+				} else {
+					for _, name := range stmt.UnpbreakRules {
+						eng.RemoveBreakpoint(name)
+					}
+				}
 			}
 		}
 	}

@@ -723,6 +723,9 @@ Defined rule 'classify-alert' (conditions=1, specificity=3)
 | `excise` / `(excise ...)` | `<rule-name...>` | Evict rule(s) from production memory and detach from Rete | `excise rule-1 rule-2` |
 | `pm` / `(pm ...)` | `[<rule-name...> \| *]` | Pretty-print production rule source definitions | `pm FindAncestors` |
 | `ppwm` / `(ppwm ...)` | `[<class> [^<attr> <val>...]] \| *` | Print working memory elements matching an LHS condition pattern | `(ppwm City ^state Pennsylvania)` |
+| `matches` / `(matches ...)` | `[<rule-name...> \| *]` | Inspect partial Rete matches (alpha WMEs, beta join tokens, conflict set activations) | `matches FindAncestors`<br>`(matches *)` |
+| `pbreak` / `(pbreak ...)` | `[<rule-name...>]` | Set rule breakpoints to suspend `run` prior to rule firing, or list breakpoints | `pbreak FindAncestors`<br>`(pbreak)` |
+| `unpbreak` / `(unpbreak ...)` | `[<rule-name...> \| *]` | Remove rule breakpoints or clear all breakpoints (`*` or no arguments) | `unpbreak FindAncestors`<br>`(unpbreak *)` |
 | `test` | `<file.json>` | Execute an external JSON test suite case | `test fixture.json` |
 | `reset` | *none* | Clear working memory and conflict set | `reset` |
 | `help` | *none* | Display interactive help menu | `help` |
@@ -730,7 +733,7 @@ Defined rule 'classify-alert' (conditions=1, specificity=3)
 
 #### REPL GUI & Interactive Features
 - **ANSI Syntax Highlighting**: Colorizes WME timetags (yellow), element classes (magenta), caret attributes (cyan), values (numbers, strings, booleans, symbols), and status headers. Respects `NO_COLOR` standard and terminal detection.
-- **Contextual Tab Completion**: Auto-completes commands, registered class schemas, caret attributes (`^attr`), rule names for `excise`/`pm`, strategies (`lex`/`mea`), trace levels (`0`, `1`, `2`), and file paths.
+- **Contextual Tab Completion**: Auto-completes commands, registered class schemas, caret attributes (`^attr`), rule names for `excise`/`pm`/`matches`/`pbreak`/`unpbreak`, strategies (`lex`/`mea`), trace levels (`0`, `1`, `2`), and file paths.
 - **Persistent Command History**: Automatically saves session command history to `~/.ops5_history` with Up/Down arrow recall and duplicate filtering.
 - **Readline Editing**: In-terminal line editing with left/right cursor navigation, Home (`Ctrl-A`), End (`Ctrl-E`), Kill (`Ctrl-K`), Clear Line (`Ctrl-U`), Clear Screen (`Ctrl-L`), and cancel (`Ctrl-C`).
 - **Boxed Table Renderer**: Formatted tables using Unicode box-drawing characters (`┌─┬┐`, `│`, `├─┼┤`, `└─┴┘`) with ANSI-aware visual column alignment for `wm`, `cs`, and `schemas`.

@@ -18,6 +18,7 @@ var baseCommands = []string{
 	"make", "modify", "remove", "run", "step", "wm", "cs", "schemas",
 	"ppwm", "strategy", "watch", "trace", "openfile", "closefile",
 	"default", "genatom", "litval", "substr", "excise", "pm",
+	"matches", "pbreak", "unpbreak", "unbreak",
 	"load", "test", "reset", "status", "clear", "help", "exit", "quit",
 }
 
@@ -103,7 +104,7 @@ func (c *Completer) Complete(line string) (candidates []string, prefix string) {
 		}
 		return candidates, currentWord
 
-	case "excise", "pm":
+	case "excise", "pm", "matches", "pbreak", "unpbreak", "unbreak":
 		if c.engine != nil {
 			for _, r := range c.engine.Rules() {
 				if strings.HasPrefix(strings.ToLower(r.Name), strings.ToLower(currentWord)) {
