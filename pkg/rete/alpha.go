@@ -104,11 +104,12 @@ func (am *AlphaMemory) Activation(wme *model.WME, tag PropagationTag) {
 	}
 }
 
-// ConstantTestNode evaluates a constant constraint on a single attribute.
+// ConstantTestNode evaluates a constant constraint or disjunction on a single attribute.
 type ConstantTestNode struct {
 	Attribute   string
 	Op          model.Operator
 	Value       model.Value
+	Disjunction []model.TestConstraint
 	VectorIndex int // -1 for scalar/membership test, >= 0 for positional element test
 	successors  []AlphaNode
 }
@@ -124,6 +125,21 @@ func NewIndexedConstantTestNode(attr string, op model.Operator, val model.Value,
 		Attribute:   model.NormalizeAttribute(attr),
 		Op:          op,
 		Value:       val,
+		VectorIndex: vecIdx,
+		successors:  make([]AlphaNode, 0),
+	}
+}
+
+// NewDisjunctiveConstantTestNode creates a test node that tests an attribute against a disjunction << ... >>.
+func NewDisjunctiveConstantTestNode(attr string, disj []model.TestConstraint) *ConstantTestNode {
+	return NewIndexedDisjunctiveConstantTestNode(attr, disj, -1)
+}
+
+// NewIndexedDisjunctiveConstantTestNode creates a test node with vector element index and disjunction << ... >>.
+func NewIndexedDisjunctiveConstantTestNode(attr string, disj []model.TestConstraint, vecIdx int) *ConstantTestNode {
+	return &ConstantTestNode{
+		Attribute:   model.NormalizeAttribute(attr),
+		Disjunction: disj,
 		VectorIndex: vecIdx,
 		successors:  make([]AlphaNode, 0),
 	}
@@ -157,11 +173,39 @@ func evalOp(val model.Value, op model.Operator, target model.Value) bool {
 	}
 }
 
+func matchesDisjunction(val model.Value, disj []model.TestConstraint) bool {
+	for _, c := range disj {
+		if evalOp(val, c.Op, c.Value) {
+			return true
+		}
+	}
+	return false
+}
+
 // Test evaluates the constraint against the WME.
 func (ct *ConstantTestNode) Test(wme *model.WME) bool {
 	val, ok := wme.Get(ct.Attribute)
 	if !ok {
 		val = model.NewSymbol("nil")
+	}
+
+	if len(ct.Disjunction) > 0 {
+		if val.IsVector() {
+			elems := val.VectorElements()
+			if ct.VectorIndex >= 0 {
+				if ct.VectorIndex < len(elems) {
+					return matchesDisjunction(elems[ct.VectorIndex], ct.Disjunction)
+				}
+				return false
+			}
+			for _, elem := range elems {
+				if matchesDisjunction(elem, ct.Disjunction) {
+					return true
+				}
+			}
+			return false
+		}
+		return matchesDisjunction(val, ct.Disjunction)
 	}
 
 	if val.IsVector() {

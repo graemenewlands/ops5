@@ -21,6 +21,7 @@ These keywords appear at the root level of `.ops` source files or directly withi
 | **`pm`** | `(pm [<rule1> ... <ruleN> \| *])` | Pretty-prints the source text of specified production rule(s) or all rules (`*`) currently held in production memory. See [`pm` Reference](pm.md). | `(pm FindAncestors)`<br>`(pm *)` |
 | **`ppwm`** | `(ppwm [<class> [^<attr> <val> ...]] \| *)` | Filters and prints active working memory elements matching an LHS condition pattern. See [`ppwm` Reference](ppwm.md). | `(ppwm City ^state Pennsylvania)` |
 | **`remove`** | `(remove [<timetag...> \| *])` | Retracts specific WME(s) by timetag or all WMEs (`*`) from working memory. | `(remove *)`<br>`(remove 1 2)` |
+| **`build`** | `(build (p <name> ...))` | Dynamically parses and compiles a production rule into the Rete network at the top level or REPL. | `(build (p rule1 (task) --> (halt)))` |
 | **`watch`** | `(watch [0 \| 1 \| 2])` | Configures or displays the engine trace level (0=silent, 1=rule firings with timetags, 2=rule firings and WM assertions/retractions). Default is 1. | `(watch)`<br>`(watch 2)` |
 
 ---
@@ -48,6 +49,7 @@ These action verbs execute sequentially when a production rule fires.
 | **`genatom`** | `(genatom)` | RHS function generating a unique symbolic atom (`atom1`, `atom2`, ...). See [`genatom` Reference](genatom.md). | `(make node ^id (genatom))` |
 | **`litval`** | `(litval [<class>] <attr>)` | RHS function returning the numeric index (2, 3, ...) of an attribute. See [`litval` Reference](litval.md). | `(make meta ^slot (litval name))` |
 | **`substr`** | `(substr <elem> <start> <end>)` | RHS function extracting a subsequence or single value from a WME. See [`substr` Reference](substr.md). | `(substr <str> sequence sequence)`<br>`(substr <str> 3 inf)` |
+| **`build`** | `(build (p <name> ...))` | Dynamically synthesizes and compiles a production rule into Rete at runtime, substituting variables bound in the parent rule. | `(build (p shortcut (traveler ^dest <d>) --> (write "Direct route to" <d>)))` |
 | **`halt`** | `(halt)` | Halts the inference engine execution loop immediately. Current cycle completes, but no further rules fire. | `(halt)` |
 | **`watch`** | `(watch [0 \| 1 \| 2])` | Modifies or displays the engine trace level dynamically during rule execution. | `(watch 2)`<br>`(watch 0)` |
 
@@ -70,6 +72,8 @@ These keywords, delimiters, and operators are recognized in rule condition patte
 | **`<=`** | Relational test | Less than or equal to. | `(sensor ^temp <= 100)` |
 | **`>`** | Relational test | Strictly greater than. | `(priority ^level > 1)` |
 | **`>=`** | Relational test | Greater than or equal to. | `(priority ^level >= 1)` |
+| **`<< ... >>`** | Disjunction block | Matches if attribute satisfies ANY of the enclosed values, operators, or bound variables. | `(item ^status << active pending >>)`<br>`(sensor ^temp << < 10 >= 100 >>)` |
+| **`{ ... }`** | Conjunction block | Matches if attribute satisfies ALL enclosed relational constraints and variable bindings. | `(sensor ^reading { >= 50 <= 100 })` |
 | **`true`**, **`false`** | Boolean literals | First-class boolean values (case-insensitive) for scalar and vector attributes. | `(sensor ^active true)` |
 | **`nil`** | Value literal | Represents unset/null attributes when an attribute is specified without a value. | `(modify <g> ^result nil)` |
 | **`;`** | Comment marker | Line comment running to the end of the line. | `; Process next batch item` |
@@ -126,10 +130,6 @@ The interactive CLI shell (`ops5`) supports both bare words and paren-enclosed c
 ## 5. Classic OPS5 Keywords Not Yet Implemented (Roadmap)
 
 For reference and future engine development, the following standard OPS5 constructs from the classic Charles Forgy specification are planned or tracked for future implementation:
-
-### LHS Compound Matchers
-- **`{ ... }`**: Conjunction block restricting an attribute to multiple bounds, e.g. `^val { > 0 < 100 }`.
-- **`<< ... >>`**: Disjunction block matching any listed symbol or value, e.g. `^status << active pending >>`.
 
 ### Control & Diagnostic Directives
 - **`matches`**: Displays partial Rete matches for a specific rule.

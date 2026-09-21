@@ -2,6 +2,7 @@ package rete
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 
 	"ops5/pkg/model"
@@ -52,7 +53,26 @@ func getAlphaKey(ce *model.ConditionElement) string {
 	for _, at := range ce.Tests {
 		isMulti := len(at.Constraints) > 1
 		for idx, c := range at.Constraints {
-			if !c.Value.IsVariable() {
+			if len(c.Disjunction) > 0 {
+				hasVar := false
+				for _, dj := range c.Disjunction {
+					if dj.Value.IsVariable() {
+						hasVar = true
+						break
+					}
+				}
+				if !hasVar {
+					var parts []string
+					for _, dj := range c.Disjunction {
+						parts = append(parts, fmt.Sprintf("%s%s", dj.Op.String(), dj.Value.String()))
+					}
+					if isMulti {
+						key += fmt.Sprintf("|%s[%d]<<%s>>", at.Attribute, idx, strings.Join(parts, ","))
+					} else {
+						key += fmt.Sprintf("|%s<<%s>>", at.Attribute, strings.Join(parts, ","))
+					}
+				}
+			} else if !c.Value.IsVariable() {
 				if isMulti {
 					key += fmt.Sprintf("|%s[%d]%s%s", at.Attribute, idx, c.Op.String(), c.Value.String())
 				} else {
@@ -71,11 +91,25 @@ func matchesCEConstants(ce *model.ConditionElement, wme *model.WME) bool {
 	for _, at := range ce.Tests {
 		isMulti := len(at.Constraints) > 1
 		for idx, c := range at.Constraints {
-			if !c.Value.IsVariable() {
-				vecIdx := -1
-				if isMulti {
-					vecIdx = idx
+			vecIdx := -1
+			if isMulti {
+				vecIdx = idx
+			}
+			if len(c.Disjunction) > 0 {
+				hasVar := false
+				for _, dj := range c.Disjunction {
+					if dj.Value.IsVariable() {
+						hasVar = true
+						break
+					}
 				}
+				if !hasVar {
+					ct := NewIndexedDisjunctiveConstantTestNode(at.Attribute, c.Disjunction, vecIdx)
+					if !ct.Test(wme) {
+						return false
+					}
+				}
+			} else if !c.Value.IsVariable() {
 				ct := NewIndexedConstantTestNode(at.Attribute, c.Op, c.Value, vecIdx)
 				if !ct.Test(wme) {
 					return false
@@ -99,11 +133,29 @@ func (net *Network) buildAlphaMemory(ce *model.ConditionElement, existingWMEs []
 	for _, at := range ce.Tests {
 		isMulti := len(at.Constraints) > 1
 		for idx, c := range at.Constraints {
-			if !c.Value.IsVariable() {
-				vecIdx := -1
-				if isMulti {
-					vecIdx = idx
+			vecIdx := -1
+			if isMulti {
+				vecIdx = idx
+			}
+			if len(c.Disjunction) > 0 {
+				hasVar := false
+				for _, dj := range c.Disjunction {
+					if dj.Value.IsVariable() {
+						hasVar = true
+						break
+					}
 				}
+				if !hasVar {
+					testNode := NewIndexedDisjunctiveConstantTestNode(at.Attribute, c.Disjunction, vecIdx)
+					switch p := currNode.(type) {
+					case *TypeNode:
+						p.AddSuccessor(testNode)
+					case *ConstantTestNode:
+						p.AddSuccessor(testNode)
+					}
+					currNode = testNode
+				}
+			} else if !c.Value.IsVariable() {
 				testNode := NewIndexedConstantTestNode(at.Attribute, c.Op, c.Value, vecIdx)
 				switch p := currNode.(type) {
 				case *TypeNode:
@@ -229,13 +281,28 @@ func (net *Network) AddRuleWithWMEs(rule *model.Rule, listener ConflictSetListen
 				for _, at := range subCE.Tests {
 					isMulti := len(at.Constraints) > 1
 					for idx, c := range at.Constraints {
-						if c.Value.IsVariable() {
+						vecIdx := -1
+						if isMulti {
+							vecIdx = idx
+						}
+						if len(c.Disjunction) > 0 {
+							hasBoundVar := false
+							for _, dj := range c.Disjunction {
+								if dj.Value.IsVariable() && subBoundVars[dj.Value.VariableName()] {
+									hasBoundVar = true
+									break
+								}
+							}
+							if hasBoundVar {
+								subJoinTests = append(subJoinTests, JoinTest{
+									Attribute:   at.Attribute,
+									VectorIndex: vecIdx,
+									Disjunction: c.Disjunction,
+								})
+							}
+						} else if c.Value.IsVariable() {
 							varName := c.Value.VariableName()
 							if subBoundVars[varName] {
-								vecIdx := -1
-								if isMulti {
-									vecIdx = idx
-								}
 								subJoinTests = append(subJoinTests, JoinTest{
 									Attribute:   at.Attribute,
 									Op:          c.Op,
@@ -311,13 +378,28 @@ func (net *Network) AddRuleWithWMEs(rule *model.Rule, listener ConflictSetListen
 		for _, at := range ce.Tests {
 			isMulti := len(at.Constraints) > 1
 			for idx, c := range at.Constraints {
-				if c.Value.IsVariable() {
+				vecIdx := -1
+				if isMulti {
+					vecIdx = idx
+				}
+				if len(c.Disjunction) > 0 {
+					hasBoundVar := false
+					for _, dj := range c.Disjunction {
+						if dj.Value.IsVariable() && boundVariables[dj.Value.VariableName()] {
+							hasBoundVar = true
+							break
+						}
+					}
+					if hasBoundVar {
+						joinTests = append(joinTests, JoinTest{
+							Attribute:   at.Attribute,
+							VectorIndex: vecIdx,
+							Disjunction: c.Disjunction,
+						})
+					}
+				} else if c.Value.IsVariable() {
 					varName := c.Value.VariableName()
 					if boundVariables[varName] {
-						vecIdx := -1
-						if isMulti {
-							vecIdx = idx
-						}
 						joinTests = append(joinTests, JoinTest{
 							Attribute:   at.Attribute,
 							Op:          c.Op,

@@ -311,11 +311,63 @@ func (p *Parser) parseConditionElement() (*model.ConditionElement, error) {
 
 			// One or more constraints on this attribute
 			for !p.isAttributeToken(p.current, schema) && p.current.Type != TokenRParen && p.current.Type != TokenEOF {
+				if p.current.Type == TokenLDisj {
+					if err := p.advance(); err != nil {
+						return nil, err
+					}
+					var disj []model.TestConstraint
+					for p.current.Type != TokenRDisj && p.current.Type != TokenRParen && p.current.Type != TokenEOF {
+						op := model.OpEqual
+						if p.current.Type == TokenOperator {
+							op = model.ParseOperator(p.current.Value)
+							if err := p.advance(); err != nil {
+								return nil, err
+							}
+						}
+						val := TokenToValue(p.current)
+						if err := p.advance(); err != nil {
+							return nil, err
+						}
+						disj = append(disj, model.TestConstraint{Op: op, Value: val})
+					}
+					if _, err := p.expect(TokenRDisj); err != nil {
+						return nil, fmt.Errorf("expected '>>' closing attribute disjunction on ^%s: %w", attrName, err)
+					}
+					ce.AddDisjunctionTest(attrName, disj)
+					continue
+				}
+
 				if p.current.Type == TokenLBrace {
 					if err := p.advance(); err != nil {
 						return nil, err
 					}
 					for p.current.Type != TokenRBrace && p.current.Type != TokenRParen && p.current.Type != TokenEOF {
+						if p.current.Type == TokenLDisj {
+							if err := p.advance(); err != nil {
+								return nil, err
+							}
+							var disj []model.TestConstraint
+							for p.current.Type != TokenRDisj && p.current.Type != TokenRBrace && p.current.Type != TokenRParen && p.current.Type != TokenEOF {
+								op := model.OpEqual
+								if p.current.Type == TokenOperator {
+									op = model.ParseOperator(p.current.Value)
+									if err := p.advance(); err != nil {
+										return nil, err
+									}
+								}
+								val := TokenToValue(p.current)
+								if err := p.advance(); err != nil {
+									return nil, err
+								}
+								disj = append(disj, model.TestConstraint{Op: op, Value: val})
+							}
+							if _, err := p.expect(TokenRDisj); err != nil {
+								return nil, fmt.Errorf("expected '>>' closing attribute disjunction in brace on ^%s: %w", attrName, err)
+							}
+							ce.AddDisjunctionTest(attrName, disj)
+							continue
+						}
+
 						op := model.OpEqual
 						if p.current.Type == TokenOperator {
 							op = model.ParseOperator(p.current.Value)
@@ -360,7 +412,30 @@ func (p *Parser) parseConditionElement() (*model.ConditionElement, error) {
 			}
 			posIndex++
 
-			if p.current.Type == TokenLBrace {
+			if p.current.Type == TokenLDisj {
+				if err := p.advance(); err != nil {
+					return nil, err
+				}
+				var disj []model.TestConstraint
+				for p.current.Type != TokenRDisj && p.current.Type != TokenRParen && p.current.Type != TokenEOF {
+					op := model.OpEqual
+					if p.current.Type == TokenOperator {
+						op = model.ParseOperator(p.current.Value)
+						if err := p.advance(); err != nil {
+							return nil, err
+						}
+					}
+					val := TokenToValue(p.current)
+					if err := p.advance(); err != nil {
+						return nil, err
+					}
+					disj = append(disj, model.TestConstraint{Op: op, Value: val})
+				}
+				if _, err := p.expect(TokenRDisj); err != nil {
+					return nil, fmt.Errorf("expected '>>' closing positional disjunction on %s: %w", attrName, err)
+				}
+				ce.AddDisjunctionTest(attrName, disj)
+			} else if p.current.Type == TokenLBrace {
 				if err := p.advance(); err != nil {
 					return nil, err
 				}
@@ -1591,6 +1666,16 @@ func (p *Parser) parseAction() (model.Action, error) {
 		}
 		return model.WatchAction{Level: level}, nil
 
+	case "build":
+		rule, err := p.ParseRule()
+		if err != nil {
+			return nil, fmt.Errorf("error parsing rule inside build action at line %d: %w", verbTok.Line, err)
+		}
+		if _, err := p.expect(TokenRParen); err != nil {
+			return nil, fmt.Errorf("expected ')' closing build action at line %d: %w", verbTok.Line, err)
+		}
+		return model.BuildAction{Rule: rule}, nil
+
 	default:
 		// Check for bare make action: (ClassName ^attr val ...) or (ClassName attr val ...)
 		if p.current.Type == TokenAttribute || p.isAttributeToken(p.current, p.getSchema(verbTok.Value)) || p.getSchema(verbTok.Value) != nil {
@@ -2332,6 +2417,22 @@ func (p *Parser) NextStatement() (*Statement, error) {
 		rule, err := p.ParseRule()
 		if err != nil {
 			return nil, err
+		}
+		return &Statement{Type: StmtRule, Rule: rule}, nil
+
+	case "build":
+		if err := p.advance(); err != nil { // '('
+			return nil, err
+		}
+		if err := p.advance(); err != nil { // 'build'
+			return nil, err
+		}
+		rule, err := p.ParseRule()
+		if err != nil {
+			return nil, err
+		}
+		if _, err := p.expect(TokenRParen); err != nil {
+			return nil, fmt.Errorf("expected ')' closing build statement: %w", err)
 		}
 		return &Statement{Type: StmtRule, Rule: rule}, nil
 

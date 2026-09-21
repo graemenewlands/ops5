@@ -202,7 +202,10 @@ func (e *Engine) ConflictSet() *conflict.Set {
 func (e *Engine) AddRule(rule *model.Rule) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	e.addRuleLocked(rule)
+}
 
+func (e *Engine) addRuleLocked(rule *model.Rule) {
 	// If rule already exists, replace previous definition
 	for i, r := range e.rules {
 		if r.Name == rule.Name {
@@ -1289,10 +1292,177 @@ func (e *Engine) Step() (bool, error) {
 					return true, err
 				}
 			}
+
+		case model.BuildAction:
+			if act.Rule != nil {
+				newRule := substituteRuleBindings(act.Rule, localBindings)
+				e.addRuleLocked(newRule)
+				if e.traceEnabled && e.watchLevel >= 1 {
+					tw := e.traceWriterLocked()
+					if tw != nil {
+						fmt.Fprintf(tw, "==> Built and compiled rule '%s'\n", newRule.Name)
+					}
+				}
+			}
 		}
 	}
 
 	return true, nil
+}
+
+func substituteRuleBindings(rule *model.Rule, bindings map[string]model.Value) *model.Rule {
+	if rule == nil {
+		return nil
+	}
+
+	newRule := model.NewRule(substituteString(rule.Name, bindings))
+
+	for _, ce := range rule.Conditions {
+		newCE := &model.ConditionElement{
+			IsNegative:      ce.IsNegative,
+			IsTest:          ce.IsTest,
+			IsExistential:   ce.IsExistential,
+			IsAccumulate:    ce.IsAccumulate,
+			IsNCC:           ce.IsNCC,
+			ElementVariable: ce.ElementVariable,
+			Class:           substituteString(ce.Class, bindings),
+		}
+
+		if ce.Accumulate != nil {
+			newCE.Accumulate = &model.AccumulateSpec{
+				Op:        ce.Accumulate.Op,
+				Target:    substituteValue(ce.Accumulate.Target, bindings),
+				ResultVar: ce.Accumulate.ResultVar,
+			}
+		}
+
+		if ce.EvalTest != nil {
+			newEval := &model.EvalTest{}
+			for _, cmp := range ce.EvalTest.Comparisons {
+				newEval.Comparisons = append(newEval.Comparisons, model.EvalComparison{
+					Op:       cmp.Op,
+					Left:     substituteValue(cmp.Left, bindings),
+					Right:    substituteValue(cmp.Right, bindings),
+					HasRight: cmp.HasRight,
+				})
+			}
+			newCE.EvalTest = newEval
+		}
+
+		if ce.IsNCC {
+			for _, sub := range ce.NCCConditions {
+				subRule := substituteRuleBindings(&model.Rule{Conditions: []*model.ConditionElement{sub}}, bindings)
+				if len(subRule.Conditions) > 0 {
+					newCE.NCCConditions = append(newCE.NCCConditions, subRule.Conditions[0])
+				}
+			}
+		}
+
+		for _, at := range ce.Tests {
+			newAT := model.AttributeTest{
+				Attribute: at.Attribute,
+			}
+			for _, c := range at.Constraints {
+				newC := model.TestConstraint{
+					Op: c.Op,
+				}
+				if len(c.Disjunction) > 0 {
+					for _, dj := range c.Disjunction {
+						newDJ := model.TestConstraint{
+							Op:    dj.Op,
+							Value: substituteValue(dj.Value, bindings),
+						}
+						newC.Disjunction = append(newC.Disjunction, newDJ)
+					}
+				} else {
+					newC.Value = substituteValue(c.Value, bindings)
+				}
+				newAT.Constraints = append(newAT.Constraints, newC)
+			}
+			newCE.Tests = append(newCE.Tests, newAT)
+		}
+
+		newRule.AddCondition(newCE)
+	}
+
+	for _, act := range rule.Actions {
+		switch a := act.(type) {
+		case model.MakeAction:
+			newAttrs := make(map[string]model.Value, len(a.Attributes))
+			for k, v := range a.Attributes {
+				newAttrs[k] = substituteValue(v, bindings)
+			}
+			newRule.AddAction(model.MakeAction{
+				Class:      substituteString(a.Class, bindings),
+				Attributes: newAttrs,
+			})
+		case model.ModifyAction:
+			newAttrs := make(map[string]model.Value, len(a.Attributes))
+			for k, v := range a.Attributes {
+				newAttrs[k] = substituteValue(v, bindings)
+			}
+			newRule.AddAction(model.ModifyAction{
+				TargetElementVar: a.TargetElementVar,
+				TargetIndex:      a.TargetIndex,
+				Attributes:       newAttrs,
+			})
+		case model.RemoveAction:
+			newRule.AddAction(a)
+		case model.WriteAction:
+			var newArgs []model.WriteArg
+			for _, arg := range a.Args {
+				if arg.Type == model.WriteArgValue {
+					newArgs = append(newArgs, model.WriteArg{
+						Type:  model.WriteArgValue,
+						Value: substituteValue(arg.Value, bindings),
+					})
+				} else {
+					newArgs = append(newArgs, arg)
+				}
+			}
+			newRule.AddAction(model.WriteAction{Args: newArgs})
+		case model.HaltAction:
+			newRule.AddAction(a)
+		case model.BindAction:
+			newRule.AddAction(model.BindAction{
+				Variable: a.Variable,
+				Value:    substituteValue(a.Value, bindings),
+			})
+		default:
+			newRule.AddAction(act)
+		}
+	}
+
+	return newRule
+}
+
+func substituteString(s string, bindings map[string]model.Value) string {
+	if strings.HasPrefix(s, "<") && strings.HasSuffix(s, ">") {
+		vName := strings.TrimPrefix(strings.TrimSuffix(s, ">"), "<")
+		if val, ok := bindings[vName]; ok {
+			return val.String()
+		}
+	}
+	return s
+}
+
+func substituteValue(val model.Value, bindings map[string]model.Value) model.Value {
+	if val.IsVariable() {
+		vName := val.VariableName()
+		if bound, ok := bindings[vName]; ok {
+			return bound
+		}
+		return val
+	}
+	if val.IsVector() {
+		elems := val.VectorElements()
+		newElems := make([]model.Value, len(elems))
+		for i, el := range elems {
+			newElems[i] = substituteValue(el, bindings)
+		}
+		return model.NewVector(newElems)
+	}
+	return val
 }
 
 // Run executes cycles until quiescence, halt, or maxCycles limit.

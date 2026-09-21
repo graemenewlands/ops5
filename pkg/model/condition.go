@@ -56,13 +56,22 @@ func ParseOperator(s string) Operator {
 	}
 }
 
-// TestConstraint represents a single operator and target value test on an attribute.
+// TestConstraint represents a single operator and target value test on an attribute,
+// or a disjunction of multiple constraints << c1 c2 ... >>.
 type TestConstraint struct {
-	Op    Operator
-	Value Value
+	Op          Operator
+	Value       Value
+	Disjunction []TestConstraint // If non-empty, represents a disjunction << c1 c2 ... >>
 }
 
 func (tc TestConstraint) String() string {
+	if len(tc.Disjunction) > 0 {
+		var parts []string
+		for _, d := range tc.Disjunction {
+			parts = append(parts, d.String())
+		}
+		return fmt.Sprintf("<< %s >>", strings.Join(parts, " "))
+	}
 	if tc.Op == OpEqual {
 		return tc.Value.String()
 	}
@@ -239,6 +248,22 @@ func (ce *ConditionElement) AddEqualTest(attr string, val Value) *ConditionEleme
 	return ce.AddTest(attr, OpEqual, val)
 }
 
+// AddDisjunctionTest adds a disjunctive attribute test << c1 c2 ... >>.
+func (ce *ConditionElement) AddDisjunctionTest(attr string, constraints []TestConstraint) *ConditionElement {
+	normAttr := NormalizeAttribute(attr)
+	for i := range ce.Tests {
+		if ce.Tests[i].Attribute == normAttr {
+			ce.Tests[i].Constraints = append(ce.Tests[i].Constraints, TestConstraint{Disjunction: constraints})
+			return ce
+		}
+	}
+	ce.Tests = append(ce.Tests, AttributeTest{
+		Attribute:   normAttr,
+		Constraints: []TestConstraint{{Disjunction: constraints}},
+	})
+	return ce
+}
+
 // SpecificityScore calculates the number of tests contributed by this condition element.
 // In OPS5:
 // - Class name test = 1
@@ -295,7 +320,13 @@ func (ce *ConditionElement) Variables() []string {
 		}
 		for _, at := range ce.Tests {
 			for _, c := range at.Constraints {
-				if c.Value.IsVariable() {
+				if len(c.Disjunction) > 0 {
+					for _, dj := range c.Disjunction {
+						if dj.Value.IsVariable() {
+							varMap[dj.Value.VariableName()] = true
+						}
+					}
+				} else if c.Value.IsVariable() {
 					varMap[c.Value.VariableName()] = true
 				}
 			}
@@ -306,7 +337,13 @@ func (ce *ConditionElement) Variables() []string {
 		}
 		for _, at := range ce.Tests {
 			for _, c := range at.Constraints {
-				if c.Value.IsVariable() {
+				if len(c.Disjunction) > 0 {
+					for _, dj := range c.Disjunction {
+						if dj.Value.IsVariable() {
+							varMap[dj.Value.VariableName()] = true
+						}
+					}
+				} else if c.Value.IsVariable() {
 					varMap[c.Value.VariableName()] = true
 				}
 			}
@@ -434,7 +471,18 @@ func (ce *ConditionElement) Matches(wme *WME) bool {
 		}
 
 		for _, c := range at.Constraints {
-			if !evalConstraint(val, c.Op, c.Value) {
+			if len(c.Disjunction) > 0 {
+				matchedAny := false
+				for _, dj := range c.Disjunction {
+					if evalConstraint(val, dj.Op, dj.Value) {
+						matchedAny = true
+						break
+					}
+				}
+				if !matchedAny {
+					return false
+				}
+			} else if !evalConstraint(val, c.Op, c.Value) {
 				return false
 			}
 		}

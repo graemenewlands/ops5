@@ -23,6 +23,7 @@ const (
 	ActionDefault
 	ActionCustom
 	ActionWatch
+	ActionBuild
 )
 
 // Action represents a RHS action to be executed when a rule fires.
@@ -258,4 +259,18 @@ func (a WatchAction) String() string {
 		return "(watch)"
 	}
 	return fmt.Sprintf("(watch %d)", *a.Level)
+}
+
+// BuildAction dynamically compiles a new production rule into the Rete network at runtime.
+type BuildAction struct {
+	Rule *Rule
+}
+
+func (a BuildAction) Type() ActionType { return ActionBuild }
+
+func (a BuildAction) String() string {
+	if a.Rule != nil {
+		return fmt.Sprintf("(build %s)", a.Rule.String())
+	}
+	return "(build)"
 }

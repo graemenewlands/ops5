@@ -303,7 +303,15 @@ Multiple constraints can be specified for a single attribute:
 (sensor ^temperature > 32 <= 212 ^status active)
 ```
 
-#### 5. Cross-Condition Variable Binding
+#### 5. Attribute Disjunction (`<< ... >>`)
+Attributes can be matched against a set of alternative values, relational operators, or bound variables enclosed in `<< ... >>`. The condition matches if any of the alternatives match (logical OR):
+```ops5
+(task ^status << active pending >>)
+(sensor ^temperature << < 32 >= 212 >>)
+(packet ^route << <primary> <backup> >>)
+```
+
+#### 6. Cross-Condition Variable Binding
 Variables bound in earlier condition elements enforce equality (or relational joins) when repeated in subsequent condition elements:
 ```ops5
 (order ^order-id <oid> ^customer-id <cid>)
@@ -434,6 +442,20 @@ When `<start> == <end>` and `<end> != inf`, it extracts and returns that single 
 (bind <next> (compute (litval sequence) + 1))
 (modify <str> ^sequence (substr <str> <next> inf)) ; pops head and keeps rest
 ```
+
+#### `(build <rule-spec>)`
+Dynamically compiles and adds a production rule to production memory at runtime:
+```ops5
+(p learn-shortcut
+   (discovered-shortcut ^from <src> ^to <dst>)
+   -->
+   (build (p route-shortcut
+             (traveler ^dest <dst> ^location <src>)
+             -->
+             (write "Taking direct shortcut from" <src> "to" <dst> (crlf))))
+)
+```
+Variable references from the enclosing rule firing are substituted into the new rule definition before compilation. The newly built rule immediately joins the active Rete network and matches against existing working memory elements. Can also be invoked as a top-level directive.
 
 ---
 

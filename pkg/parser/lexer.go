@@ -23,6 +23,8 @@ const (
 	TokenNumber        // 123, 3.14
 	TokenString        // "string"
 	TokenOperator      // =, <>, !=, <, <=, >, >=
+	TokenLDisj         // <<
+	TokenRDisj         // >>
 )
 
 func (t TokenType) String() string {
@@ -37,6 +39,10 @@ func (t TokenType) String() string {
 		return "{"
 	case TokenRBrace:
 		return "}"
+	case TokenLDisj:
+		return "<<"
+	case TokenRDisj:
+		return ">>"
 	case TokenArrow:
 		return "-->"
 	case TokenNegation:
@@ -178,9 +184,13 @@ func (l *Lexer) NextToken() (Token, error) {
 		return Token{Type: TokenAttribute, Value: b.String(), Line: startLine, Col: startCol}, nil
 	}
 
-	// Variable <foo> or Operator (<>, <=, etc.)
+	// Variable <foo>, Operator (<>, <=, <), or Disjunction <<
 	if r == '<' {
 		l.next()
+		if l.peek() == '<' {
+			l.next()
+			return Token{Type: TokenLDisj, Value: "<<", Line: startLine, Col: startCol}, nil
+		}
 		if l.peek() == '>' {
 			l.next()
 			return Token{Type: TokenOperator, Value: "<>", Line: startLine, Col: startCol}, nil
@@ -208,9 +218,13 @@ func (l *Lexer) NextToken() (Token, error) {
 		return Token{Type: TokenVariable, Value: b.String(), Line: startLine, Col: startCol}, nil
 	}
 
-	// Relational operators >, >=, =, !=
+	// Relational operators >, >=, Disjunction >>, =, !=
 	if r == '>' {
 		l.next()
+		if l.peek() == '>' {
+			l.next()
+			return Token{Type: TokenRDisj, Value: ">>", Line: startLine, Col: startCol}, nil
+		}
 		if l.peek() == '=' {
 			l.next()
 			return Token{Type: TokenOperator, Value: ">=", Line: startLine, Col: startCol}, nil

@@ -130,12 +130,14 @@ func (bm *BetaMemory) LeftActivation(token *Token, tag PropagationTag) {
 	}
 }
 
-// JoinTest specifies a relational test between a WME attribute and a variable bound in earlier tokens.
+// JoinTest specifies a relational test between a WME attribute and a variable bound in earlier tokens,
+// or a disjunction constraint << ... >>.
 type JoinTest struct {
 	Attribute   string
 	Op          model.Operator
 	Variable    string
 	VectorIndex int // -1 for scalar/membership, >= 0 for positional element in vector
+	Disjunction []model.TestConstraint
 }
 
 // JoinNode joins left tokens with right WMEs from an AlphaMemory.
@@ -156,7 +158,7 @@ func NewJoinNode(betaMem *BetaMemory, alphaMem *AlphaMemory, ce *model.Condition
 	var rightSpecs []AlphaIndexSpec
 
 	for _, t := range tests {
-		if t.Op == model.OpEqual {
+		if len(t.Disjunction) == 0 && t.Op == model.OpEqual && t.Variable != "" {
 			leftVars = append(leftVars, t.Variable)
 			rightSpecs = append(rightSpecs, AlphaIndexSpec{
 				Attribute:   t.Attribute,
@@ -241,19 +243,69 @@ func evalJoinTest(jt JoinTest, boundVal model.Value, wmeVal model.Value) bool {
 
 func matchesJoinTests(tests []JoinTest, token *Token, wme *model.WME) bool {
 	for _, jt := range tests {
-		boundVal, exists := token.Bindings[jt.Variable]
-		if !exists {
-			return false
-		}
 		wmeVal, ok := wme.Get(jt.Attribute)
 		if !ok {
 			wmeVal = model.NewSymbol("nil")
+		}
+
+		if len(jt.Disjunction) > 0 {
+			matchedAny := false
+			for _, dj := range jt.Disjunction {
+				var targetVal model.Value
+				if dj.Value.IsVariable() {
+					if token == nil {
+						continue
+					}
+					var found bool
+					targetVal, found = token.Bindings[dj.Value.VariableName()]
+					if !found {
+						continue
+					}
+				} else {
+					targetVal = dj.Value
+				}
+				if evalJoinTestValue(wmeVal, dj.Op, targetVal, jt.VectorIndex) {
+					matchedAny = true
+					break
+				}
+			}
+			if !matchedAny {
+				return false
+			}
+			continue
+		}
+
+		boundVal, exists := token.Bindings[jt.Variable]
+		if !exists {
+			return false
 		}
 		if !evalJoinTest(jt, boundVal, wmeVal) {
 			return false
 		}
 	}
 	return true
+}
+
+func evalJoinTestValue(wmeVal model.Value, op model.Operator, boundVal model.Value, vecIdx int) bool {
+	if wmeVal.IsVector() {
+		elems := wmeVal.VectorElements()
+		if boundVal.IsVector() {
+			return evalOp(wmeVal, op, boundVal)
+		}
+		if vecIdx >= 0 {
+			if vecIdx < len(elems) {
+				return evalOp(elems[vecIdx], op, boundVal)
+			}
+			return false
+		}
+		for _, elem := range elems {
+			if evalOp(elem, op, boundVal) {
+				return true
+			}
+		}
+		return false
+	}
+	return evalOp(wmeVal, op, boundVal)
 }
 
 // matches evaluates join tests between token bindings and right WME.
@@ -424,7 +476,7 @@ func NewNegativeJoinNode(betaMem *BetaMemory, alphaMem *AlphaMemory, ce *model.C
 	var rightSpecs []AlphaIndexSpec
 
 	for _, t := range tests {
-		if t.Op == model.OpEqual {
+		if len(t.Disjunction) == 0 && t.Op == model.OpEqual && t.Variable != "" {
 			leftVars = append(leftVars, t.Variable)
 			rightSpecs = append(rightSpecs, AlphaIndexSpec{
 				Attribute:   t.Attribute,

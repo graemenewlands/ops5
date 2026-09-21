@@ -2185,6 +2185,110 @@ func TestParseNccCondition(t *testing.T) {
 	}
 }
 
+func TestParseDisjunctionAttribute(t *testing.T) {
+	src := `(p test-disj
+		(task ^id <tid> ^status << active pending queued >>)
+		(sensor ^reading << < 10 > 100 >>)
+	-->
+		(write "Matched" (crlf))
+	)`
+
+	p, err := NewParser(src)
+	if err != nil {
+		t.Fatalf("NewParser error: %v", err)
+	}
+	rule, err := p.ParseRule()
+	if err != nil {
+		t.Fatalf("ParseRule error: %v", err)
+	}
+
+	if len(rule.Conditions) != 2 {
+		t.Fatalf("expected 2 conditions, got %d", len(rule.Conditions))
+	}
+
+	// CE 1: task ^status << active pending queued >>
+	ce1 := rule.Conditions[0]
+	var statusTest *model.AttributeTest
+	for i := range ce1.Tests {
+		if ce1.Tests[i].Attribute == "status" {
+			statusTest = &ce1.Tests[i]
+			break
+		}
+	}
+	if statusTest == nil || len(statusTest.Constraints) != 1 {
+		t.Fatalf("expected status test with 1 constraint, got %v", statusTest)
+	}
+	disj1 := statusTest.Constraints[0].Disjunction
+	if len(disj1) != 3 {
+		t.Fatalf("expected 3 disjunction elements, got %d", len(disj1))
+	}
+	if !disj1[0].Value.Equal(model.NewSymbol("active")) ||
+		!disj1[1].Value.Equal(model.NewSymbol("pending")) ||
+		!disj1[2].Value.Equal(model.NewSymbol("queued")) {
+		t.Errorf("unexpected disjunction values: %v", disj1)
+	}
+
+	// CE 2: sensor ^reading << < 10 > 100 >>
+	ce2 := rule.Conditions[1]
+	var readTest *model.AttributeTest
+	for i := range ce2.Tests {
+		if ce2.Tests[i].Attribute == "reading" {
+			readTest = &ce2.Tests[i]
+			break
+		}
+	}
+	if readTest == nil || len(readTest.Constraints) != 1 {
+		t.Fatalf("expected reading test, got %v", readTest)
+	}
+	disj2 := readTest.Constraints[0].Disjunction
+	if len(disj2) != 2 {
+		t.Fatalf("expected 2 disjunction elements, got %d", len(disj2))
+	}
+	if disj2[0].Op != model.OpLess || !disj2[0].Value.Equal(model.NewInt(10)) {
+		t.Errorf("expected < 10, got %v", disj2[0])
+	}
+	if disj2[1].Op != model.OpGreater || !disj2[1].Value.Equal(model.NewInt(100)) {
+		t.Errorf("expected > 100, got %v", disj2[1])
+	}
+}
+
+func TestParseBuildAction(t *testing.T) {
+	src := `(p learn-route
+		(path ^from <src> ^to <dst>)
+	-->
+		(build (p route-shortcut
+			(goal ^origin <src> ^dest <dst>)
+		-->
+			(write "Shortcut taken" (crlf))
+		))
+	)`
+
+	p, err := NewParser(src)
+	if err != nil {
+		t.Fatalf("NewParser error: %v", err)
+	}
+	rule, err := p.ParseRule()
+	if err != nil {
+		t.Fatalf("ParseRule error: %v", err)
+	}
+
+	if len(rule.Actions) != 1 {
+		t.Fatalf("expected 1 action, got %d", len(rule.Actions))
+	}
+
+	buildAct, ok := rule.Actions[0].(model.BuildAction)
+	if !ok {
+		t.Fatalf("expected BuildAction, got %T", rule.Actions[0])
+	}
+
+	if buildAct.Rule.Name != "route-shortcut" {
+		t.Errorf("expected built rule name 'route-shortcut', got %s", buildAct.Rule.Name)
+	}
+	if len(buildAct.Rule.Conditions) != 1 {
+		t.Errorf("expected 1 condition in built rule, got %d", len(buildAct.Rule.Conditions))
+	}
+}
+
 
 
 

@@ -77,12 +77,30 @@ By default, an attribute test without an operator tests for **equality** (`=`). 
 | **`>`** | Strictly greater than | `^retry-count > 3` | Numeric or lexicographical greater-than. |
 | **`>=`** | Greater than or equal | `^score >= 70` | Numeric or lexicographical greater-than-or-equal. |
 
-### Multiple Constraints on a Single Attribute
-An attribute can have multiple constraints in the same condition element:
+### Multiple Constraints & Conjunction Blocks (`{ ... }`)
+An attribute can have multiple constraints in the same condition element, either by repeating the attribute or using a braced conjunction block `{ ... }`:
 ```ops5
+; Repeated attribute syntax
 (sensor ^reading >= 50 ^reading <= 100)
+
+; Braced conjunction block syntax
+(sensor ^reading { >= 50 <= 100 })
 ```
-Matches any `sensor` whose `reading` is between 50 and 100 (inclusive).
+All constraints inside `{ ... }` must be satisfied (logical AND).
+
+### Attribute Disjunction Blocks (`<< ... >>`)
+To test an attribute against multiple acceptable values or relational conditions where **any single match** is sufficient (logical OR), enclose the alternatives in double angle brackets `<< ... >>`:
+```ops5
+; Match if status is either 'active' or 'pending'
+(task ^status << active pending >>)
+
+; Match extreme sensor values (< 10 OR >= 100)
+(sensor ^temp << < 10 >= 100 >>)
+
+; Match if route matches either previously bound primary or backup route
+(packet ^route << <primary> <backup> >>)
+```
+Disjunction blocks can also be used inside conjunction blocks (`^reading { > 0 << 10 20 30 >> }`) and within positional condition elements.
 
 ---
 
@@ -208,7 +226,19 @@ All condition elements in the LHS are implicitly joined by **logical AND**:
 ```
 
 ### 2. Disjunction (OR)
-To express logical OR between condition patterns, write separate production rules with identical RHS actions, or declare multiple rules matching different alternatives:
+
+#### Attribute-Level Disjunction (`<< ... >>`)
+When the disjunction applies to an individual attribute's value, use `<< ... >>` directly inside the condition element. This avoids rule duplication and shares Rete alpha/beta nodes:
+```ops5
+(p alert-extreme-temp
+    (sensor ^id <sid> ^temp << < 10 >= 100 >>)
+  -->
+    (make extreme-alert ^sensor-id <sid>)
+)
+```
+
+#### Rule-Level Disjunction
+To express logical OR between entirely distinct condition element structures, declare separate production rules with identical RHS actions:
 ```ops5
 (p qualify-discount-gold
     (customer ^tier gold)
