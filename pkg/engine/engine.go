@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"io"
-	"math"
 	"os"
 	"sort"
 	"strconv"
@@ -922,80 +921,7 @@ func (e *Engine) readAcceptLineLocked(logicalName string) (model.Value, error) {
 
 // applyArithmeticOp applies an arithmetic operator to two numeric values.
 func applyArithmeticOp(a model.Value, op model.ComputeOp, b model.Value) (model.Value, error) {
-	// If both are integers
-	if a.Type() == model.TypeInteger && b.Type() == model.TypeInteger {
-		i1 := a.Raw().(int64)
-		i2 := b.Raw().(int64)
-		switch op {
-		case model.ComputeOpAdd:
-			return model.NewInt(i1 + i2), nil
-		case model.ComputeOpSub:
-			return model.NewInt(i1 - i2), nil
-		case model.ComputeOpMul:
-			return model.NewInt(i1 * i2), nil
-		case model.ComputeOpDiv:
-			if i2 == 0 {
-				return model.NewInt(0), fmt.Errorf("division by zero in compute")
-			}
-			return model.NewInt(i1 / i2), nil
-		case model.ComputeOpMod:
-			if i2 == 0 {
-				return model.NewInt(0), fmt.Errorf("division by zero in compute modulo")
-			}
-			return model.NewInt(i1 % i2), nil
-		}
-	}
-
-	// Floating point arithmetic if either operand is Float (or numeric string)
-	var f1, f2 float64
-	if a.Type() == model.TypeInteger {
-		f1 = float64(a.Raw().(int64))
-	} else if a.Type() == model.TypeFloat {
-		f1 = a.Raw().(float64)
-	} else if aStr, ok := a.Raw().(string); ok {
-		if val, err := strconv.ParseFloat(aStr, 64); err == nil {
-			f1 = val
-		} else {
-			return model.NewInt(0), fmt.Errorf("non-numeric operand in compute: %v", a)
-		}
-	} else {
-		return model.NewInt(0), fmt.Errorf("non-numeric operand in compute: %v", a)
-	}
-
-	if b.Type() == model.TypeInteger {
-		f2 = float64(b.Raw().(int64))
-	} else if b.Type() == model.TypeFloat {
-		f2 = b.Raw().(float64)
-	} else if bStr, ok := b.Raw().(string); ok {
-		if val, err := strconv.ParseFloat(bStr, 64); err == nil {
-			f2 = val
-		} else {
-			return model.NewInt(0), fmt.Errorf("non-numeric operand in compute: %v", b)
-		}
-	} else {
-		return model.NewInt(0), fmt.Errorf("non-numeric operand in compute: %v", b)
-	}
-
-	switch op {
-	case model.ComputeOpAdd:
-		return model.NewFloat(f1 + f2), nil
-	case model.ComputeOpSub:
-		return model.NewFloat(f1 - f2), nil
-	case model.ComputeOpMul:
-		return model.NewFloat(f1 * f2), nil
-	case model.ComputeOpDiv:
-		if f2 == 0 {
-			return model.NewInt(0), fmt.Errorf("division by zero in compute")
-		}
-		return model.NewFloat(f1 / f2), nil
-	case model.ComputeOpMod:
-		if f2 == 0 {
-			return model.NewInt(0), fmt.Errorf("division by zero in compute modulo")
-		}
-		return model.NewFloat(math.Mod(f1, f2)), nil
-	default:
-		return model.NewInt(0), fmt.Errorf("unknown compute operator: %v", op)
-	}
+	return model.ApplyArithmeticOp(a, op, b)
 }
 
 // evaluateCompute evaluates a (compute ...) expression using the provided variable bindings.

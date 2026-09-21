@@ -75,12 +75,79 @@ type AttributeTest struct {
 	Constraints []TestConstraint
 }
 
-// ConditionElement represents a single positive or negative condition element on the LHS.
+// AccumulateOp represents an aggregation function for an accumulate condition element.
+type AccumulateOp int
+
+const (
+	AccCount AccumulateOp = iota
+	AccSum
+	AccAverage
+	AccMin
+	AccMax
+	AccCollect
+)
+
+func (op AccumulateOp) String() string {
+	switch op {
+	case AccCount:
+		return ":count"
+	case AccSum:
+		return ":sum"
+	case AccAverage:
+		return ":average"
+	case AccMin:
+		return ":min"
+	case AccMax:
+		return ":max"
+	case AccCollect:
+		return ":collect"
+	default:
+		return ":unknown"
+	}
+}
+
+// ParseAccumulateOp parses an aggregation function string.
+func ParseAccumulateOp(s string) (AccumulateOp, error) {
+	norm := strings.ToLower(strings.TrimPrefix(s, ":"))
+	switch norm {
+	case "count":
+		return AccCount, nil
+	case "sum":
+		return AccSum, nil
+	case "avg", "average":
+		return AccAverage, nil
+	case "min":
+		return AccMin, nil
+	case "max":
+		return AccMax, nil
+	case "collect":
+		return AccCollect, nil
+	default:
+		return 0, fmt.Errorf("unknown accumulate operation: %s", s)
+	}
+}
+
+// AccumulateSpec specifies the aggregation operation, target expression/variable, and result variable.
+type AccumulateSpec struct {
+	Op        AccumulateOp
+	Target    Value  // Target variable or expression, e.g. <p> or (compute ...)
+	ResultVar string // Variable name to bind the result to, e.g. "total"
+}
+
+// ConditionElement represents a single positive or negative condition element on the LHS,
+// or a predicate test condition element (test ...), or an existential/accumulate condition element.
 type ConditionElement struct {
 	IsNegative      bool
+	IsTest          bool
+	IsExistential   bool
+	IsAccumulate    bool
+	IsNCC           bool
+	NCCConditions   []*ConditionElement
+	Accumulate      *AccumulateSpec
 	ElementVariable string // e.g. "g" if bound with <g>
 	Class           string
 	Tests           []AttributeTest
+	EvalTest        *EvalTest
 }
 
 // NewPositiveCE creates a new positive ConditionElement.
@@ -98,6 +165,50 @@ func NewNegativeCE(class string) *ConditionElement {
 		IsNegative: true,
 		Class:      class,
 		Tests:      make([]AttributeTest, 0),
+	}
+}
+
+// NewNccCE creates a new Negated Conjunctive Condition (NCC) element.
+func NewNccCE(subConditions []*ConditionElement) *ConditionElement {
+	return &ConditionElement{
+		IsNegative:    true,
+		IsNCC:         true,
+		Class:         "ncc",
+		NCCConditions: subConditions,
+	}
+}
+
+// NewExistentialCE creates a new existential (exists) ConditionElement.
+func NewExistentialCE(class string) *ConditionElement {
+	return &ConditionElement{
+		IsNegative:    false,
+		IsTest:        false,
+		IsExistential: true,
+		Class:         class,
+		Tests:         make([]AttributeTest, 0),
+	}
+}
+
+// NewAccumulateCE creates a new accumulate ConditionElement with the given specification.
+func NewAccumulateCE(class string, spec *AccumulateSpec) *ConditionElement {
+	return &ConditionElement{
+		IsNegative:    false,
+		IsTest:        false,
+		IsExistential: false,
+		IsAccumulate:  true,
+		Accumulate:    spec,
+		Class:         class,
+		Tests:         make([]AttributeTest, 0),
+	}
+}
+
+// NewTestCE creates a new test ConditionElement with the given EvalTest.
+func NewTestCE(evalTest *EvalTest) *ConditionElement {
+	return &ConditionElement{
+		IsNegative: false,
+		IsTest:     true,
+		Class:      "test",
+		EvalTest:   evalTest,
 	}
 }
 
@@ -132,10 +243,27 @@ func (ce *ConditionElement) AddEqualTest(attr string, val Value) *ConditionEleme
 // In OPS5:
 // - Class name test = 1
 // - Each constraint on an attribute = 1
+// - For test CEs: each comparison counts as 1
 func (ce *ConditionElement) SpecificityScore() int {
+	if ce.IsTest {
+		if ce.EvalTest != nil && len(ce.EvalTest.Comparisons) > 0 {
+			return len(ce.EvalTest.Comparisons)
+		}
+		return 1
+	}
+	if ce.IsNCC {
+		score := 0
+		for _, sub := range ce.NCCConditions {
+			score += sub.SpecificityScore()
+		}
+		return score
+	}
 	score := 1 // For class match
 	for _, at := range ce.Tests {
 		score += len(at.Constraints)
+	}
+	if ce.IsAccumulate {
+		score++
 	}
 	return score
 }
@@ -143,13 +271,44 @@ func (ce *ConditionElement) SpecificityScore() int {
 // Variables returns all variable names referenced in this condition element.
 func (ce *ConditionElement) Variables() []string {
 	varMap := make(map[string]bool)
-	if ce.ElementVariable != "" {
-		varMap[ce.ElementVariable] = true
-	}
-	for _, at := range ce.Tests {
-		for _, c := range at.Constraints {
-			if c.Value.IsVariable() {
-				varMap[c.Value.VariableName()] = true
+	if ce.IsTest {
+		if ce.EvalTest != nil {
+			for _, cmp := range ce.EvalTest.Comparisons {
+				collectVariables(cmp.Left, varMap)
+				if cmp.HasRight {
+					collectVariables(cmp.Right, varMap)
+				}
+			}
+		}
+	} else if ce.IsNCC {
+		for _, sub := range ce.NCCConditions {
+			for _, v := range sub.Variables() {
+				varMap[v] = true
+			}
+		}
+	} else if ce.IsAccumulate {
+		if ce.Accumulate != nil {
+			if ce.Accumulate.ResultVar != "" {
+				varMap[ce.Accumulate.ResultVar] = true
+			}
+			collectVariables(ce.Accumulate.Target, varMap)
+		}
+		for _, at := range ce.Tests {
+			for _, c := range at.Constraints {
+				if c.Value.IsVariable() {
+					varMap[c.Value.VariableName()] = true
+				}
+			}
+		}
+	} else {
+		if ce.ElementVariable != "" {
+			varMap[ce.ElementVariable] = true
+		}
+		for _, at := range ce.Tests {
+			for _, c := range at.Constraints {
+				if c.Value.IsVariable() {
+					varMap[c.Value.VariableName()] = true
+				}
 			}
 		}
 	}
@@ -161,8 +320,79 @@ func (ce *ConditionElement) Variables() []string {
 	return res
 }
 
+func collectVariables(v Value, varMap map[string]bool) {
+	if v.IsVariable() {
+		varMap[v.VariableName()] = true
+	} else if v.IsCompute() {
+		for _, op := range v.ComputeExpr().Operands {
+			collectVariables(op, varMap)
+		}
+	} else if v.IsVector() {
+		for _, el := range v.VectorElements() {
+			collectVariables(el, varMap)
+		}
+	}
+}
+
 // String returns a string representation of the ConditionElement.
 func (ce *ConditionElement) String() string {
+	if ce.IsTest {
+		var b strings.Builder
+		b.WriteString("(test")
+		if ce.EvalTest != nil {
+			for _, cmp := range ce.EvalTest.Comparisons {
+				b.WriteString(" ")
+				b.WriteString(cmp.String())
+			}
+		}
+		b.WriteString(")")
+		return b.String()
+	}
+	if ce.IsExistential {
+		var b strings.Builder
+		b.WriteString("(exists (")
+		b.WriteString(ce.Class)
+		for _, at := range ce.Tests {
+			b.WriteString(fmt.Sprintf(" ^%s", at.Attribute))
+			for _, c := range at.Constraints {
+				b.WriteString(" ")
+				b.WriteString(c.String())
+			}
+		}
+		b.WriteString("))")
+		return b.String()
+	}
+	if ce.IsNCC {
+		var b strings.Builder
+		b.WriteString("-(")
+		for i, sub := range ce.NCCConditions {
+			if i > 0 {
+				b.WriteString(" ")
+			}
+			b.WriteString(sub.String())
+		}
+		b.WriteString(")")
+		return b.String()
+	}
+	if ce.IsAccumulate && ce.Accumulate != nil {
+		var b strings.Builder
+		b.WriteString("(accumulate (")
+		b.WriteString(ce.Class)
+		for _, at := range ce.Tests {
+			b.WriteString(fmt.Sprintf(" ^%s", at.Attribute))
+			for _, c := range at.Constraints {
+				b.WriteString(" ")
+				b.WriteString(c.String())
+			}
+		}
+		b.WriteString(fmt.Sprintf(") %s", ce.Accumulate.Op.String()))
+		if ce.Accumulate.Target.String() != "" && ce.Accumulate.Target.String() != "nil" && ce.Accumulate.Target.String() != `""` {
+			b.WriteString(" ")
+			b.WriteString(ce.Accumulate.Target.String())
+		}
+		b.WriteString(fmt.Sprintf(" <%s>)", ce.Accumulate.ResultVar))
+		return b.String()
+	}
 	var b strings.Builder
 	if ce.ElementVariable != "" {
 		b.WriteString(fmt.Sprintf("<%s> ", ce.ElementVariable))
@@ -188,7 +418,7 @@ func (ce *ConditionElement) String() string {
 // Class matching is case-insensitive, with "*" matching any class.
 // All attribute tests must be satisfied by the WME.
 func (ce *ConditionElement) Matches(wme *WME) bool {
-	if wme == nil {
+	if wme == nil || ce.IsTest {
 		return false
 	}
 	if ce.Class != "" && ce.Class != "*" {

@@ -24,6 +24,8 @@ This engine provides a complete, modern execution environment for rule-based sys
    - [Left-Hand Side (LHS) Condition Elements](#left-hand-side-lhs-condition-elements)
    - [Right-Hand Side (RHS) Actions](#right-hand-side-rhs-actions)
 3. [Rete Pattern Matching Engine](#rete-pattern-matching-engine)
+   - [Beta Node Types & Architecture Reference](docs/beta_nodes.md)
+   - [Beta Node Types & Implementation Matrix](#beta-node-types--implementation-matrix)
    - [Alpha Network Mechanics](#alpha-network-mechanics)
    - [Beta Network & Join Mechanics](#beta-network--join-mechanics)
    - [Hashed Beta & Alpha Join Indexing](#hashed-beta--alpha-join-indexing)
@@ -437,6 +439,9 @@ When `<start> == <end>` and `<end> != inf`, it extracts and returns that single 
 
 ## Rete Pattern Matching Engine
 
+> [!NOTE]
+> For a comprehensive architectural specification of all Beta node types, lifecycle token propagation, and roadmap features, see the [Rete Beta Network Architecture & Catalog](docs/beta_nodes.md).
+
 The engine compiles production rules into a directed acyclic dataflow graph based on Charles Forgy's Rete algorithm.
 
 ```mermaid
@@ -460,6 +465,22 @@ flowchart LR
     JN2 --> TermNode["TerminalNode: process-order"]
     TermNode --> CS["Conflict Set Activation"]
 ```
+
+### Beta Node Types & Implementation Matrix
+
+The Beta network processes partial rule instantiations (tokens) across conditions and coordinates multi-condition joins:
+
+| Node Type | Arity | Primary Purpose | State / Storage | Engine Status | Target Construct |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **`BetaRootMemory`** | 0 (Seeded) | Network root anchor; seeds evaluation with `DummyRootToken()` | Dummy root token | **Implemented** | Engine initialization |
+| **`BetaMemory`** | 1 (Left) | Caches partial match tokens; supports successor sharing and index lookups | Tokens map, `BetaIndex` | **Implemented** | Inter-condition boundary |
+| **`JoinNode`** | 2 (Left + Right) | Performs relational joins between left tokens and right WMEs | Stateless (queries memories) | **Implemented** | `(class ^attr <var>)` |
+| **`NegativeJoinNode`** | 2 (Left + Right) | Enforces absence of matching WMEs; gates tokens on match count = 0 | Tokens map, match counts, `BetaIndex` | **Implemented** | `-(class ^attr <var>)` |
+| **`TerminalNode`** | 1 (Left) | Rule terminus; fires activation additions and removals into Conflict Set | Rule, `ConflictSetListener` | **Implemented** | Rule match completion (`-->`) |
+| **`EvalNode`** | 1 (Left) | Evaluates arithmetic/boolean expressions across bound variables | Stateless filter | **Implemented** | `(test (compute <x> + <y> > 100))` |
+| **`ExistentialJoinNode`** | 2 (Left + Right) | Semi-join (`exists`): verifies $\ge 1$ matching WME without token duplication | Tokens map, match counts | **Implemented** | `(exists (class ^attr <var>))` |
+| **`AccumulateNode`** | 2 (Left + Right) | Aggregates matching WMEs (`count`, `sum`, `average`, `min`, `max`, `collect`) into `<var>` | Tokens map, aggregate accumulators, `BetaIndex` | **Implemented** | `(accumulate ... :sum <v>)` |
+| **`NccNode` / `NccPartner`** | 2 (Left + Subnet)| Negated conjunction blocks: tests absence of joint condition groups | Sub-token completion maps, match counts | **Implemented** | `-( (cond-1) (cond-2) )` |
 
 ### Alpha Network Mechanics
 1. **Root Dispatch**: `AlphaRootNode` categorizes incoming WMEs by class using `TypeNode` instances. A wildcard type node `*` captures cross-class patterns.

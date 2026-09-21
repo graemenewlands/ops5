@@ -83,6 +83,19 @@ func (bm *BetaMemory) AddSuccessor(node LeftActivatable) {
 	}
 }
 
+// RemoveSuccessor unregisters a child beta node.
+func (bm *BetaMemory) RemoveSuccessor(node LeftActivatable) {
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+	var newSuccs []LeftActivatable
+	for _, s := range bm.successors {
+		if s != node {
+			newSuccs = append(newSuccs, s)
+		}
+	}
+	bm.successors = newSuccs
+}
+
 // Tokens returns a snapshot of stored tokens.
 func (bm *BetaMemory) Tokens() []*Token {
 	bm.mu.RLock()

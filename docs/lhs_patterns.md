@@ -238,12 +238,260 @@ In OPS5:
 
 ---
 
-## 8. Summary of LHS Syntax & Rules
+## 8. Predicate Test Condition Elements (`(test ...)`)
+
+A `(test ...)` condition element evaluates mathematical, boolean, or relational expressions across variables already bound by preceding condition elements without matching against working memory:
+
+```ops5
+(test (<val1> <op> <val2>))
+(test (<op> <val1> <val2>))
+(test (compute <expr> <op> <val>))
+```
+
+### Purpose & Syntax
+1. **Cross-Variable Comparison**:
+   Standard condition elements only test individual WMEs or equality joins. To compare two bound variables with inequality or relational operators, use `(test ...)`:
+   ```ops5
+   (p detect-overdraw
+       (account ^balance <bal>)
+       (withdrawal-request ^amount <amt>)
+       (test (<amt> > <bal>))
+     -->
+       (write "Declined: withdrawal" <amt> "exceeds balance" <bal> (crlf))
+   )
+   ```
+2. **Arithmetic with `compute`**:
+   Mathematical formulas can be evaluated directly on the LHS:
+   ```ops5
+   (p discount-bulk
+       (item ^price <p> ^qty <q>)
+       (test (compute <p> * <q> >= 100))
+     -->
+       (make discount ^rate 0.10)
+   )
+   ```
+3. **Multiple Conjunction Tests**:
+   Multiple comparisons can be included in a single `(test ...)` element:
+   ```ops5
+   (test (<x> >= 10) (<x> <= 100))
+   ```
+
+> [!NOTE]
+> All variables referenced in a `(test ...)` condition must be bound by earlier positive condition elements. A `(test ...)` condition cannot be negated with `-` and cannot have an element variable `<var>`.
+
+---
+
+## 9. Existential Condition Elements (`(exists ...)`)
+
+An **existential condition element** tests for the presence of **at least one** matching WME in working memory without causing token multiplication. In relational algebra, this is known as a **semi-join** ($\exists x: P(x)$).
+
+```ops5
+(exists (class-name ^attribute value ...))
+; Or flat syntax:
+(exists class-name ^attribute value ...)
+```
+
+### The Cartesian Explosion Problem
+With standard positive condition elements, every matching WME creates a distinct token instantiation:
+```ops5
+(system ^status online)
+(order ^status pending)
+```
+If there are 50 `order` WMEs with `^status pending`, the rule matches **50 times**.
+
+Often, a rule only needs to know **whether** at least one matching item exists (e.g., "notify operator if there are any alerts", "start processing batch if there are pending items"), without firing for every single item.
+
+### Semi-Join Semantics & Behavior
+With `(exists ...)`:
+```ops5
+(p alert-pending-orders
+    (system ^status online)
+    (exists (order ^status pending))
+  -->
+    (write "System is online and pending orders exist." (crlf))
+)
+```
+1. **Zero Token Multiplication**: Regardless of whether there are 1, 10, or 10,000 pending orders, the rule produces **exactly one** activation.
+2. **Dynamic Transition Tracking**:
+   - When the first matching WME is created ($0 \to 1$), the condition becomes satisfied and a token is emitted downstream.
+   - When subsequent matching WMEs are added ($1 \to 2, 3, \dots$), propagation is suppressed.
+   - When matching WMEs are retracted, the token remains active until the last matching WME is removed ($1 \to 0$), at which point a retraction token is emitted downstream.
+3. **Cross-Condition Joins**:
+   Existential conditions can join on variables bound by earlier positive conditions:
+   ```ops5
+   (p customer-has-open-tickets
+       (customer ^id <cid> ^name <cname>)
+       (exists (ticket ^customer-id <cid> ^status open))
+     -->
+       (write "Customer" <cname> "has open support tickets." (crlf))
+   )
+   ```
+
+> [!IMPORTANT]
+> **Variable Scoping & RHS Rules**:
+> - Variables introduced inside an `(exists ...)` condition element are **locally scoped** and are **not** exported downstream or available on the RHS.
+> - An `(exists ...)` condition element **cannot** have an element variable `<var> (exists ...)` because no single WME represents the condition.
+> - An `(exists ...)` condition element **cannot** be negated (`-(exists ...)`). To test for non-existence, use standard negative condition elements `-(class ...)`.
+
+---
+
+## 10. Accumulate Condition Elements (`(accumulate ...)` / `(acc ...)`)
+
+An **accumulate condition element** aggregates a collection of matching WMEs and binds the resulting aggregate value to a variable:
+
+```ops5
+(accumulate (class-name ^attr val ...) <operation> [<target>] <result-var>)
+; Or using alias 'acc':
+(acc (class-name ^attr val ...) <operation> [<target>] <result-var>)
+```
+
+### Supported Aggregation Operations
+
+| Operation | Syntax Example | Behavior on Empty Set | Description |
+| :--- | :--- | :--- | :--- |
+| **`:count`** | `:count <cnt>` | Emits `0` | Counts total matching WMEs. Target operand is optional. |
+| **`:sum`** | `:sum <p> <total>` | Emits `0` | Sums numeric values (supports integers and floats). |
+| **`:avg`**, **`:average`** | `:avg <g> <gpa>` | Suppressed (no emission) | Calculates arithmetic mean as float. Requires count > 0. |
+| **`:min`** | `:min <score> <lowest>` | Suppressed (no emission) | Selects minimum value via relational comparison. Requires count > 0. |
+| **`:max`** | `:max <score> <highest>`| Suppressed (no emission) | Selects maximum value via relational comparison. Requires count > 0. |
+| **`:collect`** | `:collect <id> <list>` | Emits `()` (empty vector) | Collects values into an ordered vector. |
+
+### Target Expressions
+The target to accumulate can be:
+1. **A Variable**: Bound within the inner pattern (e.g. `^price <p>` with target `<p>`).
+2. **An Attribute**: Direct attribute name (e.g. `price`).
+3. **An Arithmetic Expression**: Using `(compute ...)`, e.g. `:sum (compute <qty> * <price>) <subtotal>`.
+
+### Examples
+
+#### 1. Calculating Order Total
+```ops5
+(p summarize-order
+    (order ^id <oid> ^customer <cust>)
+    (accumulate (order-line ^order-id <oid> ^price <p>) :sum <p> <total>)
+  -->
+    (write "Order" <oid> "total is:" <total> (crlf))
+)
+```
+
+#### 2. Chaining with Predicate Tests
+An aggregate result can be filtered immediately by a downstream `(test ...)` condition:
+```ops5
+(p alert-high-balance
+    (account ^id <aid> ^owner <name>)
+    (accumulate (transaction ^acc-id <aid> ^amount <amt>) :sum <amt> <total>)
+    (test (<total> > 10000))
+  -->
+    (write "Alert: High transaction volume for" <name> "Total:" <total> (crlf))
+)
+```
+
+#### 3. Counting Pending Tasks
+```ops5
+(p report-status
+    (system ^state online)
+    (accumulate (task ^status pending) :count <num-pending>)
+  -->
+    (write "Online with" <num-pending> "tasks remaining" (crlf))
+)
+```
+
+### Reactive Invalidation & Lifecycle
+- When matching WMEs are added or modified, `AccumulateNode` recalculates the aggregate value and underlying timetags.
+- If an earlier activation token was emitted downstream, the engine emits `TagRemove` for the old token and `TagAdd` for the newly calculated token.
+- Timetags of the aggregated WMEs are preserved in the token chain, ensuring that conflict resolution recency (LEX / MEA) and refraction mechanics function accurately.
+
+> [!IMPORTANT]
+> **Variable Scoping & RHS Rules**:
+> - Variables declared purely inside the inner condition pattern (e.g. `<p>` in `^price <p>`) are **locally scoped** to the accumulation.
+> - The output variable `<result-var>` (e.g. `<total>`) is **exported downstream** and is fully accessible to subsequent conditions and RHS actions (`make`, `modify`, `write`).
+> - An accumulate condition element **cannot** be negated (`-(accumulate ...)`) and **cannot** have an element variable `<var> (accumulate ...)`.
+
+---
+
+## 11. Negated Conjunctive Conditions (`-( (c1) (c2) ... )` / `(ncc ...)`)
+
+A **Negated Conjunctive Condition (NCC)** tests for the **absence of a joint combination** of two or more condition elements.
+
+While an individual negative condition element `-(class ...)` tests for the non-existence of a single WME, an NCC tests for the non-existence of an entire conjunction: $\neg (C_1 \land C_2 \land \dots \land C_k)$.
+
+```ops5
+; Standard OPS5 nested parentheses syntax:
+-( (class-1 ^attr1 val1 ...) (class-2 ^attr2 val2 ...) ... )
+
+; Alternative braced syntax:
+-{ (class-1 ^attr1 val1 ...) (class-2 ^attr2 val2 ...) ... }
+-( { (class-1 ^attr1 val1 ...) (class-2 ^attr2 val2 ...) ... } )
+
+; Explicit keyword syntax:
+(ncc (class-1 ^attr1 val1 ...) (class-2 ^attr2 val2 ...) ... )
+```
+
+### Why NCC is Needed: Absence of Relationships
+
+Consider testing the condition: *"Find every department manager where there is NO employee in the department who earns more than that manager."*
+
+With single negative condition elements, you cannot express this because the comparison requires joining `department`, `employee`, and `salary` simultaneously:
+- Testing `-(employee ^salary > <mgr-salary>)` alone would check if *no employee anywhere in any department* makes more than `<mgr-salary>`.
+- Testing `-(department ...)` and `-(employee ...)` as separate negative CEs would test each independently.
+
+With an NCC, the sub-conditions are joined together before negation is evaluated:
+
+```ops5
+(p find-top-paid-managers
+    (manager ^dept <d> ^name <mname> ^salary <msal>)
+    -( (employee ^dept <d> ^name <ename> ^salary <esal>)
+       (test (<esal> > <msal>)) )
+  -->
+    (write "Manager" <mname> "is highest paid in department" <d> (crlf))
+)
+```
+The rule matches only if there is **no combination** of `employee` and `test` in department `<d>` with salary greater than `<msal>`.
+
+### Another Example: Multistage Workflows
+```ops5
+(p order-ready-for-packaging
+    (order ^id <oid> ^status processing)
+    -( (order-item ^order-id <oid> ^sku <sku>)
+       (inventory ^sku <sku> ^available false) )
+  -->
+    (write "Order" <oid> "has all items in stock and is ready for packaging" (crlf))
+)
+```
+The rule fires when there does **not** exist an item in order `<oid>` that is simultaneously out of stock in `inventory`.
+
+### Variable Scoping & Semantics in NCC
+1. **Parent-Variable Inheritance**:
+   Sub-conditions within the NCC can reference variables bound by preceding positive conditions (e.g. `<d>` and `<msal>` above). The sub-network is scoped per parent token.
+2. **Intra-Conjunction Joins**:
+   Sub-conditions inside the NCC can introduce variables and join with one another (e.g. `<sku>` shared between `order-item` and `inventory`).
+3. **No Variable Leaking**:
+   Variables introduced *inside* the NCC (such as `<ename>` or `<esal>`) are **strictly local** to the NCC. They cannot be referenced downstream or used on the RHS.
+4. **No Element Variables**:
+   Element variables `<var> -( ... )` cannot be attached to an NCC block because no single WME represents the negated conjunction.
+5. **Minimum Conditions**:
+   An NCC must contain at least two condition elements (or at least one condition joined with a `(test ...)`). A single condition can simply be written as a standard negated condition `-(class ...)`.
+
+### Rete Architecture: `NccNode` & `NccPartnerNode`
+Under the hood, NCC is implemented as an asynchronous sub-pipeline in the Rete network:
+- The sub-conditions form a branched Rete Beta pipeline starting from the parent beta memory.
+- At the end of the sub-pipeline, an `NccPartnerNode` buffers completed sub-matches and notifies the corresponding `NccNode` on the main pipeline.
+- `NccNode` maintains a count of completed sub-matches for each parent token.
+- When `count == 0`, the parent token is satisfied and propagated downstream.
+- When `count > 0`, downstream propagation is blocked (or retracted if previously active).
+
+---
+
+## 12. Summary of LHS Syntax & Rules
 
 | Construct | Syntax | Notes |
 | :--- | :--- | :--- |
-| **Positive CE** | `(class ^attr val ...)` | Matches presence of WME. |
-| **Negative CE** | `-(class ^attr val ...)` | Matches absence of matching WMEs. |
+| **Positive CE** | `(class ^attr val ...)` | Matches presence of WME. Token emitted per matching WME. |
+| **Negative CE** | `-(class ^attr val ...)` | Matches absence of matching WMEs. Single-condition negated test. |
+| **Negated Conjunction (NCC)** | `-( (c1) (c2) ... )`<br>`(ncc (c1) (c2) ...)` | Tests absence of a joint combination of WMEs. Sub-variables do not leak downstream. |
+| **Existential CE** | `(exists (class ^attr val ...))` | Semi-join ($\exists$). Tests for $\ge 1$ matching WME without token multiplication. |
+| **Accumulate CE** | `(accumulate (class ...) :op <v> <res>)` | Aggregates matching WMEs (`:count`, `:sum`, `:avg`, `:min`, `:max`, `:collect`). |
+| **Test CE** | `(test (<val1> <op> <val2>))` | Evaluates expression across bound variables via `EvalNode`. |
 | **Element Variable** | `<var> (class ...)` | Binds WME timetag for RHS `modify`/`remove`. Positive CEs only. |
 | **Value Variable** | `^attr <var>` | Binds attribute value or constrains join across CEs. |
 | **Equality Test** | `^attr val` or `^attr = val` | Default test when operator omitted. |

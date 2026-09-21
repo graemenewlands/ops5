@@ -1667,6 +1667,524 @@ func TestParseSubstrInRule(t *testing.T) {
 	}
 }
 
+func TestParseTestCondition(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		hasError bool
+		check    func(t *testing.T, rule *model.Rule)
+	}{
+		{
+			name: "infix relational test",
+			input: `(p test-infix
+				(item ^price <p> ^cost <c>)
+				(test (<p> > <c>))
+			-->
+				(write "Profitable" (crlf))
+			)`,
+			check: func(t *testing.T, rule *model.Rule) {
+				if len(rule.Conditions) != 2 {
+					t.Fatalf("expected 2 conditions, got %d", len(rule.Conditions))
+				}
+				ce := rule.Conditions[1]
+				if !ce.IsTest || ce.EvalTest == nil {
+					t.Fatalf("expected IsTest with EvalTest, got %v", ce)
+				}
+				if len(ce.EvalTest.Comparisons) != 1 {
+					t.Fatalf("expected 1 comparison, got %d", len(ce.EvalTest.Comparisons))
+				}
+				cmp := ce.EvalTest.Comparisons[0]
+				if !cmp.Left.IsVariable() || cmp.Left.VariableName() != "p" {
+					t.Errorf("expected left operand <p>, got %v", cmp.Left)
+				}
+				if cmp.Op != model.OpGreater {
+					t.Errorf("expected OpGreater, got %v", cmp.Op)
+				}
+				if !cmp.Right.IsVariable() || cmp.Right.VariableName() != "c" {
+					t.Errorf("expected right operand <c>, got %v", cmp.Right)
+				}
+			},
+		},
+		{
+			name: "prefix relational test",
+			input: `(p test-prefix
+				(pair ^first <a> ^second <b>)
+				(test (> <a> <b>))
+			-->
+				(write "First greater" (crlf))
+			)`,
+			check: func(t *testing.T, rule *model.Rule) {
+				ce := rule.Conditions[1]
+				if !ce.IsTest || ce.EvalTest == nil {
+					t.Fatalf("expected IsTest, got %v", ce)
+				}
+				cmp := ce.EvalTest.Comparisons[0]
+				if cmp.Op != model.OpGreater || cmp.Left.VariableName() != "a" || cmp.Right.VariableName() != "b" {
+					t.Errorf("unexpected comparison: %v", cmp)
+				}
+			},
+		},
+		{
+			name: "compute expression in test",
+			input: `(p test-compute
+				(item ^price <p> ^qty <q>)
+				(test (compute <p> * <q> >= 100))
+			-->
+				(write "High value" (crlf))
+			)`,
+			check: func(t *testing.T, rule *model.Rule) {
+				ce := rule.Conditions[1]
+				if !ce.IsTest || ce.EvalTest == nil {
+					t.Fatalf("expected IsTest, got %v", ce)
+				}
+				cmp := ce.EvalTest.Comparisons[0]
+				if !cmp.Left.IsCompute() {
+					t.Fatalf("expected left to be compute expression, got %v", cmp.Left)
+				}
+				if cmp.Op != model.OpGreaterEqual {
+					t.Errorf("expected OpGreaterEqual, got %v", cmp.Op)
+				}
+				if cmp.Right.Raw().(int64) != 100 {
+					t.Errorf("expected right operand 100, got %v", cmp.Right)
+				}
+			},
+		},
+		{
+			name: "nested compute expression in test",
+			input: `(p test-nested-compute
+				(item ^price <p> ^qty <q>)
+				(test ((compute <p> * <q>) > 50))
+			-->
+				(write "Above 50" (crlf))
+			)`,
+			check: func(t *testing.T, rule *model.Rule) {
+				ce := rule.Conditions[1]
+				if !ce.IsTest || ce.EvalTest == nil {
+					t.Fatalf("expected IsTest, got %v", ce)
+				}
+				cmp := ce.EvalTest.Comparisons[0]
+				if !cmp.Left.IsCompute() {
+					t.Fatalf("expected compute, got %v", cmp.Left)
+				}
+				if cmp.Op != model.OpGreater {
+					t.Errorf("expected OpGreater, got %v", cmp.Op)
+				}
+			},
+		},
+		{
+			name: "multiple comparisons in test",
+			input: `(p test-multi
+				(data ^val <v>)
+				(test (<v> >= 10) (<v> <= 100))
+			-->
+				(write "In range" (crlf))
+			)`,
+			check: func(t *testing.T, rule *model.Rule) {
+				ce := rule.Conditions[1]
+				if len(ce.EvalTest.Comparisons) != 2 {
+					t.Fatalf("expected 2 comparisons, got %d", len(ce.EvalTest.Comparisons))
+				}
+				if ce.SpecificityScore() != 2 {
+					t.Errorf("expected specificity 2, got %d", ce.SpecificityScore())
+				}
+			},
+		},
+		{
+			name: "negated test rejected",
+			input: `(p test-neg
+				(data ^val <v>)
+				-(test (<v> > 10))
+			-->
+				(write "Bad" (crlf))
+			)`,
+			hasError: true,
+		},
+		{
+			name: "element variable on test rejected",
+			input: `(p test-elem-var
+				(data ^val <v>)
+				<t> (test (<v> > 10))
+			-->
+				(write "Bad" (crlf))
+			)`,
+			hasError: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			p, err := NewParser(tc.input)
+			if err != nil {
+				if tc.hasError {
+					return
+				}
+				t.Fatalf("unexpected NewParser error: %v", err)
+			}
+			rule, err := p.ParseRule()
+			if tc.hasError {
+				if err == nil {
+					t.Errorf("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if tc.check != nil {
+				tc.check(t, rule)
+			}
+		})
+	}
+}
+
+func TestParseExistentialCondition(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		hasError bool
+		check    func(t *testing.T, rule *model.Rule)
+	}{
+		{
+			name: "nested parens exists",
+			input: `(p test-exists-nested
+				(order ^id <oid>)
+				(exists (item ^order-id <oid> ^status pending))
+			-->
+				(write "Order has pending items" (crlf))
+			)`,
+			check: func(t *testing.T, rule *model.Rule) {
+				if len(rule.Conditions) != 2 {
+					t.Fatalf("expected 2 conditions, got %d", len(rule.Conditions))
+				}
+				ce := rule.Conditions[1]
+				if !ce.IsExistential {
+					t.Fatalf("expected IsExistential, got false")
+				}
+				if ce.Class != "item" {
+					t.Errorf("expected class item, got %s", ce.Class)
+				}
+				if len(ce.Tests) != 2 {
+					t.Fatalf("expected 2 attribute tests, got %d", len(ce.Tests))
+				}
+			},
+		},
+		{
+			name: "flat parens exists",
+			input: `(p test-exists-flat
+				(order ^id <oid>)
+				(exists item ^order-id <oid> ^status pending)
+			-->
+				(write "Order has pending items" (crlf))
+			)`,
+			check: func(t *testing.T, rule *model.Rule) {
+				ce := rule.Conditions[1]
+				if !ce.IsExistential || ce.Class != "item" {
+					t.Fatalf("expected IsExistential for item, got %v", ce)
+				}
+			},
+		},
+		{
+			name: "negated exists rejected",
+			input: `(p test-neg-exists
+				(order ^id <oid>)
+				-(exists (item ^order-id <oid>))
+			-->
+				(write "Bad" (crlf))
+			)`,
+			hasError: true,
+		},
+		{
+			name: "element variable on exists rejected",
+			input: `(p test-elem-var-exists
+				(order ^id <oid>)
+				<e> (exists (item ^order-id <oid>))
+			-->
+				(write "Bad" (crlf))
+			)`,
+			hasError: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			p, err := NewParser(tc.input)
+			if err != nil {
+				if tc.hasError {
+					return
+				}
+				t.Fatalf("unexpected NewParser error: %v", err)
+			}
+			rule, err := p.ParseRule()
+			if tc.hasError {
+				if err == nil {
+					t.Errorf("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if tc.check != nil {
+				tc.check(t, rule)
+			}
+		})
+	}
+}
+
+func TestParseAccumulateCondition(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		hasError bool
+		check    func(t *testing.T, rule *model.Rule)
+	}{
+		{
+			name: "nested sum accumulate",
+			input: `(p test-acc-sum
+				(order ^id <oid>)
+				(accumulate (order-line ^order-id <oid> ^price <p>) :sum <p> <total>)
+			-->
+				(write "Total:" <total> (crlf))
+			)`,
+			check: func(t *testing.T, rule *model.Rule) {
+				if len(rule.Conditions) != 2 {
+					t.Fatalf("expected 2 conditions, got %d", len(rule.Conditions))
+				}
+				ce := rule.Conditions[1]
+				if !ce.IsAccumulate {
+					t.Fatalf("expected IsAccumulate, got false")
+				}
+				if ce.Class != "order-line" {
+					t.Errorf("expected class order-line, got %s", ce.Class)
+				}
+				if ce.Accumulate == nil {
+					t.Fatalf("expected non-nil Accumulate spec")
+				}
+				if ce.Accumulate.Op != model.AccSum {
+					t.Errorf("expected AccSum, got %v", ce.Accumulate.Op)
+				}
+				if ce.Accumulate.ResultVar != "total" {
+					t.Errorf("expected ResultVar 'total', got %s", ce.Accumulate.ResultVar)
+				}
+				if ce.Accumulate.Target.VariableName() != "p" {
+					t.Errorf("expected target variable <p>, got %v", ce.Accumulate.Target)
+				}
+			},
+		},
+		{
+			name: "count accumulate single arg",
+			input: `(p test-acc-count
+				(accumulate (task ^status pending) :count <cnt>)
+			-->
+				(write "Pending tasks:" <cnt> (crlf))
+			)`,
+			check: func(t *testing.T, rule *model.Rule) {
+				ce := rule.Conditions[0]
+				if !ce.IsAccumulate || ce.Accumulate.Op != model.AccCount {
+					t.Fatalf("expected AccCount accumulate, got %v", ce)
+				}
+				if ce.Accumulate.ResultVar != "cnt" {
+					t.Errorf("expected ResultVar 'cnt', got %s", ce.Accumulate.ResultVar)
+				}
+			},
+		},
+		{
+			name: "acc keyword with avg and compute target",
+			input: `(p test-acc-compute
+				(acc (item ^qty <q> ^price <p>) :sum (compute <q> * <p>) <subtotal>)
+			-->
+				(write "Subtotal:" <subtotal> (crlf))
+			)`,
+			check: func(t *testing.T, rule *model.Rule) {
+				ce := rule.Conditions[0]
+				if !ce.IsAccumulate || ce.Accumulate.Op != model.AccSum {
+					t.Fatalf("expected AccSum accumulate, got %v", ce)
+				}
+				if ce.Accumulate.ResultVar != "subtotal" {
+					t.Errorf("expected ResultVar 'subtotal', got %s", ce.Accumulate.ResultVar)
+				}
+				if !ce.Accumulate.Target.IsCompute() {
+					t.Errorf("expected compute expression target, got %v", ce.Accumulate.Target)
+				}
+			},
+		},
+		{
+			name: "flat accumulate syntax",
+			input: `(p test-acc-flat
+				(accumulate student ^grade <g> :avg <g> <gpa>)
+			-->
+				(write "GPA:" <gpa> (crlf))
+			)`,
+			check: func(t *testing.T, rule *model.Rule) {
+				ce := rule.Conditions[0]
+				if !ce.IsAccumulate || ce.Accumulate.Op != model.AccAverage {
+					t.Fatalf("expected AccAverage accumulate, got %v", ce)
+				}
+				if ce.Accumulate.ResultVar != "gpa" {
+					t.Errorf("expected ResultVar 'gpa', got %s", ce.Accumulate.ResultVar)
+				}
+			},
+		},
+		{
+			name: "negated accumulate rejected",
+			input: `(p test-neg-acc
+				-(accumulate (order-line ^price <p>) :sum <p> <total>)
+			-->
+				(write "Bad" (crlf))
+			)`,
+			hasError: true,
+		},
+		{
+			name: "element variable on accumulate rejected",
+			input: `(p test-elem-var-acc
+				<e> (accumulate (order-line ^price <p>) :sum <p> <total>)
+			-->
+				(write "Bad" (crlf))
+			)`,
+			hasError: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			p, err := NewParser(tc.input)
+			if err != nil {
+				if tc.hasError {
+					return
+				}
+				t.Fatalf("unexpected NewParser error: %v", err)
+			}
+			rule, err := p.ParseRule()
+			if tc.hasError {
+				if err == nil {
+					t.Errorf("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if tc.check != nil {
+				tc.check(t, rule)
+			}
+		})
+	}
+}
+
+func TestParseNccCondition(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		hasError bool
+		check    func(t *testing.T, rule *model.Rule)
+	}{
+		{
+			name: "standard 2-condition NCC",
+			input: `(p test-ncc-2
+				(request ^id <rid> ^dept <d>)
+				-( (pending-approval ^request-id <rid>)
+				   (supervisor ^dept <d> ^active yes) )
+			-->
+				(write "Approved" (crlf))
+			)`,
+			check: func(t *testing.T, rule *model.Rule) {
+				if len(rule.Conditions) != 2 {
+					t.Fatalf("expected 2 conditions, got %d", len(rule.Conditions))
+				}
+				ce := rule.Conditions[1]
+				if !ce.IsNCC {
+					t.Fatalf("expected IsNCC to be true")
+				}
+				if len(ce.NCCConditions) != 2 {
+					t.Fatalf("expected 2 sub-conditions, got %d", len(ce.NCCConditions))
+				}
+				if ce.NCCConditions[0].Class != "pending-approval" {
+					t.Errorf("expected class pending-approval, got %s", ce.NCCConditions[0].Class)
+				}
+				if ce.NCCConditions[1].Class != "supervisor" {
+					t.Errorf("expected class supervisor, got %s", ce.NCCConditions[1].Class)
+				}
+			},
+		},
+		{
+			name: "3-condition NCC",
+			input: `(p test-ncc-3
+				-( (A ^x 1)
+				   (B ^y 2)
+				   (C ^z 3) )
+			-->
+				(write "No ABC combo" (crlf))
+			)`,
+			check: func(t *testing.T, rule *model.Rule) {
+				if len(rule.Conditions) != 1 {
+					t.Fatalf("expected 1 condition, got %d", len(rule.Conditions))
+				}
+				ce := rule.Conditions[0]
+				if !ce.IsNCC || len(ce.NCCConditions) != 3 {
+					t.Fatalf("expected 3-condition NCC, got %v", ce)
+				}
+			},
+		},
+		{
+			name: "ncc keyword syntax",
+			input: `(p test-ncc-keyword
+				(ncc (order ^id 1) (item ^status bad))
+			-->
+				(write "OK" (crlf))
+			)`,
+			check: func(t *testing.T, rule *model.Rule) {
+				ce := rule.Conditions[0]
+				if !ce.IsNCC || len(ce.NCCConditions) != 2 {
+					t.Fatalf("expected NCC condition with 2 sub-conditions, got %v", ce)
+				}
+			},
+		},
+		{
+			name: "element variable on NCC rejected",
+			input: `(p test-elem-var-ncc
+				<e> -( (A) (B) )
+			-->
+				(write "Bad" (crlf))
+			)`,
+			hasError: true,
+		},
+		{
+			name: "empty NCC rejected",
+			input: `(p test-empty-ncc
+				-( )
+			-->
+				(write "Bad" (crlf))
+			)`,
+			hasError: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			p, err := NewParser(tc.input)
+			if err != nil {
+				if tc.hasError {
+					return
+				}
+				t.Fatalf("unexpected NewParser error: %v", err)
+			}
+			rule, err := p.ParseRule()
+			if tc.hasError {
+				if err == nil {
+					t.Errorf("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if tc.check != nil {
+				tc.check(t, rule)
+			}
+		})
+	}
+}
+
 
 
 

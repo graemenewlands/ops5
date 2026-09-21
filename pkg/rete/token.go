@@ -28,10 +28,11 @@ func (t PropagationTag) String() string {
 
 // Token represents a chain of matching WMEs in the Beta network.
 type Token struct {
-	Parent   *Token
-	WME      *model.WME
-	Bindings map[string]model.Value
-	Tag      PropagationTag
+	Parent        *Token
+	WME           *model.WME
+	Bindings      map[string]model.Value
+	Tag           PropagationTag
+	ExtraTimetags []int64
 }
 
 // NewToken creates a child token with an added WME and merged variable bindings.
@@ -51,6 +52,27 @@ func NewToken(parent *Token, wme *model.WME, newBindings map[string]model.Value)
 		WME:      wme,
 		Bindings: bindings,
 		Tag:      TagAdd,
+	}
+}
+
+// NewAccumulateToken creates a child token representing an aggregated result with extra timetags.
+func NewAccumulateToken(parent *Token, newBindings map[string]model.Value, extraTimetags []int64) *Token {
+	bindings := make(map[string]model.Value)
+	if parent != nil {
+		for k, v := range parent.Bindings {
+			bindings[k] = v
+		}
+	}
+	for k, v := range newBindings {
+		bindings[k] = v
+	}
+
+	return &Token{
+		Parent:        parent,
+		WME:           nil,
+		Bindings:      bindings,
+		Tag:           TagAdd,
+		ExtraTimetags: extraTimetags,
 	}
 }
 
@@ -82,21 +104,34 @@ func (t *Token) WMEs() []*model.WME {
 	return list
 }
 
-// Timetags returns the list of timetags for all WMEs in this token.
+// Timetags returns the list of timetags for all WMEs and extra timetags in this token in condition element order.
 func (t *Token) Timetags() []int64 {
-	wmes := t.WMEs()
-	tags := make([]int64, len(wmes))
-	for i, w := range wmes {
-		tags[i] = w.Timetag
+	var chain []*Token
+	curr := t
+	for curr != nil {
+		chain = append(chain, curr)
+		curr = curr.Parent
+	}
+
+	var tags []int64
+	for i := len(chain) - 1; i >= 0; i-- {
+		tok := chain[i]
+		if tok.WME != nil {
+			tags = append(tags, tok.WME.Timetag)
+		}
+		if len(tok.ExtraTimetags) > 0 {
+			tags = append(tags, tok.ExtraTimetags...)
+		}
 	}
 	return tags
 }
 
 // String returns a readable representation of the token.
 func (t *Token) String() string {
+	tags := t.Timetags()
 	var parts []string
-	for _, w := range t.WMEs() {
-		parts = append(parts, fmt.Sprintf("%d", w.Timetag))
+	for _, tt := range tags {
+		parts = append(parts, fmt.Sprintf("%d", tt))
 	}
-	return fmt.Sprintf("Token[wmes=[%s]]", strings.Join(parts, ", "))
+	return fmt.Sprintf("Token[timetags=[%s]]", strings.Join(parts, ", "))
 }

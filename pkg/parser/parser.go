@@ -237,9 +237,53 @@ func (p *Parser) parseConditionElement() (*model.ConditionElement, error) {
 		return nil, err
 	}
 
+	if isNegated && (p.current.Type == TokenLParen || p.current.Type == TokenLBrace) {
+		if elemVar != "" {
+			return nil, fmt.Errorf("element variables cannot be bound to negated conjunction at line %d", p.current.Line)
+		}
+		return p.parseNccCondition(isBraced)
+	}
+
 	classTok, err := p.expect(TokenSymbol)
 	if err != nil {
 		return nil, fmt.Errorf("expected class name in condition element, got %v", err)
+	}
+
+	if strings.EqualFold(classTok.Value, "ncc") {
+		if elemVar != "" {
+			return nil, fmt.Errorf("element variables cannot be bound to negated conjunction at line %d", classTok.Line)
+		}
+		return p.parseNccCondition(isBraced)
+	}
+
+	if strings.EqualFold(classTok.Value, "test") {
+		if isNegated {
+			return nil, fmt.Errorf("test condition element cannot be negated at line %d", classTok.Line)
+		}
+		if elemVar != "" {
+			return nil, fmt.Errorf("element variables cannot be bound to test condition elements at line %d", classTok.Line)
+		}
+		return p.parseTestCondition(isBraced)
+	}
+
+	if strings.EqualFold(classTok.Value, "exists") {
+		if isNegated {
+			return nil, fmt.Errorf("exists condition element cannot be negated at line %d; use standard negated condition -(...) instead", classTok.Line)
+		}
+		if elemVar != "" {
+			return nil, fmt.Errorf("element variables cannot be bound to existential condition elements at line %d", classTok.Line)
+		}
+		return p.parseExistentialCondition(isBraced)
+	}
+
+	if strings.EqualFold(classTok.Value, "accumulate") || strings.EqualFold(classTok.Value, "acc") {
+		if isNegated {
+			return nil, fmt.Errorf("accumulate condition element cannot be negated at line %d", classTok.Line)
+		}
+		if elemVar != "" {
+			return nil, fmt.Errorf("element variables cannot be bound to accumulate condition elements at line %d", classTok.Line)
+		}
+		return p.parseAccumulateCondition(isBraced)
 	}
 
 	var ce *model.ConditionElement
@@ -386,6 +430,669 @@ func (p *Parser) parseConditionElement() (*model.ConditionElement, error) {
 	}
 
 	return ce, nil
+}
+
+func (p *Parser) parseTestCondition(isBraced bool) (*model.ConditionElement, error) {
+	var comparisons []model.EvalComparison
+
+	for p.current.Type != TokenRParen && p.current.Type != TokenEOF {
+		cmp, err := p.parseTestComparison()
+		if err != nil {
+			return nil, err
+		}
+		comparisons = append(comparisons, cmp)
+	}
+
+	if _, err := p.expect(TokenRParen); err != nil {
+		return nil, err
+	}
+
+	if isBraced {
+		if _, err := p.expect(TokenRBrace); err != nil {
+			return nil, fmt.Errorf("expected '}' closing condition element conjunction: %w", err)
+		}
+	}
+
+	if len(comparisons) == 0 {
+		return nil, fmt.Errorf("empty test condition element")
+	}
+
+	return model.NewTestCE(model.NewEvalTest(comparisons...)), nil
+}
+
+func (p *Parser) parseExistentialCondition(isBraced bool) (*model.ConditionElement, error) {
+	hasInnerParen := false
+	if p.current.Type == TokenLParen {
+		hasInnerParen = true
+		if err := p.advance(); err != nil {
+			return nil, err
+		}
+	}
+
+	classTok, err := p.expect(TokenSymbol)
+	if err != nil {
+		return nil, fmt.Errorf("expected class name in existential condition at line %d, got %v", p.current.Line, err)
+	}
+
+	ce := model.NewExistentialCE(classTok.Value)
+	schema := p.getSchema(classTok.Value)
+	var orderedAttrs []string
+	posIndex := 0
+
+	for p.current.Type != TokenRParen && p.current.Type != TokenEOF {
+		if p.isAttributeToken(p.current, schema) {
+			attrName := model.NormalizeAttribute(p.current.Value)
+			orderedAttrs = append(orderedAttrs, attrName)
+			if schema != nil {
+				schema.AddAttribute(attrName)
+			}
+			if err := p.advance(); err != nil {
+				return nil, err
+			}
+
+			for !p.isAttributeToken(p.current, schema) && p.current.Type != TokenRParen && p.current.Type != TokenEOF {
+				if p.current.Type == TokenLBrace {
+					if err := p.advance(); err != nil {
+						return nil, err
+					}
+					for p.current.Type != TokenRBrace && p.current.Type != TokenRParen && p.current.Type != TokenEOF {
+						op := model.OpEqual
+						if p.current.Type == TokenOperator {
+							op = model.ParseOperator(p.current.Value)
+							if err := p.advance(); err != nil {
+								return nil, err
+							}
+						}
+
+						val := TokenToValue(p.current)
+						if err := p.advance(); err != nil {
+							return nil, err
+						}
+
+						ce.AddTest(attrName, op, val)
+					}
+					if _, err := p.expect(TokenRBrace); err != nil {
+						return nil, fmt.Errorf("expected '}' closing attribute conjunction on ^%s: %w", attrName, err)
+					}
+					continue
+				}
+
+				op := model.OpEqual
+				if p.current.Type == TokenOperator {
+					op = model.ParseOperator(p.current.Value)
+					if err := p.advance(); err != nil {
+						return nil, err
+					}
+				}
+
+				val := TokenToValue(p.current)
+				if err := p.advance(); err != nil {
+					return nil, err
+				}
+
+				ce.AddTest(attrName, op, val)
+			}
+		} else {
+			attrName := fmt.Sprintf("attr%d", posIndex+1)
+			if schema != nil && posIndex < len(schema.Attributes) {
+				attrName = schema.Attributes[posIndex]
+			}
+			posIndex++
+
+			if p.current.Type == TokenLBrace {
+				if err := p.advance(); err != nil {
+					return nil, err
+				}
+				for p.current.Type != TokenRBrace && p.current.Type != TokenRParen && p.current.Type != TokenEOF {
+					op := model.OpEqual
+					if p.current.Type == TokenOperator {
+						op = model.ParseOperator(p.current.Value)
+						if err := p.advance(); err != nil {
+							return nil, err
+						}
+					}
+
+					val := TokenToValue(p.current)
+					if err := p.advance(); err != nil {
+						return nil, err
+					}
+
+					ce.AddTest(attrName, op, val)
+				}
+				if _, err := p.expect(TokenRBrace); err != nil {
+					return nil, fmt.Errorf("expected '}' closing positional conjunction on %s: %w", attrName, err)
+				}
+			} else {
+				op := model.OpEqual
+				if p.current.Type == TokenOperator {
+					op = model.ParseOperator(p.current.Value)
+					if err := p.advance(); err != nil {
+						return nil, err
+					}
+				}
+
+				val := TokenToValue(p.current)
+				if err := p.advance(); err != nil {
+					return nil, err
+				}
+
+				ce.AddTest(attrName, op, val)
+			}
+		}
+	}
+
+	if hasInnerParen {
+		if _, err := p.expect(TokenRParen); err != nil {
+			return nil, fmt.Errorf("expected ')' closing inner condition in exists: %w", err)
+		}
+	}
+
+	if _, err := p.expect(TokenRParen); err != nil {
+		return nil, fmt.Errorf("expected ')' closing (exists ...): %w", err)
+	}
+
+	if schema == nil && len(orderedAttrs) > 0 {
+		schema = model.NewClassSchema(classTok.Value, orderedAttrs)
+		p.RegisterSchema(schema)
+	}
+
+	if isBraced {
+		if _, err := p.expect(TokenRBrace); err != nil {
+			return nil, fmt.Errorf("expected '}' closing condition element conjunction: %w", err)
+		}
+	}
+
+	return ce, nil
+}
+
+func isAccumulateOpToken(tok Token) bool {
+	if tok.Type != TokenSymbol {
+		return false
+	}
+	v := strings.ToLower(strings.TrimPrefix(tok.Value, ":"))
+	switch v {
+	case "count", "sum", "avg", "average", "min", "max", "collect":
+		return true
+	}
+	return false
+}
+
+func (p *Parser) parseAccumulateCondition(isBraced bool) (*model.ConditionElement, error) {
+	hasInnerParen := false
+	if p.current.Type == TokenLParen {
+		hasInnerParen = true
+		if err := p.advance(); err != nil {
+			return nil, err
+		}
+	}
+
+	classTok, err := p.expect(TokenSymbol)
+	if err != nil {
+		return nil, fmt.Errorf("expected class name in accumulate condition at line %d, got %v", p.current.Line, err)
+	}
+
+	schema := p.getSchema(classTok.Value)
+	var orderedAttrs []string
+	posIndex := 0
+
+	tempCE := model.NewPositiveCE(classTok.Value)
+
+	for p.current.Type != TokenRParen && p.current.Type != TokenEOF {
+		if !hasInnerParen && isAccumulateOpToken(p.current) {
+			break
+		}
+
+		if p.isAttributeToken(p.current, schema) {
+			attrName := model.NormalizeAttribute(p.current.Value)
+			orderedAttrs = append(orderedAttrs, attrName)
+			if schema != nil {
+				schema.AddAttribute(attrName)
+			}
+			if err := p.advance(); err != nil {
+				return nil, err
+			}
+
+			for !p.isAttributeToken(p.current, schema) && p.current.Type != TokenRParen && p.current.Type != TokenEOF {
+				if !hasInnerParen && isAccumulateOpToken(p.current) {
+					break
+				}
+				if p.current.Type == TokenLBrace {
+					if err := p.advance(); err != nil {
+						return nil, err
+					}
+					for p.current.Type != TokenRBrace && p.current.Type != TokenRParen && p.current.Type != TokenEOF {
+						op := model.OpEqual
+						if p.current.Type == TokenOperator {
+							op = model.ParseOperator(p.current.Value)
+							if err := p.advance(); err != nil {
+								return nil, err
+							}
+						}
+						val := TokenToValue(p.current)
+						if err := p.advance(); err != nil {
+							return nil, err
+						}
+						tempCE.AddTest(attrName, op, val)
+					}
+					if _, err := p.expect(TokenRBrace); err != nil {
+						return nil, fmt.Errorf("expected '}' closing attribute conjunction on ^%s: %w", attrName, err)
+					}
+					continue
+				}
+
+				op := model.OpEqual
+				if p.current.Type == TokenOperator {
+					op = model.ParseOperator(p.current.Value)
+					if err := p.advance(); err != nil {
+						return nil, err
+					}
+				}
+				val := TokenToValue(p.current)
+				if err := p.advance(); err != nil {
+					return nil, err
+				}
+				tempCE.AddTest(attrName, op, val)
+			}
+		} else {
+			// Positional test
+			attrName := fmt.Sprintf("attr%d", posIndex+1)
+			if schema != nil && posIndex < len(schema.Attributes) {
+				attrName = schema.Attributes[posIndex]
+			}
+			posIndex++
+
+			if p.current.Type == TokenLBrace {
+				if err := p.advance(); err != nil {
+					return nil, err
+				}
+				for p.current.Type != TokenRBrace && p.current.Type != TokenRParen && p.current.Type != TokenEOF {
+					op := model.OpEqual
+					if p.current.Type == TokenOperator {
+						op = model.ParseOperator(p.current.Value)
+						if err := p.advance(); err != nil {
+							return nil, err
+						}
+					}
+					val := TokenToValue(p.current)
+					if err := p.advance(); err != nil {
+						return nil, err
+					}
+					tempCE.AddTest(attrName, op, val)
+				}
+				if _, err := p.expect(TokenRBrace); err != nil {
+					return nil, fmt.Errorf("expected '}' closing positional conjunction on %s: %w", attrName, err)
+				}
+			} else {
+				op := model.OpEqual
+				if p.current.Type == TokenOperator {
+					op = model.ParseOperator(p.current.Value)
+					if err := p.advance(); err != nil {
+						return nil, err
+					}
+				}
+				val := TokenToValue(p.current)
+				if err := p.advance(); err != nil {
+					return nil, err
+				}
+				tempCE.AddTest(attrName, op, val)
+			}
+		}
+	}
+
+	if hasInnerParen {
+		if _, err := p.expect(TokenRParen); err != nil {
+			return nil, fmt.Errorf("expected ')' closing inner condition in accumulate: %w", err)
+		}
+	}
+
+	if schema == nil && len(orderedAttrs) > 0 {
+		schema = model.NewClassSchema(classTok.Value, orderedAttrs)
+		p.RegisterSchema(schema)
+	}
+
+	// Parse accumulate operation: e.g. :sum, sum, :count, etc.
+	if !isAccumulateOpToken(p.current) {
+		return nil, fmt.Errorf("expected accumulate operation (e.g. :count, :sum, :min, :max, :avg, :collect) at line %d, got %s", p.current.Line, p.current.Value)
+	}
+
+	opName := p.current.Value
+	accOp, err := model.ParseAccumulateOp(opName)
+	if err != nil {
+		return nil, fmt.Errorf("invalid accumulate operation '%s' at line %d: %w", opName, p.current.Line, err)
+	}
+	if err := p.advance(); err != nil {
+		return nil, err
+	}
+
+	var target model.Value
+	var resultVar string
+
+	if accOp == model.AccCount {
+		firstTok := p.current
+		if err := p.advance(); err != nil {
+			return nil, err
+		}
+		if p.current.Type == TokenRParen {
+			// Single argument: result variable
+			resultVar = strings.TrimPrefix(strings.TrimSuffix(firstTok.Value, ">"), "<")
+		} else {
+			// Two arguments: target, result variable
+			target = TokenToValue(firstTok)
+			resTok := p.current
+			if err := p.advance(); err != nil {
+				return nil, err
+			}
+			resultVar = strings.TrimPrefix(strings.TrimSuffix(resTok.Value, ">"), "<")
+		}
+	} else {
+		// Target expression
+		if p.current.Type == TokenLParen {
+			cVal, err := p.parseCompute()
+			if err != nil {
+				return nil, fmt.Errorf("error parsing target compute expression in accumulate at line %d: %w", p.current.Line, err)
+			}
+			target = cVal
+		} else {
+			target = TokenToValue(p.current)
+			if err := p.advance(); err != nil {
+				return nil, err
+			}
+		}
+
+		// Result variable
+		resTok := p.current
+		if resTok.Type != TokenVariable && resTok.Type != TokenSymbol {
+			return nil, fmt.Errorf("expected result variable in accumulate at line %d, got %s", resTok.Line, resTok.Value)
+		}
+		resultVar = strings.TrimPrefix(strings.TrimSuffix(resTok.Value, ">"), "<")
+		if err := p.advance(); err != nil {
+			return nil, err
+		}
+	}
+
+	if _, err := p.expect(TokenRParen); err != nil {
+		return nil, fmt.Errorf("expected ')' closing (accumulate ...): %w", err)
+	}
+
+	if isBraced {
+		if _, err := p.expect(TokenRBrace); err != nil {
+			return nil, fmt.Errorf("expected '}' closing condition element conjunction: %w", err)
+		}
+	}
+
+	spec := &model.AccumulateSpec{
+		Op:        accOp,
+		Target:    target,
+		ResultVar: resultVar,
+	}
+
+	ce := model.NewAccumulateCE(classTok.Value, spec)
+	ce.Tests = tempCE.Tests
+
+	return ce, nil
+}
+
+func (p *Parser) parseNccCondition(isOuterBraced bool) (*model.ConditionElement, error) {
+	isInnerBraced := false
+	if p.current.Type == TokenLBrace {
+		isInnerBraced = true
+		if err := p.advance(); err != nil {
+			return nil, err
+		}
+	}
+
+	var subConditions []*model.ConditionElement
+
+	for p.current.Type != TokenRParen && p.current.Type != TokenRBrace && p.current.Type != TokenEOF {
+		subCE, err := p.parseConditionElement()
+		if err != nil {
+			return nil, fmt.Errorf("error parsing sub-condition in negated conjunction: %w", err)
+		}
+		subConditions = append(subConditions, subCE)
+	}
+
+	if isInnerBraced {
+		if _, err := p.expect(TokenRBrace); err != nil {
+			return nil, fmt.Errorf("expected '}' closing inner negated conjunction: %w", err)
+		}
+	}
+
+	if _, err := p.expect(TokenRParen); err != nil {
+		return nil, fmt.Errorf("expected ')' closing negated conjunction: %w", err)
+	}
+
+	if isOuterBraced {
+		if _, err := p.expect(TokenRBrace); err != nil {
+			return nil, fmt.Errorf("expected '}' closing outer conjunction: %w", err)
+		}
+	}
+
+	if len(subConditions) == 0 {
+		return nil, fmt.Errorf("empty negated conjunction at line %d", p.current.Line)
+	}
+
+	return model.NewNccCE(subConditions), nil
+}
+
+func (p *Parser) parseTestComparison() (model.EvalComparison, error) {
+	hasParen := false
+	if p.current.Type == TokenLParen {
+		hasParen = true
+		if err := p.advance(); err != nil {
+			return model.EvalComparison{}, err
+		}
+	}
+
+	// Check if this is a prefix operator like (> <x> <y>)
+	if op, ok := isRelationalOp(p.current); ok {
+		if err := p.advance(); err != nil {
+			return model.EvalComparison{}, err
+		}
+		left, err := p.parseTestOperand()
+		if err != nil {
+			return model.EvalComparison{}, err
+		}
+		right, err := p.parseTestOperand()
+		if err != nil {
+			return model.EvalComparison{}, err
+		}
+		if hasParen {
+			if _, err := p.expect(TokenRParen); err != nil {
+				return model.EvalComparison{}, err
+			}
+		}
+		return model.EvalComparison{Left: left, Op: op, Right: right, HasRight: true}, nil
+	}
+
+	// Check if this is (compute <x> + <y> > 100) where compute is directly inside without inner parens
+	if strings.EqualFold(p.current.Value, "compute") {
+		if err := p.advance(); err != nil {
+			return model.EvalComparison{}, err
+		}
+		var operands []model.Value
+		var operators []model.ComputeOp
+
+		for p.current.Type != TokenRParen && p.current.Type != TokenEOF {
+			// Check if at start and unary minus
+			if len(operands) == 0 {
+				if op, ok := isArithmeticOp(p.current); ok && op == model.ComputeOpSub {
+					operands = append(operands, model.NewInt(0))
+					operators = append(operators, model.ComputeOpSub)
+					if err := p.advance(); err != nil {
+						return model.EvalComparison{}, err
+					}
+					continue
+				}
+			}
+
+			// Check if we hit a relational operator
+			if relOp, ok := isRelationalOp(p.current); ok {
+				if len(operands) == 0 {
+					return model.EvalComparison{}, fmt.Errorf("unexpected relational operator %s in compute at line %d", p.current.Value, p.current.Line)
+				}
+				if err := p.advance(); err != nil {
+					return model.EvalComparison{}, err
+				}
+				right, err := p.parseTestOperand()
+				if err != nil {
+					return model.EvalComparison{}, err
+				}
+				if hasParen {
+					if _, err := p.expect(TokenRParen); err != nil {
+						return model.EvalComparison{}, err
+					}
+				}
+				return model.EvalComparison{
+					Left:     model.NewCompute(operands, operators),
+					Op:       relOp,
+					Right:    right,
+					HasRight: true,
+				}, nil
+			}
+
+			// Parse operand
+			if p.isRHSFunction() {
+				subFn, err := p.parseRHSFunction()
+				if err != nil {
+					return model.EvalComparison{}, err
+				}
+				operands = append(operands, subFn)
+			} else if p.current.Type == TokenNumber || p.current.Type == TokenVariable || p.current.Type == TokenSymbol || p.current.Type == TokenString {
+				operands = append(operands, TokenToValue(p.current))
+				if err := p.advance(); err != nil {
+					return model.EvalComparison{}, err
+				}
+			} else {
+				return model.EvalComparison{}, fmt.Errorf("unexpected token %s in compute at line %d", p.current.Value, p.current.Line)
+			}
+
+			// Check if next is a relational op or rparen
+			if relOp, ok := isRelationalOp(p.current); ok {
+				if err := p.advance(); err != nil {
+					return model.EvalComparison{}, err
+				}
+				right, err := p.parseTestOperand()
+				if err != nil {
+					return model.EvalComparison{}, err
+				}
+				if hasParen {
+					if _, err := p.expect(TokenRParen); err != nil {
+						return model.EvalComparison{}, err
+					}
+				}
+				return model.EvalComparison{
+					Left:     model.NewCompute(operands, operators),
+					Op:       relOp,
+					Right:    right,
+					HasRight: true,
+				}, nil
+			}
+
+			if p.current.Type == TokenRParen || p.current.Type == TokenEOF {
+				break
+			}
+
+			// Must be an arithmetic operator (+, -, *, /, etc.)
+			op, ok := isArithmeticOp(p.current)
+			if !ok {
+				return model.EvalComparison{}, fmt.Errorf("expected arithmetic operator in compute at line %d, got %s", p.current.Line, p.current.Value)
+			}
+			operators = append(operators, op)
+			if err := p.advance(); err != nil {
+				return model.EvalComparison{}, err
+			}
+		}
+
+		if hasParen {
+			if _, err := p.expect(TokenRParen); err != nil {
+				return model.EvalComparison{}, err
+			}
+		}
+		// Single compute expression evaluated for truthiness
+		return model.EvalComparison{Left: model.NewCompute(operands, operators), HasRight: false}, nil
+	}
+
+	// Normal infix: <left> <op> <right> or unary <left>
+	left, err := p.parseTestOperand()
+	if err != nil {
+		return model.EvalComparison{}, err
+	}
+
+	if hasParen && p.current.Type == TokenRParen {
+		// Unary truthiness test: (<left>)
+		if err := p.advance(); err != nil {
+			return model.EvalComparison{}, err
+		}
+		return model.EvalComparison{Left: left, HasRight: false}, nil
+	}
+
+	// Must have relational operator
+	relOp, ok := isRelationalOp(p.current)
+	if !ok {
+		if !hasParen && (p.current.Type == TokenRParen || p.current.Type == TokenEOF) {
+			return model.EvalComparison{Left: left, HasRight: false}, nil
+		}
+		return model.EvalComparison{}, fmt.Errorf("expected relational operator in test comparison at line %d, got %s", p.current.Line, p.current.Value)
+	}
+	if err := p.advance(); err != nil {
+		return model.EvalComparison{}, err
+	}
+
+	right, err := p.parseTestOperand()
+	if err != nil {
+		return model.EvalComparison{}, err
+	}
+
+	if hasParen {
+		if _, err := p.expect(TokenRParen); err != nil {
+			return model.EvalComparison{}, err
+		}
+	}
+
+	return model.EvalComparison{Left: left, Op: relOp, Right: right, HasRight: true}, nil
+}
+
+func (p *Parser) parseTestOperand() (model.Value, error) {
+	if p.current.Type == TokenLParen {
+		if strings.EqualFold(p.peek.Value, "compute") {
+			return p.parseCompute()
+		}
+		// Sub-expression in parens: could be (<val>) or ((compute ...))
+		if err := p.advance(); err != nil {
+			return model.NewInt(0), err
+		}
+		val, err := p.parseTestOperand()
+		if err != nil {
+			return model.NewInt(0), err
+		}
+		if _, err := p.expect(TokenRParen); err != nil {
+			return model.NewInt(0), err
+		}
+		return val, nil
+	}
+
+	if p.current.Type == TokenNumber || p.current.Type == TokenVariable || p.current.Type == TokenSymbol || p.current.Type == TokenString {
+		val := TokenToValue(p.current)
+		if err := p.advance(); err != nil {
+			return model.NewInt(0), err
+		}
+		return val, nil
+	}
+
+	return model.NewInt(0), fmt.Errorf("expected operand (number, variable, symbol, string, or compute) in test at line %d, got %s", p.current.Line, p.current.Value)
+}
+
+func isRelationalOp(tok Token) (model.Operator, bool) {
+	if tok.Type == TokenOperator {
+		return model.ParseOperator(tok.Value), true
+	}
+	if tok.Type == TokenSymbol {
+		switch tok.Value {
+		case "=", "<>", "!=", "<", "<=", ">", ">=":
+			return model.ParseOperator(tok.Value), true
+		}
+	}
+	return model.OpEqual, false
 }
 
 func isArithmeticOp(tok Token) (model.ComputeOp, bool) {
