@@ -71,8 +71,14 @@ func LexCompare(a, b *Activation) int {
 	}
 
 	// 1. Compare recency vectors
-	va := sortedDescending(a.Timetags)
-	vb := sortedDescending(b.Timetags)
+	va := a.sortedTimetags
+	if len(va) == 0 && len(a.Timetags) > 0 {
+		va = sortedDescending(a.Timetags)
+	}
+	vb := b.sortedTimetags
+	if len(vb) == 0 && len(b.Timetags) > 0 {
+		vb = sortedDescending(b.Timetags)
+	}
 	if cmp := CompareVectors(va, vb); cmp != 0 {
 		return cmp
 	}
@@ -87,17 +93,19 @@ func LexCompare(a, b *Activation) int {
 	}
 
 	// 3. Rule index tie-breaker (lower index = declared earlier = higher dominance)
-	if a.Rule.Index < b.Rule.Index {
-		return 1
-	} else if a.Rule.Index > b.Rule.Index {
-		return -1
-	}
+	if a.Rule != nil && b.Rule != nil {
+		if a.Rule.Index < b.Rule.Index {
+			return 1
+		} else if a.Rule.Index > b.Rule.Index {
+			return -1
+		}
 
-	// 4. Alphabetical tie-breaker if index is equal
-	if a.Rule.Name < b.Rule.Name {
-		return 1
-	} else if a.Rule.Name > b.Rule.Name {
-		return -1
+		// 4. Alphabetical tie-breaker if index is equal
+		if a.Rule.Name < b.Rule.Name {
+			return 1
+		} else if a.Rule.Name > b.Rule.Name {
+			return -1
+		}
 	}
 
 	return 0
@@ -133,11 +141,12 @@ func MeaCompare(a, b *Activation) int {
 	}
 
 	// 2. Compare remaining timetags sorted descending
-	var remA, remB []int64
-	if len(a.Timetags) > 1 {
+	remA := a.remainingMEA
+	if len(remA) == 0 && len(a.Timetags) > 1 {
 		remA = sortedDescending(a.Timetags[1:])
 	}
-	if len(b.Timetags) > 1 {
+	remB := b.remainingMEA
+	if len(remB) == 0 && len(b.Timetags) > 1 {
 		remB = sortedDescending(b.Timetags[1:])
 	}
 

@@ -92,7 +92,7 @@ flowchart TD
     end
 
     subgraph Agenda["Conflict Set (Agenda)"]
-        CS["Conflict Set Map"]
+        CS["Indexed Binary Heap Agenda"]
         Refraction["Refraction Table (Fired Keys)"]
         Strategy["Strategy Evaluator (LEX / MEA)"]
     end
@@ -1134,12 +1134,12 @@ Current library performance measured on a dedicated test machine (12th Gen Intel
 
 | Benchmark | Cycles | WMEs Asserted | Time to Quiescence | Throughput (Cycles/s) | WME Assertions/s | Total Heap Alloc |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Manners-16** | 2,009 | 2,744 | **857 ms** | 2,344.3 | 3,201.9 | ~530 MB |
-| **Manners-32** | 3,914 | 4,649 | **1.59 s** | 2,461.2 | 2,923.4 | ~1.02 GB |
-| **Manners-64** | 19,381 | 21,152 | **17.78 s** | 1,090.0 | 1,189.6 | ~10.7 GB |
-| **Waltz-12** | 608 | 1,238 | **64 ms** | 9,543.4 | 19,432.0 | ~35 MB |
-| **Waltz-50** | 2,268 | 4,654 | **659 ms** | 3,444.0 | 7,067.1 | ~423 MB |
-| **Zebra-5** | 7 | 19 | **0.16 ms** | 43,171.8 | 117,180.5 | ~95 KB |
+| **Manners-16** | 2,009 | 2,744 | **855 ms** | 2,349.5 | 3,209.1 | ~525 MB |
+| **Manners-32** | 3,914 | 4,649 | **1.54 s** | 2,538.6 | 3,015.3 | ~1.00 GB |
+| **Manners-64** | 19,381 | 21,152 | **16.42 s** | 1,180.6 | 1,288.4 | ~10.5 GB |
+| **Waltz-12** | 608 | 1,238 | **18 ms** | 33,944.0 | 69,116.2 | ~8.3 MB |
+| **Waltz-50** | 2,268 | 4,654 | **69 ms** | 33,077.3 | 67,875.6 | ~32.2 MB |
+| **Zebra-5** | 7 | 19 | **0.16 ms** | 35,862.3 | 97,340.6 | ~94 KB |
 
 
 ---

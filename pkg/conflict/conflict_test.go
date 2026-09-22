@@ -205,3 +205,79 @@ func TestSalienceDominance(t *testing.T) {
 	}
 }
 
+func TestBinaryHeapAgenda(t *testing.T) {
+	cs := NewSet()
+
+	rules := make([]*model.Rule, 5)
+	for i := 0; i < 5; i++ {
+		rules[i] = model.NewRule(string(rune('A' + i)))
+		rules[i].Index = i + 1
+		rules[i].AddCondition(model.NewPositiveCE("cond"))
+	}
+
+	// Add in non-sorted order with timetags:
+	// Rule A: [10]
+	// Rule B: [50]
+	// Rule C: [30]
+	// Rule D: [100]
+	// Rule E: [20]
+	cs.OnActivationAdd(rules[0], makeDummyToken([]int64{10}))
+	cs.OnActivationAdd(rules[1], makeDummyToken([]int64{50}))
+	cs.OnActivationAdd(rules[2], makeDummyToken([]int64{30}))
+	cs.OnActivationAdd(rules[3], makeDummyToken([]int64{100}))
+	cs.OnActivationAdd(rules[4], makeDummyToken([]int64{20}))
+
+	if cs.Count() != 5 {
+		t.Fatalf("expected 5 activations, got %d", cs.Count())
+	}
+
+	// Dominant should be Rule D [100]
+	dom, ok := cs.SelectDominant()
+	if !ok || dom.Rule.Name != "D" {
+		t.Fatalf("expected dominant 'D', got %v", dom)
+	}
+
+	// Fire D -> next dominant should be B [50]
+	cs.MarkFired(dom)
+	dom, ok = cs.SelectDominant()
+	if !ok || dom.Rule.Name != "B" {
+		t.Fatalf("expected dominant 'B', got %v", dom)
+	}
+
+	// Remove C [30] (from middle of heap)
+	cs.OnActivationRemove(rules[2], makeDummyToken([]int64{30}))
+	if cs.Count() != 3 {
+		t.Fatalf("expected 3 activations, got %d", cs.Count())
+	}
+
+	// Dominant should still be B [50]
+	dom, ok = cs.SelectDominant()
+	if !ok || dom.Rule.Name != "B" {
+		t.Fatalf("expected dominant 'B', got %v", dom)
+	}
+
+	// Fire B -> next should be E [20]
+	cs.MarkFired(dom)
+	dom, ok = cs.SelectDominant()
+	if !ok || dom.Rule.Name != "E" {
+		t.Fatalf("expected dominant 'E', got %v", dom)
+	}
+
+	// Fire E -> next should be A [10]
+	cs.MarkFired(dom)
+	dom, ok = cs.SelectDominant()
+	if !ok || dom.Rule.Name != "A" {
+		t.Fatalf("expected dominant 'A', got %v", dom)
+	}
+
+	// Fire A -> should be empty
+	cs.MarkFired(dom)
+	dom, ok = cs.SelectDominant()
+	if ok || dom != nil {
+		t.Fatalf("expected empty agenda, got %v", dom)
+	}
+	if cs.Count() != 0 {
+		t.Fatalf("expected count 0, got %d", cs.Count())
+	}
+}
+

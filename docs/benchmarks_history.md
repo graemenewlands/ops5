@@ -43,16 +43,17 @@ go test -bench=. -benchtime=1x -run=^$ ./benchmarks
 
 | Version / Tag | Release Date | Key Optimizations / Features | Manners-16 | Manners-32 | Manners-64 | Waltz-12 | Waltz-50 | Zebra-5 |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **`v0.2.0`** | 2026-09-22 | Token signature caching, zero-copy binding sharing, single-key RightActivation fast path | **857 ms** (-51%) | **1.59 s** (-51%) | **17.78 s** (-48%) | **64 ms** (-2%) | **659 ms** (-1%) | **0.16 ms** (-16%) |
+| **`v0.2.0`** | 2026-09-22 | Token signature caching, binding sharing, binary heap agenda (O(1) dominant dispatch) | **855 ms** (-51%) | **1.54 s** (-52%) | **16.42 s** (-52%) | **18 ms** (-72%) | **69 ms** (-90%) | **0.16 ms** (-16%) |
 | **[`v0.1.0`](#v010---2026-09-22-baseline)** | 2026-09-22 | Dual-sided join hashing, Structural beta sharing, Left/Right node unlinking, Rule salience | 1.74 s | 3.23 s | 34.20 s | 65 ms | 662 ms | 0.19 ms |
 
 ---
 
 ## Version Release Logs
 
-### `v0.2.0` - 2026-09-22 (Token Signature Caching & Binding Sharing)
+### `v0.2.0` - 2026-09-22 (Token Signature Caching, Binding Sharing & Binary Heap Agenda)
 
 * **Key Optimizations**:
+  - **Binary Max-Heap Agenda (`conflict.Set`)**: Transformed conflict set agenda into a container/heap binary max-heap with an auxiliary index map. Dominant instantiation selection is now $O(1)$ and activation addition/refraction/removal is $O(\log K)$, producing a **9.6x speedup on Waltz-50** (659ms -> 69ms) and saving hundreds of megabytes of transient map allocations.
   - **Token Signature Caching**: Precomputed `sig` string at token creation via incremental string derivation, eliminating hundreds of thousands of `fmt.Sprintf` calls, slice allocations, and recursive `Timetags()` walks in beta memory indexing and duplicate detection.
   - **Zero-Copy Binding Sharing**: When a condition element introduces no new variable bindings, child tokens share the parent's binding map directly instead of copying, saving thousands of map allocations.
   - **Single-Key RightActivation Fast Path**: Bypasses allocating a `seen map[string]bool` when an incoming WME matches a single join key (the common case).
@@ -64,23 +65,23 @@ go test -bench=. -benchtime=1x -run=^$ ./benchmarks
 ========================================================================================================================
 Benchmark    |   Cycles | WMEs Assert |   Quiescence |     Cycles/sec |       WMEs/sec |   Heap Alloc
 ------------------------------------------------------------------------------------------------------------------------
-Manners-16   |     2009 |       2744 |        857ms |         2344.3 |         3201.9 |  543049.16 KB (~530 MB)
-Manners-32   |     3914 |       4649 |        1.59s |         2461.2 |         2923.4 | 1073987.34 KB (~1.02 GB)
-Manners-64   |    19381 |      21152 |      17.781s |         1090.0 |         1189.6 | 11206724.62 KB (~10.7 GB)
-Waltz-12     |      608 |       1238 |         64ms |         9543.4 |        19432.0 |   35563.23 KB (~34.7 MB)
-Waltz-50     |     2268 |       4654 |        659ms |         3444.0 |         7067.1 |  433674.98 KB (~423 MB)
-Zebra-5      |        7 |         19 |       0.16ms |        43171.8 |       117180.5 |      94.70 KB (~95 KB)
+Manners-16   |     2009 |       2744 |        855ms |         2349.5 |         3209.1 |  537410.03 KB (~525 MB)
+Manners-32   |     3914 |       4649 |       1.542s |         2538.6 |         3015.3 | 1049629.58 KB (~1.00 GB)
+Manners-64   |    19381 |      21152 |      16.417s |         1180.6 |         1288.4 | 10960309.74 KB (~10.5 GB)
+Waltz-12     |      608 |       1238 |         18ms |        33944.0 |        69116.2 |    8466.45 KB (~8.3 MB)
+Waltz-50     |     2268 |       4654 |         69ms |        33077.3 |        67875.6 |   33007.95 KB (~32.2 MB)
+Zebra-5      |        7 |         19 |       0.16ms |        35862.3 |        97340.6 |      94.10 KB (~94 KB)
 ========================================================================================================================
 ```
 
 #### Go Microbenchmark Metrics (`go test -bench`)
 
 ```
-BenchmarkSuiteManners16-16    1     811539191 ns/op    2476 cycles/s    3381 wmes/s
-BenchmarkSuiteManners32-16    1    1616702229 ns/op    2421 cycles/s    2876 wmes/s
-BenchmarkSuiteWaltz12-16      1      54773614 ns/op   11101 cycles/s   22604 wmes/s
-BenchmarkSuiteWaltz50-16      1     686426072 ns/op    3304 cycles/s    6780 wmes/s
-BenchmarkSuiteZebra-16        1        150860 ns/op   47120 cycles/s  127896 wmes/s
+BenchmarkSuiteManners16-16    1     835280698 ns/op    2405 cycles/s    3285 wmes/s
+BenchmarkSuiteManners32-16    1    1554918841 ns/op    2517 cycles/s    2990 wmes/s
+BenchmarkSuiteWaltz12-16      1      23850596 ns/op   25496 cycles/s   51914 wmes/s
+BenchmarkSuiteWaltz50-16      1      74783025 ns/op   30329 cycles/s   62236 wmes/s
+BenchmarkSuiteZebra-16        1        177934 ns/op   39826 cycles/s  108100 wmes/s
 ```
 
 ---
