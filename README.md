@@ -58,6 +58,7 @@ This engine provides a complete, modern execution environment for rule-based sys
    - [Package Breakdown](#package-breakdown)
    - [Extensibility & Custom Actions](#extensibility--custom-actions)
 8. [Canonical Benchmark Suite](#canonical-benchmark-suite)
+   - [Engine Comparison & Architectural Evaluation](docs/engine_comparison.md)
    - [Benchmark Problems (Manners, Waltz, Zebra)](#benchmark-problems-manners-waltz-zebra)
    - [Running the Benchmarks](#running-the-benchmarks)
    - [Benchmark Results & Performance Profile](#benchmark-results--performance-profile)
@@ -1086,7 +1087,7 @@ eng.AddRule(rule)
 
 ## Canonical Benchmark Suite
 
-The engine includes classic academic production-system benchmark suites located in [`benchmarks/`](benchmarks/):
+The engine includes classic academic production-system benchmark suites located in [`benchmarks/`](benchmarks/). For an in-depth comparative evaluation against other rule engines (CMU OPS5, NASA CLIPS, Apache Drools, and modern Go rule libraries), see the **[Engine Comparison & Architectural Evaluation Reference](docs/engine_comparison.md)**.
 
 ### Benchmark Problems (Manners, Waltz, Zebra)
 
