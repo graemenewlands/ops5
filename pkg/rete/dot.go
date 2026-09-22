@@ -18,15 +18,17 @@ type dotWriter struct {
 	w            io.Writer
 	alphaMemKeys map[*AlphaMemory]string
 	alphaMemIDs  map[*AlphaMemory]string
+	switchNodeIDs map[*AlphaSwitchNode]string
 	testNodeIDs  map[*ConstantTestNode]string
 	typeNodeIDs  map[*TypeNode]string
 	betaMemIDs   map[*BetaMemory]string
 	betaNodeIDs  map[LeftActivatable]string
 	terminalIDs  map[*TerminalNode]string
 
-	nextAlphaMemID int
-	nextTestNodeID int
-	nextBetaNodeID int
+	nextAlphaMemID   int
+	nextSwitchNodeID int
+	nextTestNodeID   int
+	nextBetaNodeID   int
 
 	alphaNodes []string
 	alphaEdges []string
@@ -37,14 +39,15 @@ type dotWriter struct {
 
 func newDOTWriter(w io.Writer) *dotWriter {
 	return &dotWriter{
-		w:            w,
-		alphaMemKeys: make(map[*AlphaMemory]string),
-		alphaMemIDs:  make(map[*AlphaMemory]string),
-		testNodeIDs:  make(map[*ConstantTestNode]string),
-		typeNodeIDs:  make(map[*TypeNode]string),
-		betaMemIDs:   make(map[*BetaMemory]string),
-		betaNodeIDs:  make(map[LeftActivatable]string),
-		terminalIDs:  make(map[*TerminalNode]string),
+		w:             w,
+		alphaMemKeys:  make(map[*AlphaMemory]string),
+		alphaMemIDs:   make(map[*AlphaMemory]string),
+		switchNodeIDs: make(map[*AlphaSwitchNode]string),
+		testNodeIDs:   make(map[*ConstantTestNode]string),
+		typeNodeIDs:   make(map[*TypeNode]string),
+		betaMemIDs:    make(map[*BetaMemory]string),
+		betaNodeIDs:   make(map[LeftActivatable]string),
+		terminalIDs:   make(map[*TerminalNode]string),
 	}
 }
 
@@ -74,6 +77,16 @@ func (d *dotWriter) getOrCreateAlphaMemID(am *AlphaMemory) string {
 	id := fmt.Sprintf("am_%d", d.nextAlphaMemID)
 	d.nextAlphaMemID++
 	d.alphaMemIDs[am] = id
+	return id
+}
+
+func (d *dotWriter) getOrCreateSwitchNodeID(asn *AlphaSwitchNode) string {
+	if id, ok := d.switchNodeIDs[asn]; ok {
+		return id
+	}
+	id := fmt.Sprintf("asn_%d", d.nextSwitchNodeID)
+	d.nextSwitchNodeID++
+	d.switchNodeIDs[asn] = id
 	return id
 }
 
@@ -192,16 +205,47 @@ func formatTerminalNode(tn *TerminalNode) string {
 	return fmt.Sprintf("Rule: %s\nActivations: %d", tn.rule.Name, count)
 }
 
-func (d *dotWriter) traverseAlphaSuccessors(parentID string, succs []AlphaNode) {
+func (d *dotWriter) traverseAlphaSuccessors(parentID string, succs []AlphaNode, edgeLabel string) {
 	for _, succ := range succs {
 		switch node := succ.(type) {
+		case *AlphaSwitchNode:
+			id := d.getOrCreateSwitchNodeID(node)
+			label := fmt.Sprintf("Switch: ^%s", node.Attribute)
+			if node.VectorIndex >= 0 {
+				label = fmt.Sprintf("Switch: ^%s[%d]", node.Attribute, node.VectorIndex)
+			}
+			d.alphaNodes = append(d.alphaNodes, fmt.Sprintf("    %s [label=\"%s\", shape=hexagon, style=\"filled,rounded\", fillcolor=\"#ede7f6\", color=\"#512da8\", fontcolor=\"#311b92\"];",
+				id, escapeDOT(label)))
+			if edgeLabel != "" {
+				d.alphaEdges = append(d.alphaEdges, fmt.Sprintf("    %s -> %s [label=\"%s\", color=\"#512da8\", fontcolor=\"#512da8\"];", parentID, id, escapeDOT(edgeLabel)))
+			} else {
+				d.alphaEdges = append(d.alphaEdges, fmt.Sprintf("    %s -> %s [color=\"#512da8\"];", parentID, id))
+			}
+
+			node.mu.RLock()
+			var keys []string
+			for k := range node.cases {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			for _, k := range keys {
+				branchSuccs := append([]AlphaNode(nil), node.cases[k]...)
+				d.traverseAlphaSuccessors(id, branchSuccs, k)
+			}
+			node.mu.RUnlock()
+
 		case *ConstantTestNode:
 			id := d.getOrCreateTestNodeID(node)
 			label := formatConstantTest(node)
 			d.alphaNodes = append(d.alphaNodes, fmt.Sprintf("    %s [label=\"%s\", shape=box, style=\"filled,rounded\", fillcolor=\"#e1f5fe\", color=\"#0288d1\", fontcolor=\"#014361\"];",
 				id, escapeDOT(label)))
-			d.alphaEdges = append(d.alphaEdges, fmt.Sprintf("    %s -> %s [color=\"#0288d1\"];", parentID, id))
-			d.traverseAlphaSuccessors(id, node.successors)
+			if edgeLabel != "" {
+				d.alphaEdges = append(d.alphaEdges, fmt.Sprintf("    %s -> %s [label=\"%s\", color=\"#0288d1\", fontcolor=\"#0288d1\"];", parentID, id, escapeDOT(edgeLabel)))
+			} else {
+				d.alphaEdges = append(d.alphaEdges, fmt.Sprintf("    %s -> %s [color=\"#0288d1\"];", parentID, id))
+			}
+			d.traverseAlphaSuccessors(id, node.successors, "")
+
 		case *AlphaMemory:
 			id := d.getOrCreateAlphaMemID(node)
 			key := d.alphaMemKeys[node]
@@ -213,7 +257,11 @@ func (d *dotWriter) traverseAlphaSuccessors(parentID string, succs []AlphaNode) 
 			}
 			d.alphaNodes = append(d.alphaNodes, fmt.Sprintf("    %s [label=\"%s\", shape=box, style=\"filled,rounded\", fillcolor=\"#e8f0fe\", color=\"#4285f4\", fontcolor=\"#174ea6\"];",
 				id, escapeDOT(label)))
-			d.alphaEdges = append(d.alphaEdges, fmt.Sprintf("    %s -> %s [color=\"#4285f4\"];", parentID, id))
+			if edgeLabel != "" {
+				d.alphaEdges = append(d.alphaEdges, fmt.Sprintf("    %s -> %s [label=\"%s\", color=\"#4285f4\", fontcolor=\"#4285f4\"];", parentID, id, escapeDOT(edgeLabel)))
+			} else {
+				d.alphaEdges = append(d.alphaEdges, fmt.Sprintf("    %s -> %s [color=\"#4285f4\"];", parentID, id))
+			}
 		}
 	}
 }
@@ -244,7 +292,7 @@ func exportNetworkDOT(net *Network, w io.Writer) error {
 		d.alphaNodes = append(d.alphaNodes, fmt.Sprintf("    %s [label=\"Type: %s\", shape=octagon, style=filled, fillcolor=\"#d9e8fb\", color=\"#2a62a8\", fontcolor=\"#0d2346\"];",
 			typeID, escapeDOT(c)))
 		d.alphaEdges = append(d.alphaEdges, fmt.Sprintf("    alpha_root -> %s [color=\"#2a62a8\"];", typeID))
-		d.traverseAlphaSuccessors(typeID, tn.successors)
+		d.traverseAlphaSuccessors(typeID, tn.successors, "")
 	}
 
 	// -------------------------------------------------------------

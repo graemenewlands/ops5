@@ -75,12 +75,23 @@ func (net *Network) OnRetract(wme *model.WME) {
 	net.alphaRoot.Activation(wme, TagRemove)
 }
 
-// getAlphaKey produces a canonical key for sharing AlphaMemory across equivalent conditions.
-func getAlphaKey(ce *model.ConditionElement) string {
-	key := ce.Class
+type alphaTestSpec struct {
+	Attribute   string
+	VectorIndex int
+	IsEquality  bool
+	Op          model.Operator
+	Value       model.Value
+	Disjunction []model.TestConstraint
+}
+
+func extractConstantTests(ce *model.ConditionElement) (eqTests []alphaTestSpec, nonEqTests []alphaTestSpec) {
 	for _, at := range ce.Tests {
 		isMulti := len(at.Constraints) > 1
 		for idx, c := range at.Constraints {
+			vecIdx := -1
+			if isMulti {
+				vecIdx = idx
+			}
 			if len(c.Disjunction) > 0 {
 				hasVar := false
 				for _, dj := range c.Disjunction {
@@ -90,26 +101,96 @@ func getAlphaKey(ce *model.ConditionElement) string {
 					}
 				}
 				if !hasVar {
-					var parts []string
-					for _, dj := range c.Disjunction {
-						parts = append(parts, fmt.Sprintf("%s%s", dj.Op.String(), dj.Value.String()))
-					}
-					if isMulti {
-						key += fmt.Sprintf("|%s[%d]<<%s>>", at.Attribute, idx, strings.Join(parts, ","))
-					} else {
-						key += fmt.Sprintf("|%s<<%s>>", at.Attribute, strings.Join(parts, ","))
-					}
+					nonEqTests = append(nonEqTests, alphaTestSpec{
+						Attribute:   model.NormalizeAttribute(at.Attribute),
+						VectorIndex: vecIdx,
+						IsEquality:  false,
+						Disjunction: c.Disjunction,
+					})
 				}
 			} else if !c.Value.IsVariable() {
-				if isMulti {
-					key += fmt.Sprintf("|%s[%d]%s%s", at.Attribute, idx, c.Op.String(), c.Value.String())
+				normAttr := model.NormalizeAttribute(at.Attribute)
+				if c.Op == model.OpEqual {
+					eqTests = append(eqTests, alphaTestSpec{
+						Attribute:   normAttr,
+						VectorIndex: vecIdx,
+						IsEquality:  true,
+						Op:          c.Op,
+						Value:       c.Value,
+					})
 				} else {
-					key += fmt.Sprintf("|%s%s%s", at.Attribute, c.Op.String(), c.Value.String())
+					nonEqTests = append(nonEqTests, alphaTestSpec{
+						Attribute:   normAttr,
+						VectorIndex: vecIdx,
+						IsEquality:  false,
+						Op:          c.Op,
+						Value:       c.Value,
+					})
 				}
 			}
 		}
 	}
-	return key
+
+	// Sort eqTests canonically: Attribute asc, VectorIndex asc, Value string asc
+	sort.Slice(eqTests, func(i, j int) bool {
+		if eqTests[i].Attribute != eqTests[j].Attribute {
+			return eqTests[i].Attribute < eqTests[j].Attribute
+		}
+		if eqTests[i].VectorIndex != eqTests[j].VectorIndex {
+			return eqTests[i].VectorIndex < eqTests[j].VectorIndex
+		}
+		return eqTests[i].Value.String() < eqTests[j].Value.String()
+	})
+
+	// Sort nonEqTests canonically: Attribute asc, VectorIndex asc, Op asc, Value string asc
+	sort.Slice(nonEqTests, func(i, j int) bool {
+		if nonEqTests[i].Attribute != nonEqTests[j].Attribute {
+			return nonEqTests[i].Attribute < nonEqTests[j].Attribute
+		}
+		if nonEqTests[i].VectorIndex != nonEqTests[j].VectorIndex {
+			return nonEqTests[i].VectorIndex < nonEqTests[j].VectorIndex
+		}
+		if nonEqTests[i].Op != nonEqTests[j].Op {
+			return nonEqTests[i].Op < nonEqTests[j].Op
+		}
+		return nonEqTests[i].Value.String() < nonEqTests[j].Value.String()
+	})
+
+	return eqTests, nonEqTests
+}
+
+// getAlphaKey produces a canonical key for sharing AlphaMemory across equivalent conditions.
+func getAlphaKey(ce *model.ConditionElement) string {
+	eqTests, nonEqTests := extractConstantTests(ce)
+	var sb strings.Builder
+	sb.WriteString(ce.Class)
+	for _, eq := range eqTests {
+		if eq.VectorIndex >= 0 {
+			sb.WriteString(fmt.Sprintf("|%s[%d]=%s", eq.Attribute, eq.VectorIndex, eq.Value.String()))
+		} else {
+			sb.WriteString(fmt.Sprintf("|%s=%s", eq.Attribute, eq.Value.String()))
+		}
+	}
+	for _, ne := range nonEqTests {
+		if len(ne.Disjunction) > 0 {
+			var parts []string
+			for _, dj := range ne.Disjunction {
+				parts = append(parts, fmt.Sprintf("%s%s", dj.Op.String(), dj.Value.String()))
+			}
+			if ne.VectorIndex >= 0 {
+				sb.WriteString(fmt.Sprintf("|%s[%d]<<%s>>", ne.Attribute, ne.VectorIndex, strings.Join(parts, ",")))
+			} else {
+				sb.WriteString(fmt.Sprintf("|%s<<%s>>", ne.Attribute, strings.Join(parts, ",")))
+			}
+		} else {
+			if ne.VectorIndex >= 0 {
+				sb.WriteString(fmt.Sprintf("|%s[%d]%s%s", ne.Attribute, ne.VectorIndex, ne.Op.String(), ne.Value.String()))
+			} else {
+				sb.WriteString(fmt.Sprintf("|%s%s%s", ne.Attribute, ne.Op.String(), ne.Value.String()))
+			}
+		}
+	}
+	return sb.String()
 }
 
 func canonicalCEString(ce *model.ConditionElement) string {
@@ -249,6 +330,74 @@ func matchesCEConstants(ce *model.ConditionElement, wme *model.WME) bool {
 	return true
 }
 
+type alphaBuilderCursor interface {
+	getOrCreateSwitchNode(attr string, vecIdx int) *AlphaSwitchNode
+	getOrCreateConstantTestNode(attr string, op model.Operator, val model.Value, vecIdx int) *ConstantTestNode
+	getOrCreateDisjunctiveTestNode(attr string, disj []model.TestConstraint, vecIdx int) *ConstantTestNode
+	addSuccessor(succ AlphaNode)
+}
+
+type typeNodeCursor struct {
+	tn *TypeNode
+}
+
+func (c *typeNodeCursor) getOrCreateSwitchNode(attr string, vecIdx int) *AlphaSwitchNode {
+	return c.tn.GetOrCreateSwitchNode(attr, vecIdx)
+}
+
+func (c *typeNodeCursor) getOrCreateConstantTestNode(attr string, op model.Operator, val model.Value, vecIdx int) *ConstantTestNode {
+	return c.tn.GetOrCreateConstantTestNode(attr, op, val, vecIdx)
+}
+
+func (c *typeNodeCursor) getOrCreateDisjunctiveTestNode(attr string, disj []model.TestConstraint, vecIdx int) *ConstantTestNode {
+	return c.tn.GetOrCreateDisjunctiveTestNode(attr, disj, vecIdx)
+}
+
+func (c *typeNodeCursor) addSuccessor(succ AlphaNode) {
+	c.tn.AddSuccessor(succ)
+}
+
+type constantTestCursor struct {
+	ct *ConstantTestNode
+}
+
+func (c *constantTestCursor) getOrCreateSwitchNode(attr string, vecIdx int) *AlphaSwitchNode {
+	return c.ct.GetOrCreateSwitchNode(attr, vecIdx)
+}
+
+func (c *constantTestCursor) getOrCreateConstantTestNode(attr string, op model.Operator, val model.Value, vecIdx int) *ConstantTestNode {
+	return c.ct.GetOrCreateConstantTestNode(attr, op, val, vecIdx)
+}
+
+func (c *constantTestCursor) getOrCreateDisjunctiveTestNode(attr string, disj []model.TestConstraint, vecIdx int) *ConstantTestNode {
+	return c.ct.GetOrCreateDisjunctiveTestNode(attr, disj, vecIdx)
+}
+
+func (c *constantTestCursor) addSuccessor(succ AlphaNode) {
+	c.ct.AddSuccessor(succ)
+}
+
+type switchBranchCursor struct {
+	sw  *AlphaSwitchNode
+	key string
+}
+
+func (c *switchBranchCursor) getOrCreateSwitchNode(attr string, vecIdx int) *AlphaSwitchNode {
+	return c.sw.GetOrCreateSwitchNode(c.key, attr, vecIdx)
+}
+
+func (c *switchBranchCursor) getOrCreateConstantTestNode(attr string, op model.Operator, val model.Value, vecIdx int) *ConstantTestNode {
+	return c.sw.GetOrCreateConstantTestNode(c.key, attr, op, val, vecIdx)
+}
+
+func (c *switchBranchCursor) getOrCreateDisjunctiveTestNode(attr string, disj []model.TestConstraint, vecIdx int) *ConstantTestNode {
+	return c.sw.GetOrCreateDisjunctiveTestNode(c.key, attr, disj, vecIdx)
+}
+
+func (c *switchBranchCursor) addSuccessor(succ AlphaNode) {
+	c.sw.AddSuccessor(c.key, succ)
+}
+
 // buildAlphaMemory creates or retrieves a shared AlphaMemory for the given condition element.
 func (net *Network) buildAlphaMemory(ce *model.ConditionElement, existingWMEs []*model.WME) *AlphaMemory {
 	key := getAlphaKey(ce)
@@ -256,44 +405,25 @@ func (net *Network) buildAlphaMemory(ce *model.ConditionElement, existingWMEs []
 		return am
 	}
 
-	currNode := AlphaNode(net.alphaRoot.GetOrCreateTypeNode(ce.Class))
+	eqTests, nonEqTests := extractConstantTests(ce)
 
-	// Chain constant test nodes
-	for _, at := range ce.Tests {
-		isMulti := len(at.Constraints) > 1
-		for idx, c := range at.Constraints {
-			vecIdx := -1
-			if isMulti {
-				vecIdx = idx
-			}
-			if len(c.Disjunction) > 0 {
-				hasVar := false
-				for _, dj := range c.Disjunction {
-					if dj.Value.IsVariable() {
-						hasVar = true
-						break
-					}
-				}
-				if !hasVar {
-					testNode := NewIndexedDisjunctiveConstantTestNode(at.Attribute, c.Disjunction, vecIdx)
-					switch p := currNode.(type) {
-					case *TypeNode:
-						p.AddSuccessor(testNode)
-					case *ConstantTestNode:
-						p.AddSuccessor(testNode)
-					}
-					currNode = testNode
-				}
-			} else if !c.Value.IsVariable() {
-				testNode := NewIndexedConstantTestNode(at.Attribute, c.Op, c.Value, vecIdx)
-				switch p := currNode.(type) {
-				case *TypeNode:
-					p.AddSuccessor(testNode)
-				case *ConstantTestNode:
-					p.AddSuccessor(testNode)
-				}
-				currNode = testNode
-			}
+	var cursor alphaBuilderCursor = &typeNodeCursor{tn: net.alphaRoot.GetOrCreateTypeNode(ce.Class)}
+
+	// 1. Process equality tests (via AlphaSwitchNodes for O(1) attribute dispatch)
+	for _, eq := range eqTests {
+		sw := cursor.getOrCreateSwitchNode(eq.Attribute, eq.VectorIndex)
+		branchKey := CanonicalValueKey(eq.Value)
+		cursor = &switchBranchCursor{sw: sw, key: branchKey}
+	}
+
+	// 2. Process non-equality tests (via ConstantTestNodes)
+	for _, nonEq := range nonEqTests {
+		if len(nonEq.Disjunction) > 0 {
+			ct := cursor.getOrCreateDisjunctiveTestNode(nonEq.Attribute, nonEq.Disjunction, nonEq.VectorIndex)
+			cursor = &constantTestCursor{ct: ct}
+		} else {
+			ct := cursor.getOrCreateConstantTestNode(nonEq.Attribute, nonEq.Op, nonEq.Value, nonEq.VectorIndex)
+			cursor = &constantTestCursor{ct: ct}
 		}
 	}
 
@@ -305,13 +435,7 @@ func (net *Network) buildAlphaMemory(ce *model.ConditionElement, existingWMEs []
 		}
 	}
 
-	switch p := currNode.(type) {
-	case *TypeNode:
-		p.AddSuccessor(am)
-	case *ConstantTestNode:
-		p.AddSuccessor(am)
-	}
-
+	cursor.addSuccessor(am)
 	net.alphaMemPool[key] = am
 	return am
 }

@@ -476,6 +476,250 @@ func (ct *ConstantTestNode) Activation(wme *model.WME, tag PropagationTag) {
 	}
 }
 
+// Successors returns all downstream AlphaNodes.
+func (ct *ConstantTestNode) Successors() []AlphaNode {
+	return ct.successors
+}
+
+// GetOrCreateSwitchNode retrieves an existing child switch node or registers a new one.
+func (ct *ConstantTestNode) GetOrCreateSwitchNode(attr string, vecIdx int) *AlphaSwitchNode {
+	for _, s := range ct.successors {
+		if sw, ok := s.(*AlphaSwitchNode); ok {
+			if sw.Attribute == attr && sw.VectorIndex == vecIdx {
+				return sw
+			}
+		}
+	}
+	sw := NewIndexedAlphaSwitchNode(attr, vecIdx)
+	ct.AddSuccessor(sw)
+	return sw
+}
+
+// GetOrCreateConstantTestNode retrieves an existing child constant test node or registers a new one.
+func (ct *ConstantTestNode) GetOrCreateConstantTestNode(attr string, op model.Operator, val model.Value, vecIdx int) *ConstantTestNode {
+	for _, s := range ct.successors {
+		if child, ok := s.(*ConstantTestNode); ok {
+			if child.Attribute == attr && child.Op == op && child.Value.Equal(val) && child.VectorIndex == vecIdx && len(child.Disjunction) == 0 {
+				return child
+			}
+		}
+	}
+	child := NewIndexedConstantTestNode(attr, op, val, vecIdx)
+	ct.AddSuccessor(child)
+	return child
+}
+
+// GetOrCreateDisjunctiveTestNode retrieves an existing child disjunctive test node or registers a new one.
+func (ct *ConstantTestNode) GetOrCreateDisjunctiveTestNode(attr string, disj []model.TestConstraint, vecIdx int) *ConstantTestNode {
+	for _, s := range ct.successors {
+		if child, ok := s.(*ConstantTestNode); ok {
+			if child.Attribute == attr && child.VectorIndex == vecIdx && testConstraintsEqual(child.Disjunction, disj) {
+				return child
+			}
+		}
+	}
+	child := NewIndexedDisjunctiveConstantTestNode(attr, disj, vecIdx)
+	ct.AddSuccessor(child)
+	return child
+}
+
+// AlphaSwitchNode partitions WME activations by attribute value using O(1) hash table lookup.
+type AlphaSwitchNode struct {
+	mu          sync.RWMutex
+	Attribute   string
+	VectorIndex int // -1 for scalar/membership test, >= 0 for positional element test
+	cases       map[string][]AlphaNode
+}
+
+// NewAlphaSwitchNode creates a new switch node for a scalar attribute.
+func NewAlphaSwitchNode(attr string) *AlphaSwitchNode {
+	return NewIndexedAlphaSwitchNode(attr, -1)
+}
+
+// NewIndexedAlphaSwitchNode creates a new switch node for an attribute at a positional element or scalar.
+func NewIndexedAlphaSwitchNode(attr string, vecIdx int) *AlphaSwitchNode {
+	return &AlphaSwitchNode{
+		Attribute:   model.NormalizeAttribute(attr),
+		VectorIndex: vecIdx,
+		cases:       make(map[string][]AlphaNode),
+	}
+}
+
+// BranchCount returns the number of distinct constant value branches registered on this switch node.
+func (asn *AlphaSwitchNode) BranchCount() int {
+	asn.mu.RLock()
+	defer asn.mu.RUnlock()
+	return len(asn.cases)
+}
+
+// CaseKeys returns all registered case keys in this switch node.
+func (asn *AlphaSwitchNode) CaseKeys() []string {
+	asn.mu.RLock()
+	defer asn.mu.RUnlock()
+	keys := make([]string, 0, len(asn.cases))
+	for k := range asn.cases {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+// SuccessorsForCase returns the AlphaNodes associated with a specific canonical key.
+func (asn *AlphaSwitchNode) SuccessorsForCase(key string) []AlphaNode {
+	asn.mu.RLock()
+	defer asn.mu.RUnlock()
+	return append([]AlphaNode(nil), asn.cases[key]...)
+}
+
+// AddSuccessor registers a child AlphaNode under the specified constant value branch.
+func (asn *AlphaSwitchNode) AddSuccessor(key string, succ AlphaNode) {
+	asn.mu.Lock()
+	defer asn.mu.Unlock()
+	for _, s := range asn.cases[key] {
+		if s == succ {
+			return
+		}
+	}
+	asn.cases[key] = append(asn.cases[key], succ)
+}
+
+// GetOrCreateSwitchNode retrieves an existing child switch node under a branch or registers a new one.
+func (asn *AlphaSwitchNode) GetOrCreateSwitchNode(key string, attr string, vecIdx int) *AlphaSwitchNode {
+	asn.mu.Lock()
+	defer asn.mu.Unlock()
+	normAttr := model.NormalizeAttribute(attr)
+	for _, s := range asn.cases[key] {
+		if sw, ok := s.(*AlphaSwitchNode); ok {
+			if sw.Attribute == normAttr && sw.VectorIndex == vecIdx {
+				return sw
+			}
+		}
+	}
+	sw := NewIndexedAlphaSwitchNode(normAttr, vecIdx)
+	asn.cases[key] = append(asn.cases[key], sw)
+	return sw
+}
+
+// GetOrCreateConstantTestNode retrieves an existing child constant test node under a branch or registers a new one.
+func (asn *AlphaSwitchNode) GetOrCreateConstantTestNode(key string, attr string, op model.Operator, val model.Value, vecIdx int) *ConstantTestNode {
+	asn.mu.Lock()
+	defer asn.mu.Unlock()
+	normAttr := model.NormalizeAttribute(attr)
+	for _, s := range asn.cases[key] {
+		if ct, ok := s.(*ConstantTestNode); ok {
+			if ct.Attribute == normAttr && ct.Op == op && ct.Value.Equal(val) && ct.VectorIndex == vecIdx && len(ct.Disjunction) == 0 {
+				return ct
+			}
+		}
+	}
+	ct := NewIndexedConstantTestNode(normAttr, op, val, vecIdx)
+	asn.cases[key] = append(asn.cases[key], ct)
+	return ct
+}
+
+// GetOrCreateDisjunctiveTestNode retrieves an existing child disjunctive test node under a branch or registers a new one.
+func (asn *AlphaSwitchNode) GetOrCreateDisjunctiveTestNode(key string, attr string, disj []model.TestConstraint, vecIdx int) *ConstantTestNode {
+	asn.mu.Lock()
+	defer asn.mu.Unlock()
+	normAttr := model.NormalizeAttribute(attr)
+	for _, s := range asn.cases[key] {
+		if ct, ok := s.(*ConstantTestNode); ok {
+			if ct.Attribute == normAttr && ct.VectorIndex == vecIdx && testConstraintsEqual(ct.Disjunction, disj) {
+				return ct
+			}
+		}
+	}
+	ct := NewIndexedDisjunctiveConstantTestNode(normAttr, disj, vecIdx)
+	asn.cases[key] = append(asn.cases[key], ct)
+	return ct
+}
+
+// Activation extracts the attribute value and routes the WME event to matching branches in O(1).
+func (asn *AlphaSwitchNode) Activation(wme *model.WME, tag PropagationTag) {
+	val, ok := wme.Get(asn.Attribute)
+	if !ok {
+		val = model.NewSymbol("nil")
+	}
+
+	if val.IsVector() {
+		elems := val.VectorElements()
+		if asn.VectorIndex >= 0 {
+			if asn.VectorIndex < len(elems) {
+				k := CanonicalValueKey(elems[asn.VectorIndex])
+				asn.mu.RLock()
+				succs := asn.cases[k]
+				asn.mu.RUnlock()
+				for _, s := range succs {
+					s.Activation(wme, tag)
+				}
+			}
+			return
+		}
+		// Membership test (VectorIndex == -1)
+		if len(elems) == 1 {
+			k := CanonicalValueKey(elems[0])
+			asn.mu.RLock()
+			succs := asn.cases[k]
+			asn.mu.RUnlock()
+			for _, s := range succs {
+				s.Activation(wme, tag)
+			}
+			return
+		}
+		var seen [8]string
+		var seenHeap map[string]bool
+		seenCount := 0
+		for _, elem := range elems {
+			k := CanonicalValueKey(elem)
+			duplicate := false
+			if seenCount < len(seen) {
+				for i := 0; i < seenCount; i++ {
+					if seen[i] == k {
+						duplicate = true
+						break
+					}
+				}
+				if !duplicate {
+					seen[seenCount] = k
+					seenCount++
+				}
+			} else {
+				if seenHeap == nil {
+					seenHeap = make(map[string]bool, len(elems))
+					for i := 0; i < seenCount; i++ {
+						seenHeap[seen[i]] = true
+					}
+				}
+				if seenHeap[k] {
+					duplicate = true
+				} else {
+					seenHeap[k] = true
+				}
+			}
+			if !duplicate {
+				asn.mu.RLock()
+				succs := asn.cases[k]
+				asn.mu.RUnlock()
+				for _, s := range succs {
+					s.Activation(wme, tag)
+				}
+			}
+		}
+		return
+	}
+
+	// Non-vector value
+	if asn.VectorIndex > 0 {
+		return
+	}
+	k := CanonicalValueKey(val)
+	asn.mu.RLock()
+	succs := asn.cases[k]
+	asn.mu.RUnlock()
+	for _, s := range succs {
+		s.Activation(wme, tag)
+	}
+}
+
 // TypeNode filters WMEs by their class name.
 type TypeNode struct {
 	Class      string
@@ -492,7 +736,74 @@ func NewTypeNode(class string) *TypeNode {
 
 // AddSuccessor adds a downstream alpha node.
 func (tn *TypeNode) AddSuccessor(succ AlphaNode) {
+	for _, s := range tn.successors {
+		if s == succ {
+			return
+		}
+	}
 	tn.successors = append(tn.successors, succ)
+}
+
+// Successors returns all downstream AlphaNodes.
+func (tn *TypeNode) Successors() []AlphaNode {
+	return tn.successors
+}
+
+// GetOrCreateSwitchNode retrieves an existing child switch node or registers a new one.
+func (tn *TypeNode) GetOrCreateSwitchNode(attr string, vecIdx int) *AlphaSwitchNode {
+	normAttr := model.NormalizeAttribute(attr)
+	for _, s := range tn.successors {
+		if sw, ok := s.(*AlphaSwitchNode); ok {
+			if sw.Attribute == normAttr && sw.VectorIndex == vecIdx {
+				return sw
+			}
+		}
+	}
+	sw := NewIndexedAlphaSwitchNode(normAttr, vecIdx)
+	tn.AddSuccessor(sw)
+	return sw
+}
+
+// GetOrCreateConstantTestNode retrieves an existing child constant test node or registers a new one.
+func (tn *TypeNode) GetOrCreateConstantTestNode(attr string, op model.Operator, val model.Value, vecIdx int) *ConstantTestNode {
+	normAttr := model.NormalizeAttribute(attr)
+	for _, s := range tn.successors {
+		if ct, ok := s.(*ConstantTestNode); ok {
+			if ct.Attribute == normAttr && ct.Op == op && ct.Value.Equal(val) && ct.VectorIndex == vecIdx && len(ct.Disjunction) == 0 {
+				return ct
+			}
+		}
+	}
+	ct := NewIndexedConstantTestNode(normAttr, op, val, vecIdx)
+	tn.AddSuccessor(ct)
+	return ct
+}
+
+// GetOrCreateDisjunctiveTestNode retrieves an existing child disjunctive test node or registers a new one.
+func (tn *TypeNode) GetOrCreateDisjunctiveTestNode(attr string, disj []model.TestConstraint, vecIdx int) *ConstantTestNode {
+	normAttr := model.NormalizeAttribute(attr)
+	for _, s := range tn.successors {
+		if ct, ok := s.(*ConstantTestNode); ok {
+			if ct.Attribute == normAttr && ct.VectorIndex == vecIdx && testConstraintsEqual(ct.Disjunction, disj) {
+				return ct
+			}
+		}
+	}
+	ct := NewIndexedDisjunctiveConstantTestNode(normAttr, disj, vecIdx)
+	tn.AddSuccessor(ct)
+	return ct
+}
+
+func testConstraintsEqual(a, b []model.TestConstraint) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].Op != b[i].Op || !a[i].Value.Equal(b[i].Value) {
+			return false
+		}
+	}
+	return true
 }
 
 // Activation routes WMEs matching the class name to successors.
