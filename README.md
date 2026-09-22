@@ -62,6 +62,7 @@ This engine provides a complete, modern execution environment for rule-based sys
    - [Extensibility & Custom Actions](#extensibility--custom-actions)
 8. [Canonical Benchmark Suite](#canonical-benchmark-suite)
    - [Engine Comparison & Architectural Evaluation](docs/engine_comparison.md)
+   - [Benchmark Timing History & Release Log](docs/benchmarks_history.md)
    - [Benchmark Problems (Manners, Waltz, Zebra)](#benchmark-problems-manners-waltz-zebra)
    - [Running the Benchmarks](#running-the-benchmarks)
    - [Benchmark Results & Performance Profile](#benchmark-results--performance-profile)
@@ -1129,16 +1130,16 @@ go test -bench=. -benchtime=1x -run=^$ ./benchmarks
 
 ### Benchmark Results & Performance Profile
 
-Representative metrics measured on a standard developer workstation (12th Gen Intel Core i7-1260P, Go 1.24):
+Current library performance measured on a dedicated test machine (12th Gen Intel Core i7-1260P, 16 threads, 64 GB RAM, Ubuntu 24.04, Go 1.23). For full machine architecture specifications and historical logs across versions, see **[Benchmark Timing History & Performance Log](docs/benchmarks_history.md)**.
 
 | Benchmark | Cycles | WMEs Asserted | Time to Quiescence | Throughput (Cycles/s) | WME Assertions/s | Total Heap Alloc |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Manners-16** | 2,009 | 2,744 | 1.81 s | 1,110.5 | 1,516.8 | ~978 MB |
-| **Manners-32** | 3,914 | 4,649 | 3.59 s | 1,088.8 | 1,293.2 | ~1,933 MB |
-| **Manners-64** | 19,381 | 21,152 | 37.35 s | 518.9 | 566.3 | ~20.1 GB |
-| **Waltz-12** | 608 | 1,238 | 68 ms | 8,944.6 | 18,212.8 | ~38 MB |
-| **Waltz-50** | 2,268 | 4,654 | 689 ms | 3,291.0 | 6,753.2 | ~437 MB |
-| **Zebra-5** | 7 | 19 | 0.20 ms | 32,396.5 | 87,933.2 | 133 KB |
+| **Manners-16** | 2,009 | 2,744 | 1.74 s | 1,156.0 | 1,578.9 | ~978 MB |
+| **Manners-32** | 3,914 | 4,649 | 3.23 s | 1,213.0 | 1,440.8 | ~1,933 MB |
+| **Manners-64** | 19,381 | 21,152 | 34.20 s | 566.6 | 618.4 | ~20.1 GB |
+| **Waltz-12** | 608 | 1,238 | 65 ms | 9,384.5 | 19,108.6 | ~38 MB |
+| **Waltz-50** | 2,268 | 4,654 | 662 ms | 3,426.4 | 7,031.1 | ~437 MB |
+| **Zebra-5** | 7 | 19 | 0.19 ms | 36,965.3 | 100,334.3 | ~134 KB |
 
 
 ---
