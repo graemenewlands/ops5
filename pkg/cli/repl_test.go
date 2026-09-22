@@ -1096,14 +1096,56 @@ func TestREPLSalienceFormatting(t *testing.T) {
 	}
 }
 
+func TestREPLDOTCommand(t *testing.T) {
+	tmpDir := t.TempDir()
+	dotFile1 := filepath.Join(tmpDir, "graph1.dot")
+	dotFile2 := filepath.Join(tmpDir, "graph2.dot")
 
+	commands := fmt.Sprintf(`
+	(p alert-rule
+	   (sensor ^temp > 100)
+	   -->
+	   (write "alert")
+	)
+	dot
+	dot %s
+	(dot %s)
+	exit
+	`, dotFile1, dotFile2)
 
+	in := strings.NewReader(commands)
+	var out bytes.Buffer
+	repl := NewREPL(in, &out)
+	repl.Start()
 
+	output := out.String()
 
+	// 1. Check bare 'dot' printed Graphviz DOT syntax to stdout
+	if !strings.Contains(output, "digraph ReteNetwork {") {
+		t.Fatalf("expected digraph header in REPL output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "type_sensor") {
+		t.Fatalf("expected type_sensor in REPL output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "term_alert_rule") {
+		t.Fatalf("expected term_alert_rule in REPL output, got:\n%s", output)
+	}
 
+	// 2. Check 'dot <filepath>' created file with DOT syntax
+	content1, err := os.ReadFile(dotFile1)
+	if err != nil {
+		t.Fatalf("failed to read dotFile1: %v", err)
+	}
+	if !strings.Contains(string(content1), "digraph ReteNetwork {") || !strings.Contains(string(content1), "alert-rule") {
+		t.Fatalf("expected valid DOT content in file1, got:\n%s", string(content1))
+	}
 
-
-
-
-
-
+	// 3. Check '(dot <filepath>)' created file with DOT syntax
+	content2, err := os.ReadFile(dotFile2)
+	if err != nil {
+		t.Fatalf("failed to read dotFile2: %v", err)
+	}
+	if !strings.Contains(string(content2), "digraph ReteNetwork {") || !strings.Contains(string(content2), "alert-rule") {
+		t.Fatalf("expected valid DOT content in file2, got:\n%s", string(content2))
+	}
+}

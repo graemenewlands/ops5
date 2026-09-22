@@ -26,6 +26,7 @@ These keywords appear at the root level of `.ops` source files or directly withi
 | **`pbreak`** | `(pbreak [<rule1> ... <ruleN>])` | Sets execution breakpoints on specified production rules, suspending `run` execution prior to firing. If called with no arguments, lists active breakpoints. | `(pbreak detect-item)`<br>`(pbreak)` |
 | **`unpbreak`** / **`unbreak`** | `(unpbreak [<rule1> ... \| *])` | Removes execution breakpoints from specified rules, or clears all breakpoints (`*` or no arguments). | `(unpbreak detect-item)`<br>`(unpbreak *)` |
 | **`watch`** | `(watch [0 \| 1 \| 2])` | Configures or displays the engine trace level (0=silent, 1=rule firings with timetags, 2=rule firings and WM assertions/retractions). Default is 1. | `(watch)`<br>`(watch 2)` |
+| **`dot`** | `(dot [<filepath>])` | Exports compiled Rete network graph in Graphviz `.dot` format to stdout or file. | `(dot "network.dot")`<br>`(dot)` |
 
 ---
 
@@ -119,6 +120,7 @@ The interactive CLI shell (`ops5`) supports both bare words and paren-enclosed c
 | **`matches`** | `[<rule1> ... \| *]` | Displays diagnostic partial matches (alpha WMEs, beta join tokens, conflict set activations) for rules. |
 | **`pbreak`** | `[<rule1> ...]` | Sets execution breakpoints on production rules, or lists breakpoints if no arguments are given. |
 | **`unpbreak`** / **`unbreak`** | `[<rule1> ... \| *]` | Removes rule breakpoints or clears all breakpoints (`*` or no arguments). |
+| **`dot`** | `[<filepath>]` | Exports compiled Rete network graph in Graphviz `.dot` format to stdout or file. |
 | **`test`** | `<file.json>` | Executes a JSON test harness case. |
 | **`reset`** | _none_ | Clears working memory, network state, and conflict set. |
 | **`help`** | _none_ | Displays interactive REPL help. |

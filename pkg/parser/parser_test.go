@@ -2527,7 +2527,39 @@ func TestParseRuleSalience(t *testing.T) {
 	}
 }
 
+func TestParseDOTStatement(t *testing.T) {
+	src := `
+(dot)
+(dot network.dot)
+(dot "graph.dot")
+`
+	p, err := NewParser(src)
+	if err != nil {
+		t.Fatalf("NewParser error: %v", err)
+	}
 
+	s1, err := p.NextStatement()
+	if err != nil || s1.Type != StmtDOT {
+		t.Fatalf("expected StmtDOT, got %+v (err: %v)", s1, err)
+	}
+	if s1.DOTFile != "" {
+		t.Errorf("expected empty DOTFile, got %q", s1.DOTFile)
+	}
 
+	s2, err := p.NextStatement()
+	if err != nil || s2.Type != StmtDOT {
+		t.Fatalf("expected StmtDOT, got %+v (err: %v)", s2, err)
+	}
+	if s2.DOTFile != "network.dot" {
+		t.Errorf("expected DOTFile 'network.dot', got %q", s2.DOTFile)
+	}
 
+	s3, err := p.NextStatement()
+	if err != nil || s3.Type != StmtDOT {
+		t.Fatalf("expected StmtDOT, got %+v (err: %v)", s3, err)
+	}
+	if s3.DOTFile != "graph.dot" {
+		t.Errorf("expected DOTFile 'graph.dot', got %q", s3.DOTFile)
+	}
+}
 

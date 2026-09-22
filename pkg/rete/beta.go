@@ -664,9 +664,11 @@ func (njn *NegativeJoinNode) RightActivation(wme *model.WME, tag PropagationTag)
 
 // TerminalNode represents the completion of a rule's LHS and manages activation events.
 type TerminalNode struct {
-	rule     *model.Rule
-	listener ConflictSetListener
-	active   bool
+	mu              sync.RWMutex
+	rule            *model.Rule
+	listener        ConflictSetListener
+	active          bool
+	activationCount int
 }
 
 // NewTerminalNode creates a new TerminalNode for a rule.
@@ -678,19 +680,42 @@ func NewTerminalNode(rule *model.Rule, listener ConflictSetListener) *TerminalNo
 	}
 }
 
+// ActivationCount returns the number of active token instantiations at this terminal node.
+func (tn *TerminalNode) ActivationCount() int {
+	tn.mu.RLock()
+	defer tn.mu.RUnlock()
+	return tn.activationCount
+}
+
 // Deactivate disables this terminal node so no further activations are propagated.
 func (tn *TerminalNode) Deactivate() {
+	tn.mu.Lock()
+	defer tn.mu.Unlock()
 	tn.active = false
 }
 
 // LeftActivation handles a fully matched token arriving at the terminal node.
 func (tn *TerminalNode) LeftActivation(token *Token, tag PropagationTag) {
+	tn.mu.Lock()
 	if !tn.active || tn.listener == nil {
+		tn.mu.Unlock()
 		return
 	}
 	if tag == TagAdd {
-		tn.listener.OnActivationAdd(tn.rule, token)
+		tn.activationCount++
 	} else {
-		tn.listener.OnActivationRemove(tn.rule, token)
+		tn.activationCount--
+		if tn.activationCount < 0 {
+			tn.activationCount = 0
+		}
+	}
+	listener := tn.listener
+	rule := tn.rule
+	tn.mu.Unlock()
+
+	if tag == TagAdd {
+		listener.OnActivationAdd(rule, token)
+	} else {
+		listener.OnActivationRemove(rule, token)
 	}
 }

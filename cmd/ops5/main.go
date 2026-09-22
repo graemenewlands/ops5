@@ -19,6 +19,7 @@ func main() {
 	maxCyclesFlag := flag.Int("max-cycles", 1000, "Maximum number of cycles for batch run")
 	colorFlag := flag.String("color", "auto", "Terminal color output: 'auto', 'always', or 'never'")
 	tableFlag := flag.Bool("table", false, "Display working memory, conflict set, and schemas in boxed tables")
+	dotFlag := flag.String("dot", "", "Export compiled Rete network to Graphviz .dot file")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "OPS5 Production Rule System (Go)\n\n")
@@ -83,6 +84,21 @@ func main() {
 		_ = repl.Engine().SetWatchLevel(1)
 	}
 
+	exportDOT := func() {
+		if *dotFlag != "" {
+			f, err := os.Create(*dotFlag)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Failed to create DOT file %s: %v\n", *dotFlag, err)
+				os.Exit(1)
+			}
+			defer f.Close()
+			if err := repl.Engine().ExportDOT(f); err != nil {
+				fmt.Fprintf(os.Stderr, "Failed to export DOT graph: %v\n", err)
+				os.Exit(1)
+			}
+		}
+	}
+
 	// If a file is provided as argument
 	if len(args) >= 1 && args[0] != "test" {
 		filePath := args[0]
@@ -90,6 +106,8 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Failed to load %s: %v\n", filePath, err)
 			os.Exit(1)
 		}
+
+		exportDOT()
 
 		// If not interactive, run to completion and exit
 		if !*interactiveFlag {
@@ -104,6 +122,11 @@ func main() {
 			} else {
 				fmt.Printf("Quiescence reached after %d cycles.\n", cycles)
 			}
+			return
+		}
+	} else if *dotFlag != "" {
+		exportDOT()
+		if !*interactiveFlag {
 			return
 		}
 	}

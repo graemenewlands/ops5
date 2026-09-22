@@ -278,6 +278,12 @@ func (r *REPL) handleCommand(input string) bool {
 		return false
 	}
 
+	// 17. S-expression dot: (dot ...)
+	if strings.HasPrefix(strings.ToLower(input), "(dot ") || strings.ToLower(strings.TrimSpace(input)) == "(dot)" {
+		r.handleDOT(input)
+		return false
+	}
+
 	// Strip outer parentheses for command convenience if present: e.g. (wm) -> wm
 	cmd := input
 	if strings.HasPrefix(cmd, "(") && strings.HasSuffix(cmd, ")") && !strings.Contains(cmd, "^") {
@@ -385,6 +391,9 @@ func (r *REPL) handleCommand(input string) bool {
 
 	case "unpbreak", "unbreak":
 		r.handleUnpbreak(input)
+
+	case "dot":
+		r.handleDOT(input)
 
 	case "strategy":
 		if len(parts) == 1 {
@@ -1032,6 +1041,24 @@ func (r *REPL) LoadFile(path string) error {
 					}
 				}
 			}
+		case parser.StmtDOT:
+			if stmt.DOTFile == "" {
+				if err := r.engine.ExportDOT(r.out); err != nil {
+					fmt.Fprintf(r.out, "Error exporting DOT: %v\n", err)
+				}
+			} else {
+				f, err := os.Create(stmt.DOTFile)
+				if err != nil {
+					fmt.Fprintf(r.out, "Failed to create DOT file %s: %v\n", stmt.DOTFile, err)
+				} else {
+					if err := r.engine.ExportDOT(f); err != nil {
+						fmt.Fprintf(r.out, "Error exporting DOT to %s: %v\n", stmt.DOTFile, err)
+					} else {
+						fmt.Fprintf(r.out, "Exported Rete network graph to %s\n", stmt.DOTFile)
+					}
+					f.Close()
+				}
+			}
 		}
 	}
 
@@ -1171,6 +1198,7 @@ Commands:
   load <file.ops>           Load and compile rules and makes from an OPS5 source file
   test <file.json>          Execute an external test case file
   reset                     Reset working memory and conflict set
+  dot [<filepath>]          Export compiled Rete network in Graphviz .dot format
   help                      Show this help text
   exit / quit               Exit the REPL
 `
@@ -1657,3 +1685,30 @@ func (r *REPL) printBreakpoints() {
 	}
 }
 
+func (r *REPL) handleDOT(input string) {
+	tokens, err := tokenizeLine(input)
+	if err != nil {
+		fmt.Fprintf(r.out, "Parse error: %v\n", err)
+		return
+	}
+	if len(tokens) <= 1 {
+		if err := r.engine.ExportDOT(r.out); err != nil {
+			fmt.Fprintf(r.out, "Error exporting DOT: %v\n", err)
+		}
+		return
+	}
+
+	filePath := tokens[1]
+	f, err := os.Create(filePath)
+	if err != nil {
+		fmt.Fprintf(r.out, "Failed to create file %s: %v\n", filePath, err)
+		return
+	}
+	defer f.Close()
+
+	if err := r.engine.ExportDOT(f); err != nil {
+		fmt.Fprintf(r.out, "Error exporting DOT to %s: %v\n", filePath, err)
+		return
+	}
+	fmt.Fprintf(r.out, "Exported Rete network graph to %s\n", filePath)
+}

@@ -82,3 +82,15 @@ func (et *EvalTest) Evaluate(bindings map[string]Value) (bool, error) {
 	}
 	return true, nil
 }
+
+// String returns the string representation of all comparisons in the test.
+func (et *EvalTest) String() string {
+	if et == nil || len(et.Comparisons) == 0 {
+		return "(test)"
+	}
+	var parts []string
+	for _, cmp := range et.Comparisons {
+		parts = append(parts, cmp.String())
+	}
+	return fmt.Sprintf("(test %s)", strings.Join(parts, " "))
+}

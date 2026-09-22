@@ -1868,6 +1868,7 @@ const (
 	StmtMatches
 	StmtPBreak
 	StmtUnpbreak
+	StmtDOT
 )
 
 func (st StatementType) String() string {
@@ -1906,6 +1907,8 @@ func (st StatementType) String() string {
 		return "pbreak"
 	case StmtUnpbreak:
 		return "unpbreak"
+	case StmtDOT:
+		return "dot"
 	default:
 		return "unknown"
 	}
@@ -1935,6 +1938,7 @@ type Statement struct {
 	MatchesRules    []string
 	PBreakRules     []string
 	UnpbreakRules   []string
+	DOTFile         string
 }
 
 func (p *Parser) parseMakeBody(classTok Token) (string, map[string]model.Value, error) {
@@ -2649,6 +2653,28 @@ func (p *Parser) ParseUnpbreak() ([]string, error) {
 	return names, nil
 }
 
+// ParseDOT parses a standalone (dot [filepath]) statement.
+func (p *Parser) ParseDOT() (string, error) {
+	if _, err := p.expect(TokenLParen); err != nil {
+		return "", err
+	}
+	verbTok, err := p.expect(TokenSymbol)
+	if err != nil || strings.ToLower(verbTok.Value) != "dot" {
+		return "", fmt.Errorf("expected 'dot', got %v", verbTok.Value)
+	}
+	var filePath string
+	if p.current.Type == TokenSymbol || p.current.Type == TokenString {
+		filePath = p.current.Value
+		if err := p.advance(); err != nil {
+			return "", err
+		}
+	}
+	if _, err := p.expect(TokenRParen); err != nil {
+		return "", fmt.Errorf("expected ')' closing dot statement: %w", err)
+	}
+	return filePath, nil
+}
+
 // NextStatement parses the next top-level statement (Rule, Make, Literalize, VectorAttribute, OpenFile, CloseFile, Default, Excise, PM, Remove, Watch, PPWM, or Strategy).
 // Returns (nil, nil) when TokenEOF is reached.
 func (p *Parser) NextStatement() (*Statement, error) {
@@ -2841,6 +2867,16 @@ func (p *Parser) NextStatement() (*Statement, error) {
 		return &Statement{
 			Type:          StmtUnpbreak,
 			UnpbreakRules: rules,
+		}, nil
+
+	case "dot":
+		filePath, err := p.ParseDOT()
+		if err != nil {
+			return nil, err
+		}
+		return &Statement{
+			Type:    StmtDOT,
+			DOTFile: filePath,
 		}, nil
 
 	default:

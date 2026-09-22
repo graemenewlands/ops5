@@ -687,6 +687,9 @@ go build -o ops5 ./cmd/ops5
 # Run with cycle tracing enabled
 ./ops5 -trace path/to/rules.ops
 
+# Export compiled Rete network topology to Graphviz DOT file
+./ops5 --dot network.dot path/to/rules.ops
+
 # Execute with MEA strategy and cycle limit
 ./ops5 -strategy mea -max-cycles 500 path/to/rules.ops
 
@@ -699,6 +702,7 @@ go build -o ops5 ./cmd/ops5
 | `-i` | boolean | `false` | Drop into interactive REPL after loading input file |
 | `-color` | string | `"auto"` | Terminal color output: `auto` (autodetect), `always`, or `never` |
 | `-table` | boolean | `false` | Enable boxed tabular mode by default for `wm`, `cs`, and `schemas` |
+| `-dot` | string | `""` | Export compiled Rete network graph to Graphviz `.dot` file |
 | `-watch` | integer | `1` | Set trace watch level: `0` (silent), `1` (rule firings), `2` (firings + WM changes) |
 | `-trace` | boolean | `false` | Enable cycle-by-cycle execution tracing to stdout (alias for `-watch 1`) |
 | `-strategy` | string | `"lex"` | Conflict resolution strategy: `lex` or `mea` |
@@ -753,6 +757,7 @@ Defined rule 'classify-alert' (conditions=1, specificity=3)
 | `matches` / `(matches ...)` | `[<rule-name...> \| *]` | Inspect partial Rete matches (alpha WMEs, beta join tokens, conflict set activations) | `matches FindAncestors`<br>`(matches *)` |
 | `pbreak` / `(pbreak ...)` | `[<rule-name...>]` | Set rule breakpoints to suspend `run` prior to rule firing, or list breakpoints | `pbreak FindAncestors`<br>`(pbreak)` |
 | `unpbreak` / `(unpbreak ...)` | `[<rule-name...> \| *]` | Remove rule breakpoints or clear all breakpoints (`*` or no arguments) | `unpbreak FindAncestors`<br>`(unpbreak *)` |
+| `dot` / `(dot ...)` | `[<filepath>]` | Export compiled Rete network in Graphviz `.dot` format to stdout or file | `dot network.dot`<br>`(dot)` |
 | `test` | `<file.json>` | Execute an external JSON test suite case | `test fixture.json` |
 | `reset` | *none* | Clear working memory and conflict set | `reset` |
 | `help` | *none* | Display interactive help menu | `help` |
@@ -800,6 +805,58 @@ Execution halted by rule action after 2 cycles.
 =>WM: (3: item ^id 101 ^status pending)
 ```
 
+### Rete Network Graph Visualization (`--dot` / Graphviz)
+
+The engine can serialize the entire compiled Rete network topology into Graphviz `.dot` format for architectural inspection, structural sharing validation, and debugging.
+
+#### Node & Edge Styling
+- **Alpha Network Cluster (`cluster_alpha`)**:
+  - **Alpha Root & Type Nodes**: Blue octagons displaying class names.
+  - **Constant Test Nodes**: Light-blue rounded boxes displaying intra-condition predicate tests (e.g. `^temp > 100`, disjunctions `^status << active pending >>`).
+  - **Alpha Memories**: Rounded blue boxes displaying canonical key signatures and live WME counts (`Items: N`).
+- **Beta Network Cluster (`cluster_beta`)**:
+  - **Beta Memories**: Green rounded boxes displaying node IDs (`bm0`, `bm1`, ...) and live token counts.
+  - **Join Nodes**: Orange ellipses with join test predicates (e.g. `^sensor-id = <sid>`).
+  - **Negative Join Nodes**: Red ellipses indicating negative pattern tests (`-(command)`).
+  - **Existential Join Nodes**: Amber ellipses indicating existential quantifiers (`(exists item)`).
+  - **Accumulate Nodes**: Gray ellipses displaying aggregation functions (`COUNT`, `SUM`, `MIN`, `MAX`, `AVG`).
+  - **Eval Nodes**: Yellow diamonds indicating arbitrary predicate expressions.
+  - **NCC Subnetworks**: Red rounded conjunction and partner nodes with dotted inhibit connections.
+  - **Terminal Nodes**: Purple double-circles showing rule names, priority/salience (`[salience: N]`), and activation counts.
+- **Edge Types**:
+  - **Solid Green**: Left token propagation between beta memories and join nodes.
+  - **Dashed Blue**: Right WME activation from alpha memories to join nodes.
+  - **Dashed Red**: Right negative WME activation to negative join nodes.
+  - **Dashed Amber**: Right existential WME activation to existential join nodes.
+  - **Dotted Red**: Inhibit edges from NCC partner nodes to NCC nodes.
+  - **Solid Purple**: Rule activation edges from beta memories to terminal nodes.
+
+#### Exporting & Rendering
+
+Export via CLI:
+```bash
+./ops5 --dot network.dot path/to/rules.ops
+```
+
+Export via REPL:
+```ops5
+ops5> dot network.dot
+Exported Rete network graph to network.dot
+
+ops5> dot
+; Emits DOT graph directly to stdout
+```
+
+Export in `.ops` files:
+```ops5
+(dot "network.dot")
+```
+
+Render to SVG or PNG using Graphviz:
+```bash
+dot -Tsvg network.dot -o network.svg
+dot -Tpng network.dot -o network.png
+```
 
 ---
 

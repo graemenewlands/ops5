@@ -242,6 +242,16 @@ func (r *Runner) Run(tc *TestCase) *Result {
 						eng.RemoveBreakpoint(name)
 					}
 				}
+			case parser.StmtDOT:
+				if stmt.DOTFile == "" {
+					_ = eng.ExportDOT(&outBuf)
+				} else {
+					f, err := os.Create(stmt.DOTFile)
+					if err == nil {
+						_ = eng.ExportDOT(f)
+						f.Close()
+					}
+				}
 			}
 		}
 	}

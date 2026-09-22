@@ -95,6 +95,13 @@ func (am *AlphaMemory) Items() []*model.WME {
 	return res
 }
 
+// ItemCount returns the number of WMEs currently stored in this AlphaMemory.
+func (am *AlphaMemory) ItemCount() int {
+	am.mu.RLock()
+	defer am.mu.RUnlock()
+	return len(am.items)
+}
+
 // Activation processes an incoming WME assertion or retraction.
 func (am *AlphaMemory) Activation(wme *model.WME, tag PropagationTag) {
 	am.mu.Lock()
