@@ -1043,6 +1043,60 @@ func TestREPLMatchesAndPBreak(t *testing.T) {
 	}
 }
 
+func TestREPLSalienceFormatting(t *testing.T) {
+	commands := `
+	(p normal-operation
+	   (sensor ^temp <v>)
+	   -->
+	   (write "normal")
+	)
+	(p emergency-shutdown [salience 1000]
+	   (sensor ^temp <v>)
+	   -->
+	   (write "emergency")
+	)
+	make sensor ^temp 750
+	cs
+	cs --table
+	pm
+	step
+	exit
+	`
+	in := strings.NewReader(commands)
+	var out bytes.Buffer
+	repl := NewREPL(in, &out)
+	repl.Start()
+
+	output := out.String()
+
+	// Text cs check: dominant marker on emergency-shutdown, salience displayed
+	if !strings.Contains(output, "* 1. emergency-shutdown [salience: 1000]") {
+		t.Fatalf("expected dominant emergency-shutdown with salience: 1000 in cs, got:\n%s", output)
+	}
+	if !strings.Contains(output, "2. normal-operation [salience: 0]") {
+		t.Fatalf("expected normal-operation with salience: 0 in cs, got:\n%s", output)
+	}
+
+	// cs --table check: Salience column header and values
+	if !strings.Contains(output, "Salience") {
+		t.Fatalf("expected 'Salience' column header in cs --table, got:\n%s", output)
+	}
+	if !strings.Contains(output, "1000") {
+		t.Fatalf("expected salience 1000 in cs --table, got:\n%s", output)
+	}
+
+	// pm check: pm prints [salience 1000]
+	if !strings.Contains(output, "(p emergency-shutdown [salience 1000]") {
+		t.Fatalf("expected pm to print [salience 1000], got:\n%s", output)
+	}
+
+	// Execution check: emergency-shutdown fires first on step
+	if !strings.Contains(output, "emergency") {
+		t.Fatalf("expected emergency-shutdown to fire first, got:\n%s", output)
+	}
+}
+
+
 
 
 

@@ -60,12 +60,13 @@ To prevent an inference engine from looping indefinitely on the same static set 
 
 ### LEX Selection Algorithm
 
-When comparing candidate activations $A$ and $B$, `LEX` evaluates four criteria in strict priority:
+When comparing candidate activations $A$ and $B$, `LEX` evaluates five criteria in strict priority:
 
 ```mermaid
 flowchart TD
-    Start["Compare Activations A and B"] --> Refraction["1. Discard Refracted Instantiations"]
-    Refraction --> Recency["2. Compare Recency Vectors (All Timetags Descending)"]
+    Start["Compare Activations A and B"] --> Salience["1. Compare Rule Salience ([salience N])"]
+    Salience -- Higher Salience Wins --> WinnerS["Higher Priority Rule Wins"]
+    Salience -- Equal Salience (Default 0) --> Recency["2. Compare Recency Vectors (All Timetags Descending)"]
     Recency -- Higher Timetag Wins --> WinnerA["Activation with Newer Data Wins"]
     Recency -- Identical Vectors --> Specificity["3. Compare Specificity (LHS Test Count)"]
     Specificity -- Higher Score Wins --> WinnerB["More Specific Rule Wins"]
@@ -74,8 +75,8 @@ flowchart TD
     DeclOrder -- Equal Index --> Alphabetical["5. Alphabetical Rule Name"]
 ```
 
-#### Step 1: Refraction Filter
-Any activation that has already fired for its specific combination of WME timetags is eliminated.
+#### Step 1: Explicit Rule Salience
+If the rules define explicit salience weights (default is `0`), the activation with the higher salience strictly dominates, regardless of WME recency or specificity.
 
 #### Step 2: Full Recency Vector Comparison
 1. For each candidate activation, collect the timetags of all WMEs matching positive condition elements.
@@ -103,35 +104,40 @@ If declaration indices are identical (e.g. dynamically generated rules), rule na
 
 ### MEA Selection Algorithm
 
-`MEA` differs from `LEX` in how it prioritizes recency:
+`MEA` evaluates criteria in the following strict priority:
 
 ```mermaid
 flowchart TD
-    Start["Compare Activations A and B (MEA)"] --> Step1["1. Compare Timetag of First Condition Element (CE 1)"]
+    Start["Compare Activations A and B (MEA)"] --> Step0["1. Compare Rule Salience ([salience N])"]
+    Step0 -- "Higher Salience" --> WinSal["Higher Priority Rule Wins"]
+    Step0 -- "Equal Salience (Default 0)" --> Step1["2. Compare Timetag of First Condition Element (CE 1)"]
     Step1 -- "CE 1 Newest" --> WinGoal["Activation with Most Recent Goal Wins"]
-    Step1 -- "CE 1 Equal" --> Step2["2. Compare Recency Vector of Remaining CEs (CE 2..N)"]
+    Step1 -- "CE 1 Equal" --> Step2["3. Compare Recency Vector of Remaining CEs (CE 2..N)"]
     Step2 -- "Remaining Vector Higher" --> WinData["Activation with Newer Supporting Data Wins"]
-    Step2 -- "Remaining Equal" --> Step3["3. Compare Specificity (Total LHS Tests)"]
+    Step2 -- "Remaining Equal" --> Step3["4. Compare Specificity (Total LHS Tests)"]
     Step3 -- "Higher Specificity" --> WinSpec["More Specific Rule Wins"]
-    Step3 -- "Equal Specificity" --> Step4["4. Declaration Order & Rule Name Tie-Breakers"]
+    Step3 -- "Equal Specificity" --> Step4["5. Declaration Order & Rule Name Tie-Breakers"]
 ```
 
-#### Step 1: First Condition Element (Goal Recency)
+#### Step 1: Explicit Rule Salience
+If the rules define explicit salience weights, the higher salience activation strictly dominates.
+
+#### Step 2: First Condition Element (Goal Recency)
 - Compare the timetag of the WME matching **Condition Element 1** ($CE_1$):
   - If $T_{A, 1} > T_{B, 1}$, Activation $A$ dominates.
   - If $T_{B, 1} > T_{A, 1}$, Activation $B$ dominates.
 - Because a newly asserted or modified sub-goal will have a higher timetag than its parent goal, the engine immediately suspends parent-level processing and focuses exclusively on rules serving the new sub-goal.
 
-#### Step 2: Remaining Recency Vector (Supporting Data Recency)
+#### Step 3: Remaining Recency Vector (Supporting Data Recency)
 If both activations match the exact same goal WME ($T_{A, 1} = T_{B, 1}$):
 - Collect the timetags of the remaining condition elements ($CE_2, \dots, CE_k$).
 - Sort remaining timetags in descending order.
 - Compare the resulting vectors lexicographically, exactly as in `LEX`.
 
-#### Step 3: Specificity Comparison
+#### Step 4: Specificity Comparison
 If remaining recency vectors are identical, choose the activation with higher specificity.
 
-#### Step 4: Declaration Order and Name Tie-Breakers
+#### Step 5: Declaration Order and Name Tie-Breakers
 Identical to `LEX`.
 
 ---

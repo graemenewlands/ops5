@@ -15,6 +15,8 @@ const (
 	TokenRParen        // )
 	TokenLBrace        // {
 	TokenRBrace        // }
+	TokenLBracket      // [
+	TokenRBracket      // ]
 	TokenArrow         // -->
 	TokenNegation      // -
 	TokenAttribute     // ^attr
@@ -39,6 +41,10 @@ func (t TokenType) String() string {
 		return "{"
 	case TokenRBrace:
 		return "}"
+	case TokenLBracket:
+		return "["
+	case TokenRBracket:
+		return "]"
 	case TokenLDisj:
 		return "<<"
 	case TokenRDisj:
@@ -161,6 +167,14 @@ func (l *Lexer) NextToken() (Token, error) {
 		l.next()
 		return Token{Type: TokenRBrace, Value: "}", Line: startLine, Col: startCol}, nil
 	}
+	if r == '[' {
+		l.next()
+		return Token{Type: TokenLBracket, Value: "[", Line: startLine, Col: startCol}, nil
+	}
+	if r == ']' {
+		l.next()
+		return Token{Type: TokenRBracket, Value: "]", Line: startLine, Col: startCol}, nil
+	}
 
 	// Arrow -->
 	if r == '-' && l.cursor+2 < len(l.src) && l.src[l.cursor+1] == '-' && l.src[l.cursor+2] == '>' {
@@ -176,7 +190,7 @@ func (l *Lexer) NextToken() (Token, error) {
 		var b strings.Builder
 		for {
 			c := l.peek()
-			if c == 0 || unicode.IsSpace(c) || c == '(' || c == ')' || c == '{' || c == '}' || c == '^' {
+			if c == 0 || unicode.IsSpace(c) || c == '(' || c == ')' || c == '{' || c == '}' || c == '[' || c == ']' || c == '^' {
 				break
 			}
 			b.WriteRune(l.next())
@@ -199,7 +213,7 @@ func (l *Lexer) NextToken() (Token, error) {
 			l.next()
 			return Token{Type: TokenOperator, Value: "<=", Line: startLine, Col: startCol}, nil
 		}
-		if unicode.IsSpace(l.peek()) || l.peek() == 0 || l.peek() == ')' || l.peek() == '}' {
+		if unicode.IsSpace(l.peek()) || l.peek() == 0 || l.peek() == ')' || l.peek() == '}' || l.peek() == ']' {
 			return Token{Type: TokenOperator, Value: "<", Line: startLine, Col: startCol}, nil
 		}
 
@@ -297,7 +311,7 @@ func (l *Lexer) NextToken() (Token, error) {
 	var b strings.Builder
 	for {
 		c := l.peek()
-		if c == 0 || unicode.IsSpace(c) || c == '(' || c == ')' || c == '{' || c == '}' || c == '^' || c == ';' {
+		if c == 0 || unicode.IsSpace(c) || c == '(' || c == ')' || c == '{' || c == '}' || c == '[' || c == ']' || c == '^' || c == ';' {
 			break
 		}
 		b.WriteRune(l.next())

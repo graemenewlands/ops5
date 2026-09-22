@@ -164,6 +164,11 @@ func (p *Parser) ParseRule() (*model.Rule, error) {
 
 	rule := model.NewRule(nameTok.Value)
 
+	// Parse optional rule properties / documentation (e.g. [salience N], (salience N), "docstring")
+	if err := p.parseRuleProperties(rule); err != nil {
+		return nil, err
+	}
+
 	// Parse LHS condition elements until TokenArrow (-->)
 	for p.current.Type != TokenArrow && p.current.Type != TokenEOF {
 		ce, err := p.parseConditionElement()
@@ -191,6 +196,151 @@ func (p *Parser) ParseRule() (*model.Rule, error) {
 	}
 
 	return rule, nil
+}
+
+func (p *Parser) parseInteger() (int, error) {
+	sign := 1
+	if p.current.Type == TokenNegation || (p.current.Type == TokenSymbol && p.current.Value == "-") {
+		sign = -1
+		if err := p.advance(); err != nil {
+			return 0, err
+		}
+	} else if p.current.Type == TokenSymbol && p.current.Value == "+" {
+		if err := p.advance(); err != nil {
+			return 0, err
+		}
+	}
+
+	if p.current.Type != TokenNumber {
+		return 0, fmt.Errorf("expected integer, got %s (%q) at line %d", p.current.Type, p.current.Value, p.current.Line)
+	}
+
+	val, err := strconv.ParseInt(p.current.Value, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid integer %q at line %d: %w", p.current.Value, p.current.Line, err)
+	}
+	if err := p.advance(); err != nil {
+		return 0, err
+	}
+	if val < 0 {
+		return int(val), nil
+	}
+	return int(val) * sign, nil
+}
+
+func (p *Parser) parseRuleProperties(rule *model.Rule) error {
+	for {
+		if p.current.Type == TokenString {
+			rule.Docstring = p.current.Value
+			if err := p.advance(); err != nil {
+				return err
+			}
+			continue
+		}
+
+		if p.current.Type == TokenLBracket {
+			if err := p.advance(); err != nil {
+				return err
+			}
+			propName := strings.ToLower(p.current.Value)
+			propName = strings.TrimSuffix(propName, ":")
+			if propName == "salience" {
+				if err := p.advance(); err != nil {
+					return err
+				}
+				if p.current.Type == TokenSymbol && (p.current.Value == ":" || p.current.Value == "=") {
+					if err := p.advance(); err != nil {
+						return err
+					}
+				}
+				sal, err := p.parseInteger()
+				if err != nil {
+					return fmt.Errorf("invalid salience value at line %d: %w", p.current.Line, err)
+				}
+				rule.Salience = sal
+			} else {
+				return fmt.Errorf("unknown rule property [%s] at line %d", p.current.Value, p.current.Line)
+			}
+			if _, err := p.expect(TokenRBracket); err != nil {
+				return err
+			}
+			continue
+		}
+
+		if p.current.Type == TokenLParen {
+			if strings.EqualFold(p.peek.Value, "declare") {
+				if err := p.advance(); err != nil { // consume '('
+					return err
+				}
+				if err := p.advance(); err != nil { // consume 'declare'
+					return err
+				}
+				for p.current.Type != TokenRParen && p.current.Type != TokenEOF {
+					if _, err := p.expect(TokenLParen); err != nil {
+						return err
+					}
+					decName := strings.ToLower(p.current.Value)
+					decName = strings.TrimSuffix(decName, ":")
+					if decName == "salience" {
+						if err := p.advance(); err != nil {
+							return err
+						}
+						if p.current.Type == TokenSymbol && (p.current.Value == ":" || p.current.Value == "=") {
+							if err := p.advance(); err != nil {
+								return err
+							}
+						}
+						sal, err := p.parseInteger()
+						if err != nil {
+							return fmt.Errorf("invalid salience value at line %d: %w", p.current.Line, err)
+						}
+						rule.Salience = sal
+					} else {
+						return fmt.Errorf("unknown declaration (%s) at line %d", p.current.Value, p.current.Line)
+					}
+					if _, err := p.expect(TokenRParen); err != nil {
+						return err
+					}
+				}
+				if _, err := p.expect(TokenRParen); err != nil {
+					return err
+				}
+				continue
+			}
+
+			peekLower := strings.ToLower(p.peek.Value)
+			peekClean := strings.TrimSuffix(peekLower, ":")
+			if peekClean == "salience" {
+				lx := *p.lexer
+				tok3, _ := lx.NextToken()
+				if tok3.Type == TokenNumber || tok3.Type == TokenNegation || tok3.Value == ":" || tok3.Value == "=" || (tok3.Type == TokenSymbol && isNumber(tok3.Value)) {
+					if err := p.advance(); err != nil { // consume '('
+						return err
+					}
+					if err := p.advance(); err != nil { // consume 'salience'
+						return err
+					}
+					if p.current.Type == TokenSymbol && (p.current.Value == ":" || p.current.Value == "=") {
+						if err := p.advance(); err != nil {
+							return err
+						}
+					}
+					sal, err := p.parseInteger()
+					if err != nil {
+						return fmt.Errorf("invalid salience value at line %d: %w", p.current.Line, err)
+					}
+					rule.Salience = sal
+					if _, err := p.expect(TokenRParen); err != nil {
+						return err
+					}
+					continue
+				}
+			}
+		}
+
+		break
+	}
+	return nil
 }
 
 func (p *Parser) isAttributeToken(tok Token, schema *model.ClassSchema) bool {

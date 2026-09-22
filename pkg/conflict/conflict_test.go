@@ -139,3 +139,69 @@ func TestConflictSetRemoveRule(t *testing.T) {
 		t.Errorf("expected dominant to be ruleB, got %v", dom)
 	}
 }
+
+func TestSalienceDominance(t *testing.T) {
+	// Rule Low: salience 0, newer timetag [100], higher specificity (2 conditions)
+	ruleLow := model.NewRule("ruleLow").SetSalience(0)
+	ruleLow.Index = 1
+	ruleLow.AddCondition(model.NewPositiveCE("c1").AddEqualTest("x", model.NewInt(1)))
+	ruleLow.AddCondition(model.NewPositiveCE("c2").AddEqualTest("y", model.NewInt(2)))
+
+	// Rule High: salience 100, older timetag [10], lower specificity (1 condition)
+	ruleHigh := model.NewRule("ruleHigh").SetSalience(100)
+	ruleHigh.Index = 2
+	ruleHigh.AddCondition(model.NewPositiveCE("c1"))
+
+	// Rule Negative: salience -50, older timetag [5]
+	ruleNeg := model.NewRule("ruleNeg").SetSalience(-50)
+	ruleNeg.Index = 3
+	ruleNeg.AddCondition(model.NewPositiveCE("c1"))
+
+	actLow := NewActivation(ruleLow, makeDummyToken([]int64{100, 99}))
+	actHigh := NewActivation(ruleHigh, makeDummyToken([]int64{10}))
+	actNeg := NewActivation(ruleNeg, makeDummyToken([]int64{5}))
+
+	// Under LEX:
+	// Without salience, actLow (timetag 100) would dominate actHigh (timetag 10).
+	// But with salience 100 vs 0, actHigh MUST dominate actLow!
+	if LexCompare(actHigh, actLow) <= 0 {
+		t.Errorf("LEX: expected actHigh (salience 100) to dominate actLow (salience 0)")
+	}
+	if LexCompare(actLow, actNeg) <= 0 {
+		t.Errorf("LEX: expected actLow (salience 0) to dominate actNeg (salience -50)")
+	}
+
+	// Under MEA:
+	// Without salience, actLow (CE1=100) would dominate actHigh (CE1=10).
+	// But with salience 100 vs 0, actHigh MUST dominate actLow!
+	if MeaCompare(actHigh, actLow) <= 0 {
+		t.Errorf("MEA: expected actHigh (salience 100) to dominate actLow (salience 0)")
+	}
+
+	// Test conflict set All() ordering
+	cs := NewSet()
+	cs.OnActivationAdd(ruleLow, makeDummyToken([]int64{100, 99}))
+	cs.OnActivationAdd(ruleNeg, makeDummyToken([]int64{5}))
+	cs.OnActivationAdd(ruleHigh, makeDummyToken([]int64{10}))
+
+	all := cs.All()
+	if len(all) != 3 {
+		t.Fatalf("expected 3 activations, got %d", len(all))
+	}
+	if all[0].Rule.Name != "ruleHigh" {
+		t.Errorf("expected 1st dominant activation to be ruleHigh (salience 100), got %s", all[0].Rule.Name)
+	}
+	if all[1].Rule.Name != "ruleLow" {
+		t.Errorf("expected 2nd activation to be ruleLow (salience 0), got %s", all[1].Rule.Name)
+	}
+	if all[2].Rule.Name != "ruleNeg" {
+		t.Errorf("expected 3rd activation to be ruleNeg (salience -50), got %s", all[2].Rule.Name)
+	}
+
+	// Dominant selection in ConflictSet
+	dom, ok := cs.SelectDominant()
+	if !ok || dom.Rule.Name != "ruleHigh" {
+		t.Errorf("expected dominant to be ruleHigh, got %v", dom)
+	}
+}
+

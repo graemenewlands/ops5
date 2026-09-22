@@ -2397,6 +2397,137 @@ func TestParseUnpbreakStatement(t *testing.T) {
 	}
 }
 
+func TestParseRuleSalience(t *testing.T) {
+	tests := []struct {
+		name         string
+		input        string
+		wantSalience int
+		wantDoc      string
+		hasError     bool
+	}{
+		{
+			name: "square bracket salience",
+			input: `(p emergency-shutdown [salience 1000]
+				(sensor ^temp > 500)
+			-->
+				(halt)
+			)`,
+			wantSalience: 1000,
+		},
+		{
+			name: "square bracket salience with colon",
+			input: `(p emergency-shutdown [salience: 500]
+				(sensor ^temp > 500)
+			-->
+				(halt)
+			)`,
+			wantSalience: 500,
+		},
+		{
+			name: "negative salience in bracket",
+			input: `(p low-priority [salience -100]
+				(item ^status pending)
+			-->
+				(write "Low priority" (crlf))
+			)`,
+			wantSalience: -100,
+		},
+		{
+			name: "paren salience",
+			input: `(p urgent-task (salience 250)
+				(task ^priority high)
+			-->
+				(write "Urgent" (crlf))
+			)`,
+			wantSalience: 250,
+		},
+		{
+			name: "paren salience with colon",
+			input: `(p urgent-task (salience: 350)
+				(task ^priority high)
+			-->
+				(write "Urgent" (crlf))
+			)`,
+			wantSalience: 350,
+		},
+		{
+			name: "declare salience",
+			input: `(p clips-style (declare (salience 750))
+				(event ^kind alert)
+			-->
+				(write "Alert" (crlf))
+			)`,
+			wantSalience: 750,
+		},
+		{
+			name: "docstring and salience",
+			input: `(p documented-rule "Critical emergency rule" [salience 999]
+				(sensor ^temp > 600)
+			-->
+				(halt)
+			)`,
+			wantSalience: 999,
+			wantDoc:      "Critical emergency rule",
+		},
+		{
+			name: "default salience is zero",
+			input: `(p standard-rule
+				(sensor ^temp > 100)
+			-->
+				(halt)
+			)`,
+			wantSalience: 0,
+		},
+		{
+			name: "rule with class named salience in CE is not parsed as property",
+			input: `(p match-salience-class
+				(salience ^score <sval>)
+			-->
+				(write "Matched salience WME" (crlf))
+			)`,
+			wantSalience: 0,
+		},
+		{
+			name: "invalid salience property name rejected",
+			input: `(p bad-prop [unknown-prop 10]
+				(sensor ^temp > 100)
+			-->
+				(halt)
+			)`,
+			hasError: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			p, err := NewParser(tc.input)
+			if err != nil {
+				if tc.hasError {
+					return
+				}
+				t.Fatalf("unexpected NewParser error: %v", err)
+			}
+			rule, err := p.ParseRule()
+			if tc.hasError {
+				if err == nil {
+					t.Fatalf("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected ParseRule error: %v", err)
+			}
+			if rule.Salience != tc.wantSalience {
+				t.Errorf("expected Salience %d, got %d", tc.wantSalience, rule.Salience)
+			}
+			if tc.wantDoc != "" && rule.Docstring != tc.wantDoc {
+				t.Errorf("expected Docstring %q, got %q", tc.wantDoc, rule.Docstring)
+			}
+		})
+	}
+}
+
+
 
 
 

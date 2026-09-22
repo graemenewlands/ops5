@@ -585,32 +585,52 @@ To prevent infinite loops where a single rule continuously matches the same stat
 - Once an instantiation fires, its unique key is stored in the refraction table.
 - An identical instantiation cannot fire again unless at least one of its participating WMEs is modified or re-asserted (yielding a new timetag).
 
+### Rule Salience / Priority (`[salience N]`)
+
+Rules can declare an optional **salience** (priority weight) directly following the rule name. Higher salience activations strictly dominate in conflict resolution before recency or specificity heuristics are evaluated:
+
+```ops5
+(p emergency-shutdown [salience 1000]
+    (sensor ^temp > 500)
+  -->
+    (halt)
+)
+```
+
+- **Syntax formats supported**: `[salience N]`, `[salience: N]`, `(salience N)`, `(salience: N)`, and CLIPS-style `(declare (salience N))`.
+- **Default salience**: `0`. Supports positive (priority) and negative (deferred/cleanup) integers.
+- **Tie-breaking**: When candidate activations have equal salience, the active conflict resolution strategy (**LEX** or **MEA**) determines dominance.
+
 ### LEX Strategy (Lexicographic)
 
-The default OPS5 conflict resolution strategy prioritizes the most recently asserted or modified facts across the entire LHS:
+The default OPS5 conflict resolution strategy prioritizes explicit salience followed by the most recently asserted or modified facts across the entire LHS:
 
-1. **Recency Vector Comparison**:
+1. **Rule Salience (Tier 1)**:
+   - Higher salience rules strictly dominate.
+2. **Recency Vector Comparison**:
    - Collect all participating WME timetags in the instantiation.
    - Sort them descending: `[T_max, T_second, ..., T_min]`.
    - Compare vectors lexicographically against other candidate activations. The activation with the highest timetag wins. If highest timetags are equal, compare second-highest, and so on.
-2. **Specificity**:
+3. **Specificity**:
    - If recency vectors are identical, choose the rule with higher specificity (more condition tests).
-3. **Rule Index Tie-Breaker**:
+4. **Rule Index Tie-Breaker**:
    - If specificity is identical, choose the rule declared earliest in the engine (lowest declaration index).
-4. **Alphabetical Tie-Breaker**:
+5. **Alphabetical Tie-Breaker**:
    - Final deterministic tie-breaker by rule name string comparison.
 
 ### MEA Strategy (Means-Ends Analysis)
 
 The MEA strategy is designed for goal-directed architectures:
 
-1. **Recency of Condition Element 1**:
+1. **Rule Salience (Tier 1)**:
+   - Higher salience rules strictly dominate.
+2. **Recency of Condition Element 1**:
    - Compare the timetag of the WME matching the **very first condition element** (the goal CE). The instantiation with the newest goal WME dominates.
-2. **Recency Vector of Remaining Condition Elements**:
+3. **Recency Vector of Remaining Condition Elements**:
    - If CE 1 timetags are equal, sort the remaining timetags (`CE_2` through `CE_N`) descending and compare them lexicographically (identical to LEX).
-3. **Specificity**:
+4. **Specificity**:
    - If remaining recencies are equal, choose the rule with higher specificity.
-4. **Rule Index & Name Tie-Breakers**:
+5. **Rule Index & Name Tie-Breakers**:
    - Definition index followed by alphabetical tie-breaker.
 
 #### Strategy Comparison Example

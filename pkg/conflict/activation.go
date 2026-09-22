@@ -33,6 +33,14 @@ func (a *Activation) Key() string {
 	return fmt.Sprintf("%s:[%s]", a.Rule.Name, strings.Join(tags, ","))
 }
 
+// Salience returns the priority weight of the rule associated with this activation.
+func (a *Activation) Salience() int {
+	if a.Rule != nil {
+		return a.Rule.Salience
+	}
+	return 0
+}
+
 // Specificity returns the specificity of the rule associated with this activation.
 func (a *Activation) Specificity() int {
 	return a.Rule.Specificity()
@@ -40,5 +48,8 @@ func (a *Activation) Specificity() int {
 
 // String returns a human-readable representation of the activation.
 func (a *Activation) String() string {
+	if a.Salience() != 0 {
+		return fmt.Sprintf("Activation{%s, salience=%d, timetags=%v, specificity=%d}", a.Rule.Name, a.Salience(), a.Timetags, a.Specificity())
+	}
 	return fmt.Sprintf("Activation{%s, timetags=%v, specificity=%d}", a.Rule.Name, a.Timetags, a.Specificity())
 }

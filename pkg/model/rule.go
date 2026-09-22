@@ -9,6 +9,8 @@ import (
 type Rule struct {
 	Index       int                 // Declaration sequence index (used as final tie-breaker)
 	Name        string              // Rule name
+	Docstring   string              // Optional documentation string
+	Salience    int                 // Priority weight (default 0). Higher salience dominates in conflict resolution.
 	Conditions  []*ConditionElement // LHS conditions
 	Actions     []Action            // RHS actions
 	specificity int                 // Cached specificity score
@@ -18,10 +20,23 @@ type Rule struct {
 func NewRule(name string) *Rule {
 	return &Rule{
 		Name:        name,
+		Salience:    0,
 		Conditions:  make([]*ConditionElement, 0),
 		Actions:     make([]Action, 0),
 		specificity: -1,
 	}
+}
+
+// SetSalience sets the salience priority weight of the rule.
+func (r *Rule) SetSalience(salience int) *Rule {
+	r.Salience = salience
+	return r
+}
+
+// SetDocstring sets the documentation string for the rule.
+func (r *Rule) SetDocstring(doc string) *Rule {
+	r.Docstring = doc
+	return r
 }
 
 // AddCondition appends a condition element to the LHS.
@@ -57,7 +72,14 @@ func (r *Rule) Specificity() int {
 // String returns a representation of the production.
 func (r *Rule) String() string {
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("(p %s\n", r.Name))
+	if r.Salience != 0 {
+		b.WriteString(fmt.Sprintf("(p %s [salience %d]\n", r.Name, r.Salience))
+	} else {
+		b.WriteString(fmt.Sprintf("(p %s\n", r.Name))
+	}
+	if r.Docstring != "" {
+		b.WriteString(fmt.Sprintf("   %q\n", r.Docstring))
+	}
 	for _, ce := range r.Conditions {
 		b.WriteString(fmt.Sprintf("   %s\n", ce.String()))
 	}

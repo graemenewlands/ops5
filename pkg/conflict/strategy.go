@@ -58,10 +58,18 @@ func sortedDescending(tags []int64) []int64 {
 }
 
 // LexCompare compares two activations using the OPS5 LEX conflict resolution strategy.
+// 0. Salience: Higher salience priority dominates.
 // 1. Recency: Descending sort of all timetags, compared lexicographically.
 // 2. Specificity: Number of tests on the LHS.
 // 3. Tie-breaker: Rule declaration sequence index.
 func LexCompare(a, b *Activation) int {
+	// 0. Compare salience (Tier 1)
+	if a.Salience() > b.Salience() {
+		return 1
+	} else if a.Salience() < b.Salience() {
+		return -1
+	}
+
 	// 1. Compare recency vectors
 	va := sortedDescending(a.Timetags)
 	vb := sortedDescending(b.Timetags)
@@ -96,11 +104,19 @@ func LexCompare(a, b *Activation) int {
 }
 
 // MeaCompare compares two activations using the OPS5 MEA conflict resolution strategy.
+// 0. Salience: Higher salience priority dominates.
 // 1. Recency of CE 1: Timetag of the first condition element.
 // 2. Recency of remaining CEs: Descending sort of remaining timetags, compared lexicographically.
 // 3. Specificity: Number of tests on the LHS.
 // 4. Tie-breaker: Rule declaration sequence index.
 func MeaCompare(a, b *Activation) int {
+	// 0. Compare salience (Tier 1)
+	if a.Salience() > b.Salience() {
+		return 1
+	} else if a.Salience() < b.Salience() {
+		return -1
+	}
+
 	// 1. Compare timetag of condition element 1
 	var firstA, firstB int64
 	if len(a.Timetags) > 0 {

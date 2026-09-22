@@ -760,18 +760,43 @@ func (r *REPL) printConflictSet(args ...string) {
 		return
 	}
 
+	hasSalience := false
+	for _, act := range acts {
+		if act.Salience() != 0 {
+			hasSalience = true
+			break
+		}
+	}
+
 	for i, act := range acts {
 		marker := "  "
 		if dom != nil && act.Key() == dom.Key() {
 			marker = "* " // Dominant activation
 		}
-		fmt.Fprintf(r.out, "%s%d. %s  WMEs: %v  (specificity: %d)\n", marker, i+1, r.styler.Bold(act.Rule.Name), act.Timetags, act.Specificity())
+		salienceStr := ""
+		if hasSalience {
+			salienceStr = fmt.Sprintf(" [salience: %d]", act.Salience())
+		}
+		fmt.Fprintf(r.out, "%s%d. %s%s  WMEs: %v  (specificity: %d)\n", marker, i+1, r.styler.Bold(act.Rule.Name), salienceStr, act.Timetags, act.Specificity())
 	}
 }
 
 func (r *REPL) printConflictSetTable(acts []*conflict.Activation, dom *conflict.Activation) {
 	tbl := NewTable(r.styler)
-	tbl.SetHeaders("#", "Sel", "Rule", "Timetags", "Specificity")
+
+	hasSalience := false
+	for _, act := range acts {
+		if act.Salience() != 0 {
+			hasSalience = true
+			break
+		}
+	}
+
+	if hasSalience {
+		tbl.SetHeaders("#", "Sel", "Rule", "Salience", "Timetags", "Specificity")
+	} else {
+		tbl.SetHeaders("#", "Sel", "Rule", "Timetags", "Specificity")
+	}
 
 	for i, act := range acts {
 		sel := " "
@@ -781,13 +806,30 @@ func (r *REPL) printConflictSetTable(acts []*conflict.Activation, dom *conflict.
 			ruleName = r.styler.Bold(r.styler.BrightYellow(ruleName))
 		}
 		timetagsStr := fmt.Sprintf("%v", act.Timetags)
-		tbl.AddRow(
-			fmt.Sprintf("%d", i+1),
-			sel,
-			ruleName,
-			timetagsStr,
-			fmt.Sprintf("%d", act.Specificity()),
-		)
+		if hasSalience {
+			salienceStr := fmt.Sprintf("%d", act.Salience())
+			if act.Salience() > 0 {
+				salienceStr = r.styler.BrightCyan(salienceStr)
+			} else if act.Salience() < 0 {
+				salienceStr = r.styler.BrightMagenta(salienceStr)
+			}
+			tbl.AddRow(
+				fmt.Sprintf("%d", i+1),
+				sel,
+				ruleName,
+				salienceStr,
+				timetagsStr,
+				fmt.Sprintf("%d", act.Specificity()),
+			)
+		} else {
+			tbl.AddRow(
+				fmt.Sprintf("%d", i+1),
+				sel,
+				ruleName,
+				timetagsStr,
+				fmt.Sprintf("%d", act.Specificity()),
+			)
+		}
 	}
 
 	fmt.Fprint(r.out, tbl.Render())

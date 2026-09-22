@@ -83,8 +83,9 @@ func (s *Styler) Cyan(text string) string         { return s.Wrap(ansiCyan, text
 func (s *Styler) Gray(text string) string         { return s.Wrap(ansiGray, text) }
 func (s *Styler) BrightRed(text string) string    { return s.Wrap(ansiBrightRed, text) }
 func (s *Styler) BrightGreen(text string) string  { return s.Wrap(ansiBrightGreen, text) }
-func (s *Styler) BrightYellow(text string) string { return s.Wrap(ansiBrightYellow, text) }
-func (s *Styler) BrightCyan(text string) string   { return s.Wrap(ansiBrightCyan, text) }
+func (s *Styler) BrightYellow(text string) string  { return s.Wrap(ansiBrightYellow, text) }
+func (s *Styler) BrightMagenta(text string) string { return s.Wrap(ansiBrightMagenta, text) }
+func (s *Styler) BrightCyan(text string) string    { return s.Wrap(ansiBrightCyan, text) }
 
 func (s *Styler) Prompt() string {
 	if !s.Enabled {
