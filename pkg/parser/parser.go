@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"ops5/pkg/model"
+	"github.com/graemenewlands/ops5/pkg/model"
 )
 
 // Parser parses OPS5 productions and commands into model objects.

@@ -3,7 +3,7 @@ package rete
 import (
 	"testing"
 
-	"ops5/pkg/model"
+	"github.com/graemenewlands/ops5/pkg/model"
 )
 
 func TestNccNodeUnitLifecycle(t *testing.T) {

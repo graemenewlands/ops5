@@ -3,7 +3,7 @@ package rete
 import (
 	"sync"
 
-	"ops5/pkg/model"
+	"github.com/graemenewlands/ops5/pkg/model"
 )
 
 // NccPartnerNode is the terminal node of an NCC sub-network.

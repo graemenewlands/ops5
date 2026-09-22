@@ -5,7 +5,7 @@ import (
 	"strings"
 	"sync"
 
-	"ops5/pkg/model"
+	"github.com/graemenewlands/ops5/pkg/model"
 )
 
 // CanonicalValueKey computes a deterministic string representation for model.Value

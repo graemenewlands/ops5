@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"ops5/pkg/engine"
-	"ops5/pkg/model"
-	"ops5/pkg/parser"
+	"github.com/graemenewlands/ops5/pkg/engine"
+	"github.com/graemenewlands/ops5/pkg/model"
+	"github.com/graemenewlands/ops5/pkg/parser"
 )
 
 // helper to execute OPS5 script statements (rules and top-level makes)

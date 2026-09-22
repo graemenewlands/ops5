@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"ops5/pkg/conflict"
-	"ops5/pkg/engine"
+	"github.com/graemenewlands/ops5/pkg/conflict"
+	"github.com/graemenewlands/ops5/pkg/engine"
 )
 
 type benchmarkResult struct {

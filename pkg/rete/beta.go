@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sync"
 
-	"ops5/pkg/model"
+	"github.com/graemenewlands/ops5/pkg/model"
 )
 
 // LeftActivatable represents a beta node that accepts left activations (tokens).

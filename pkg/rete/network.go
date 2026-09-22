@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"ops5/pkg/model"
+	"github.com/graemenewlands/ops5/pkg/model"
 )
 
 type terminalInfo struct {

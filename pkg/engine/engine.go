@@ -11,11 +11,11 @@ import (
 	"sync"
 	"unicode"
 
-	"ops5/pkg/conflict"
-	"ops5/pkg/model"
-	"ops5/pkg/parser"
-	"ops5/pkg/rete"
-	"ops5/pkg/wm"
+	"github.com/graemenewlands/ops5/pkg/conflict"
+	"github.com/graemenewlands/ops5/pkg/model"
+	"github.com/graemenewlands/ops5/pkg/parser"
+	"github.com/graemenewlands/ops5/pkg/rete"
+	"github.com/graemenewlands/ops5/pkg/wm"
 )
 
 type openFileEntry struct {

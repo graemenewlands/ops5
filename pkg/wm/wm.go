@@ -5,7 +5,7 @@ import (
 	"sort"
 	"sync"
 
-	"ops5/pkg/model"
+	"github.com/graemenewlands/ops5/pkg/model"
 )
 
 // Listener is notified whenever a WME is asserted or retracted.

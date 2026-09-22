@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"ops5/pkg/model"
-	"ops5/pkg/rete"
+	"github.com/graemenewlands/ops5/pkg/model"
+	"github.com/graemenewlands/ops5/pkg/rete"
 )
 
 // Activation represents an instantiation of a rule with matched WMEs.

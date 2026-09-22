@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"ops5/pkg/model"
+	"github.com/graemenewlands/ops5/pkg/model"
 )
 
 func TestEngineGoalProgression(t *testing.T) {

@@ -3,8 +3,8 @@ package rete
 import (
 	"testing"
 
-	"ops5/pkg/model"
-	"ops5/pkg/wm"
+	"github.com/graemenewlands/ops5/pkg/model"
+	"github.com/graemenewlands/ops5/pkg/wm"
 )
 
 type recordListener struct {

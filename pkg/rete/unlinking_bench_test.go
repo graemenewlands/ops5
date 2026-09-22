@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"ops5/pkg/model"
+	"github.com/graemenewlands/ops5/pkg/model"
 )
 
 // BenchmarkJoinRightUnlinked measures throughput of sending left tokens to a BetaMemory

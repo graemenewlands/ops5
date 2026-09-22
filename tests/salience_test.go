@@ -5,10 +5,10 @@ import (
 	"strings"
 	"testing"
 
-	"ops5/pkg/conflict"
-	"ops5/pkg/engine"
-	"ops5/pkg/model"
-	"ops5/pkg/parser"
+	"github.com/graemenewlands/ops5/pkg/conflict"
+	"github.com/graemenewlands/ops5/pkg/engine"
+	"github.com/graemenewlands/ops5/pkg/model"
+	"github.com/graemenewlands/ops5/pkg/parser"
 )
 
 func TestRuleSalienceEndToEnd(t *testing.T) {

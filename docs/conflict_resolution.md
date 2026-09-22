@@ -335,8 +335,8 @@ Configure or inspect the strategy on the Go [`Engine`](../pkg/engine/engine.go) 
 package main
 
 import (
-    "ops5/pkg/conflict"
-    "ops5/pkg/engine"
+    "github.com/graemenewlands/ops5/pkg/conflict"
+    "github.com/graemenewlands/ops5/pkg/engine"
 )
 
 func main() {

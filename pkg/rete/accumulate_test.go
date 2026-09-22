@@ -4,7 +4,7 @@ import (
 	"math"
 	"testing"
 
-	"ops5/pkg/model"
+	"github.com/graemenewlands/ops5/pkg/model"
 )
 
 func TestAccumulateNodeCount(t *testing.T) {

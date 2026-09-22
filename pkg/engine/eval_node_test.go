@@ -3,8 +3,8 @@ package engine
 import (
 	"testing"
 
-	"ops5/pkg/model"
-	"ops5/pkg/parser"
+	"github.com/graemenewlands/ops5/pkg/model"
+	"github.com/graemenewlands/ops5/pkg/parser"
 )
 
 func loadRule(t *testing.T, eng *Engine, src string) {

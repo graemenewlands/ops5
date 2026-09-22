@@ -8,10 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"ops5/pkg/conflict"
-	"ops5/pkg/engine"
-	"ops5/pkg/model"
-	"ops5/pkg/parser"
+	"github.com/graemenewlands/ops5/pkg/conflict"
+	"github.com/graemenewlands/ops5/pkg/engine"
+	"github.com/graemenewlands/ops5/pkg/model"
+	"github.com/graemenewlands/ops5/pkg/parser"
 )
 
 // WMEAssertion defines a working memory element to assert or verify in a test case.

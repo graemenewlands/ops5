@@ -5,8 +5,8 @@ import (
 	"strings"
 	"sync"
 
-	"ops5/pkg/model"
-	"ops5/pkg/rete"
+	"github.com/graemenewlands/ops5/pkg/model"
+	"github.com/graemenewlands/ops5/pkg/rete"
 )
 
 // Set manages the active conflict set (agenda) of candidate rule instantiations.

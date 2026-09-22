@@ -3,8 +3,8 @@ package conflict
 import (
 	"testing"
 
-	"ops5/pkg/model"
-	"ops5/pkg/rete"
+	"github.com/graemenewlands/ops5/pkg/model"
+	"github.com/graemenewlands/ops5/pkg/rete"
 )
 
 func makeDummyToken(timetags []int64) *rete.Token {

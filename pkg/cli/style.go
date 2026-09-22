@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"ops5/pkg/model"
+	"github.com/graemenewlands/ops5/pkg/model"
 	"golang.org/x/term"
 )
 

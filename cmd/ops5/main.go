@@ -6,9 +6,9 @@ import (
 	"os"
 	"strings"
 
-	"ops5/pkg/cli"
-	"ops5/pkg/conflict"
-	"ops5/pkg/harness"
+	"github.com/graemenewlands/ops5/pkg/cli"
+	"github.com/graemenewlands/ops5/pkg/conflict"
+	"github.com/graemenewlands/ops5/pkg/harness"
 )
 
 func main() {

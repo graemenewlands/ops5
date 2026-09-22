@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"ops5/pkg/engine"
-	"ops5/pkg/model"
+	"github.com/graemenewlands/ops5/pkg/engine"
+	"github.com/graemenewlands/ops5/pkg/model"
 )
 
 // TestExistsIntegrationSingleRule verifies that an existential semi-join

@@ -1,7 +1,7 @@
 # OPS5 Go Runtime & Engine Specification
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![Go Reference](https://pkg.go.dev/badge/ops5.svg)](https://pkg.go.dev/ops5)
+[![Go Reference](https://pkg.go.dev/badge/github.com/graemenewlands/ops5.svg)](https://pkg.go.dev/github.com/graemenewlands/ops5)
 
 A minimal, robust, and high-performance Go implementation of Charles Forgy's classic **OPS5** production rule system using the **Rete** pattern matching algorithm.
 
@@ -1012,10 +1012,10 @@ package main
 
 import (
 	"fmt"
-	"ops5/pkg/conflict"
-	"ops5/pkg/engine"
-	"ops5/pkg/model"
-	"ops5/pkg/parser"
+	"github.com/graemenewlands/ops5/pkg/conflict"
+	"github.com/graemenewlands/ops5/pkg/engine"
+	"github.com/graemenewlands/ops5/pkg/model"
+	"github.com/graemenewlands/ops5/pkg/parser"
 )
 
 func main() {

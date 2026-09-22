@@ -1,4 +1,4 @@
-module ops5
+module github.com/graemenewlands/ops5
 
 go 1.23.2
 

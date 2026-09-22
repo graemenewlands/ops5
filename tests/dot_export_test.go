@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"ops5/pkg/cli"
-	"ops5/pkg/engine"
-	"ops5/pkg/harness"
-	"ops5/pkg/parser"
+	"github.com/graemenewlands/ops5/pkg/cli"
+	"github.com/graemenewlands/ops5/pkg/engine"
+	"github.com/graemenewlands/ops5/pkg/harness"
+	"github.com/graemenewlands/ops5/pkg/parser"
 )
 
 func TestEngineExportDOTComprehensive(t *testing.T) {

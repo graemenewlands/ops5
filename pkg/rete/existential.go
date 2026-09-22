@@ -3,7 +3,7 @@ package rete
 import (
 	"sync"
 
-	"ops5/pkg/model"
+	"github.com/graemenewlands/ops5/pkg/model"
 )
 
 // ExistentialJoinNode handles existential condition elements (exists (class ...)).

@@ -3,7 +3,7 @@ package rete
 import (
 	"sync"
 
-	"ops5/pkg/model"
+	"github.com/graemenewlands/ops5/pkg/model"
 )
 
 // AlphaNode represents any node in the alpha network capable of processing a WME.

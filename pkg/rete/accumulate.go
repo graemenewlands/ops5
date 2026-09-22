@@ -5,7 +5,7 @@ import (
 	"strings"
 	"sync"
 
-	"ops5/pkg/model"
+	"github.com/graemenewlands/ops5/pkg/model"
 )
 
 // AccumulateNode implements beta-network aggregation over sets of matching WMEs.

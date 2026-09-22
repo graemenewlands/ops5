@@ -3,7 +3,7 @@ package rete
 import (
 	"sync"
 
-	"ops5/pkg/model"
+	"github.com/graemenewlands/ops5/pkg/model"
 )
 
 // EvalNode is a single-input beta node that filters incoming tokens

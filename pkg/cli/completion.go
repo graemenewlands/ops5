@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"ops5/pkg/engine"
+	"github.com/graemenewlands/ops5/pkg/engine"
 )
 
 // Completer generates context-aware autocompletions for the OPS5 REPL.

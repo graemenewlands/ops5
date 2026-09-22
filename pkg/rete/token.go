@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"ops5/pkg/model"
+	"github.com/graemenewlands/ops5/pkg/model"
 )
 
 // PropagationTag indicates whether an activation is being asserted (added) or retracted (removed).
