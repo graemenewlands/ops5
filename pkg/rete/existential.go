@@ -21,6 +21,9 @@ type ExistentialJoinNode struct {
 	matches    map[string]map[int64]bool
 	tokens     map[string]*Token
 	successors []LeftActivatable
+
+	leftLink  LeftLink  // always linked to betaMemory
+	rightLink RightLink // unlinked from alphaMemory when betaMemory has 0 tokens
 }
 
 // NewExistentialJoinNode creates a new ExistentialJoinNode.
@@ -43,7 +46,7 @@ func NewExistentialJoinNode(betaMem *BetaMemory, alphaMem *AlphaMemory, ce *mode
 		ai = alphaMem.GetOrCreateIndex(rightSpecs)
 	}
 
-	return &ExistentialJoinNode{
+	ejn := &ExistentialJoinNode{
 		betaMemory:  betaMem,
 		alphaMemory: alphaMem,
 		joinTests:   tests,
@@ -54,15 +57,58 @@ func NewExistentialJoinNode(betaMem *BetaMemory, alphaMem *AlphaMemory, ce *mode
 		tokens:      make(map[string]*Token),
 		successors:  make([]LeftActivatable, 0),
 	}
+	ejn.leftLink.target = ejn
+	ejn.rightLink.target = ejn
+	return ejn
 }
 
-// Attach connects the existential join node to its parent memories and triggers catch-up.
+// Attach connects the existential join node to its parent memories and sets up unlinking.
 func (ejn *ExistentialJoinNode) Attach() {
 	if ejn.alphaMemory != nil {
 		ejn.alphaMemory.AddSuccessor(ejn)
+		if ejn.betaMemory != nil && ejn.betaMemory.TokenCount() > 0 {
+			ejn.alphaMemory.LinkSuccessor(&ejn.rightLink)
+		}
 	}
 	if ejn.betaMemory != nil {
+		ejn.betaMemory.LinkSuccessor(&ejn.leftLink)
 		ejn.betaMemory.AddSuccessor(ejn)
+	}
+}
+
+// LeftLink returns the LeftLink associated with this existential join node.
+func (ejn *ExistentialJoinNode) LeftLink() *LeftLink {
+	return &ejn.leftLink
+}
+
+// RightLink returns the RightLink associated with this existential join node.
+func (ejn *ExistentialJoinNode) RightLink() *RightLink {
+	return &ejn.rightLink
+}
+
+// IsLeftLinked returns true (existential joins are always left-linked).
+func (ejn *ExistentialJoinNode) IsLeftLinked() bool {
+	return ejn.leftLink.IsLinked()
+}
+
+// IsRightLinked returns true if this existential join node is linked to its AlphaMemory.
+func (ejn *ExistentialJoinNode) IsRightLinked() bool {
+	return ejn.rightLink.IsLinked()
+}
+
+// OnLeftMemoryNonEmpty is called when betaMemory token count transitions 0 -> 1.
+// Re-links this existential join node to its AlphaMemory (Left Unlinking).
+func (ejn *ExistentialJoinNode) OnLeftMemoryNonEmpty() {
+	if ejn.alphaMemory != nil {
+		ejn.alphaMemory.LinkSuccessor(&ejn.rightLink)
+	}
+}
+
+// OnLeftMemoryEmpty is called when betaMemory token count transitions 1 -> 0.
+// Unlinks this existential join node from its AlphaMemory (Left Unlinking).
+func (ejn *ExistentialJoinNode) OnLeftMemoryEmpty() {
+	if ejn.alphaMemory != nil {
+		ejn.alphaMemory.UnlinkSuccessor(&ejn.rightLink)
 	}
 }
 

@@ -30,6 +30,9 @@ type AccumulateNode struct {
 	activeTokens map[string]*Token
 
 	successors []LeftActivatable
+
+	leftLink  LeftLink  // always linked to betaMemory (aggregates like count=0 can activate on empty alpha)
+	rightLink RightLink // unlinked from alphaMemory when betaMemory has 0 tokens (Left Unlinking)
 }
 
 // NewAccumulateNode creates a new AccumulateNode.
@@ -52,7 +55,7 @@ func NewAccumulateNode(betaMem *BetaMemory, alphaMem *AlphaMemory, ce *model.Con
 		ai = alphaMem.GetOrCreateIndex(rightSpecs)
 	}
 
-	return &AccumulateNode{
+	an := &AccumulateNode{
 		betaMemory:   betaMem,
 		alphaMemory:  alphaMem,
 		joinTests:    tests,
@@ -65,15 +68,58 @@ func NewAccumulateNode(betaMem *BetaMemory, alphaMem *AlphaMemory, ce *model.Con
 		activeTokens: make(map[string]*Token),
 		successors:   make([]LeftActivatable, 0),
 	}
+	an.leftLink.target = an
+	an.rightLink.target = an
+	return an
 }
 
-// Attach connects the accumulate node to its parent alpha and beta memories.
+// Attach connects the accumulate node to its parent alpha and beta memories and sets up unlinking.
 func (an *AccumulateNode) Attach() {
 	if an.alphaMemory != nil {
 		an.alphaMemory.AddSuccessor(an)
+		if an.betaMemory != nil && an.betaMemory.TokenCount() > 0 {
+			an.alphaMemory.LinkSuccessor(&an.rightLink)
+		}
 	}
 	if an.betaMemory != nil {
+		an.betaMemory.LinkSuccessor(&an.leftLink)
 		an.betaMemory.AddSuccessor(an)
+	}
+}
+
+// LeftLink returns the LeftLink associated with this accumulate node.
+func (an *AccumulateNode) LeftLink() *LeftLink {
+	return &an.leftLink
+}
+
+// RightLink returns the RightLink associated with this accumulate node.
+func (an *AccumulateNode) RightLink() *RightLink {
+	return &an.rightLink
+}
+
+// IsLeftLinked returns true (accumulate nodes are always left-linked).
+func (an *AccumulateNode) IsLeftLinked() bool {
+	return an.leftLink.IsLinked()
+}
+
+// IsRightLinked returns true if this accumulate node is linked to its AlphaMemory.
+func (an *AccumulateNode) IsRightLinked() bool {
+	return an.rightLink.IsLinked()
+}
+
+// OnLeftMemoryNonEmpty is called when betaMemory token count transitions 0 -> 1.
+// Re-links this accumulate node to its AlphaMemory (Left Unlinking).
+func (an *AccumulateNode) OnLeftMemoryNonEmpty() {
+	if an.alphaMemory != nil {
+		an.alphaMemory.LinkSuccessor(&an.rightLink)
+	}
+}
+
+// OnLeftMemoryEmpty is called when betaMemory token count transitions 1 -> 0.
+// Unlinks this accumulate node from its AlphaMemory (Left Unlinking).
+func (an *AccumulateNode) OnLeftMemoryEmpty() {
+	if an.alphaMemory != nil {
+		an.alphaMemory.UnlinkSuccessor(&an.rightLink)
 	}
 }
 

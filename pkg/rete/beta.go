@@ -18,22 +18,122 @@ type ConflictSetListener interface {
 	OnActivationRemove(rule *model.Rule, token *Token)
 }
 
+// LeftLink represents a doubly-linked list node connecting a LeftActivatable to a BetaMemory's active list.
+type LeftLink struct {
+	prev     *LeftLink
+	next     *LeftLink
+	target   LeftActivatable
+	isLinked bool
+}
+
+// Target returns the LeftActivatable node associated with this link.
+func (l *LeftLink) Target() LeftActivatable {
+	return l.target
+}
+
+// IsLinked returns true if this link is currently linked into its BetaMemory.
+func (l *LeftLink) IsLinked() bool {
+	return l.isLinked
+}
+
+// LeftUnlinkable represents a two-input beta node that can be unlinked from its AlphaMemory
+// when its parent BetaMemory has 0 tokens (Left Unlinking).
+type LeftUnlinkable interface {
+	OnLeftMemoryEmpty()
+	OnLeftMemoryNonEmpty()
+	IsRightLinked() bool
+}
+
+// LeftLinkProvider allows beta nodes to expose their LeftLink for O(1) doubly-linked unlinking.
+type LeftLinkProvider interface {
+	LeftLink() *LeftLink
+}
+
 // BetaMemory stores beta tokens and propagates them to child beta nodes.
 type BetaMemory struct {
-	mu         sync.RWMutex
-	id         int
-	tokens     map[string]*Token // Keyed by token signature
-	successors []LeftActivatable
-	indexes    []*BetaIndex
+	mu              sync.RWMutex
+	id              int
+	tokens          map[string]*Token // Keyed by token signature
+	successors      []LeftActivatable // All structural successors
+	activeHead      *LeftLink         // Doubly-linked list head for active left activations
+	activeTail      *LeftLink         // Doubly-linked list tail
+	activeCount     int
+	indexes         []*BetaIndex
+	unlinkableNodes []LeftUnlinkable // Nodes to notify on 0 <-> 1 token transitions
 }
 
 // NewBetaMemory creates a new BetaMemory.
 func NewBetaMemory() *BetaMemory {
 	return &BetaMemory{
-		tokens:     make(map[string]*Token),
-		successors: make([]LeftActivatable, 0),
-		indexes:    make([]*BetaIndex, 0),
+		tokens:          make(map[string]*Token),
+		successors:      make([]LeftActivatable, 0),
+		indexes:         make([]*BetaIndex, 0),
+		unlinkableNodes: make([]LeftUnlinkable, 0),
 	}
+}
+
+// LinkSuccessor adds a LeftLink to the active doubly-linked list in O(1) time.
+func (bm *BetaMemory) LinkSuccessor(link *LeftLink) {
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+	if link.isLinked {
+		return
+	}
+	link.prev = bm.activeTail
+	link.next = nil
+	link.isLinked = true
+	if bm.activeTail != nil {
+		bm.activeTail.next = link
+	} else {
+		bm.activeHead = link
+	}
+	bm.activeTail = link
+	bm.activeCount++
+}
+
+// UnlinkSuccessor removes a LeftLink from the active doubly-linked list in O(1) time.
+func (bm *BetaMemory) UnlinkSuccessor(link *LeftLink) {
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+	if !link.isLinked {
+		return
+	}
+	if link.prev != nil {
+		link.prev.next = link.next
+	} else {
+		bm.activeHead = link.next
+	}
+	if link.next != nil {
+		link.next.prev = link.prev
+	} else {
+		bm.activeTail = link.prev
+	}
+	link.prev = nil
+	link.next = nil
+	link.isLinked = false
+	bm.activeCount--
+}
+
+// ActiveSuccessorCount returns the number of currently linked (active) successors in this BetaMemory.
+func (bm *BetaMemory) ActiveSuccessorCount() int {
+	bm.mu.RLock()
+	defer bm.mu.RUnlock()
+	return bm.activeCount
+}
+
+// IsSuccessorActive returns true if the specified node is currently linked to receive left activations.
+func (bm *BetaMemory) IsSuccessorActive(node LeftActivatable) bool {
+	bm.mu.RLock()
+	defer bm.mu.RUnlock()
+	if provider, ok := node.(LeftLinkProvider); ok {
+		return provider.LeftLink().IsLinked()
+	}
+	for curr := bm.activeHead; curr != nil; curr = curr.next {
+		if curr.target == node {
+			return true
+		}
+	}
+	return false
 }
 
 // ID returns the unique ID of this BetaMemory.
@@ -89,11 +189,54 @@ func strSliceEqual(a, b []string) bool {
 // AddSuccessor registers a child beta node.
 func (bm *BetaMemory) AddSuccessor(node LeftActivatable) {
 	bm.mu.Lock()
-	defer bm.mu.Unlock()
 	bm.successors = append(bm.successors, node)
 
-	// Catch-up: send existing tokens to new successor
-	for _, tok := range bm.tokens {
+	if unlinkable, ok := node.(LeftUnlinkable); ok {
+		bm.unlinkableNodes = append(bm.unlinkableNodes, unlinkable)
+	}
+
+	if provider, ok := node.(LeftLinkProvider); ok {
+		link := provider.LeftLink()
+		link.target = node
+		if link.isLinked && link.prev == nil && link.next == nil && bm.activeHead != link {
+			link.prev = bm.activeTail
+			link.next = nil
+			if bm.activeTail != nil {
+				bm.activeTail.next = link
+			} else {
+				bm.activeHead = link
+			}
+			bm.activeTail = link
+			bm.activeCount++
+		}
+	} else {
+		// Non-unlinkable successor (TerminalNode, EvalNode, etc.): permanently active
+		link := &LeftLink{target: node, isLinked: true}
+		if bm.activeTail != nil {
+			bm.activeTail.next = link
+			link.prev = bm.activeTail
+			bm.activeTail = link
+		} else {
+			bm.activeHead = link
+			bm.activeTail = link
+		}
+		bm.activeCount++
+	}
+
+	// Catch-up: send existing tokens to new successor only if currently linked
+	var toks []*Token
+	isLinked := true
+	if ru, ok := node.(RightUnlinkable); ok {
+		isLinked = ru.IsLeftLinked()
+	}
+	if isLinked {
+		for _, tok := range bm.tokens {
+			toks = append(toks, tok)
+		}
+	}
+	bm.mu.Unlock()
+
+	for _, tok := range toks {
 		node.LeftActivation(tok, TagAdd)
 	}
 }
@@ -101,7 +244,6 @@ func (bm *BetaMemory) AddSuccessor(node LeftActivatable) {
 // RemoveSuccessor unregisters a child beta node.
 func (bm *BetaMemory) RemoveSuccessor(node LeftActivatable) {
 	bm.mu.Lock()
-	defer bm.mu.Unlock()
 	var newSuccs []LeftActivatable
 	for _, s := range bm.successors {
 		if s != node {
@@ -109,6 +251,57 @@ func (bm *BetaMemory) RemoveSuccessor(node LeftActivatable) {
 		}
 	}
 	bm.successors = newSuccs
+
+	if unlinkable, ok := node.(LeftUnlinkable); ok {
+		var newUnlinkables []LeftUnlinkable
+		for _, u := range bm.unlinkableNodes {
+			if u != unlinkable {
+				newUnlinkables = append(newUnlinkables, u)
+			}
+		}
+		bm.unlinkableNodes = newUnlinkables
+	}
+
+	if provider, ok := node.(LeftLinkProvider); ok {
+		link := provider.LeftLink()
+		if link.isLinked {
+			if link.prev != nil {
+				link.prev.next = link.next
+			} else {
+				bm.activeHead = link.next
+			}
+			if link.next != nil {
+				link.next.prev = link.prev
+			} else {
+				bm.activeTail = link.prev
+			}
+			link.prev = nil
+			link.next = nil
+			link.isLinked = false
+			bm.activeCount--
+		}
+	} else {
+		for curr := bm.activeHead; curr != nil; curr = curr.next {
+			if curr.target == node {
+				if curr.prev != nil {
+					curr.prev.next = curr.next
+				} else {
+					bm.activeHead = curr.next
+				}
+				if curr.next != nil {
+					curr.next.prev = curr.prev
+				} else {
+					bm.activeTail = curr.prev
+				}
+				curr.prev = nil
+				curr.next = nil
+				curr.isLinked = false
+				bm.activeCount--
+				break
+			}
+		}
+	}
+	bm.mu.Unlock()
 }
 
 // Tokens returns a snapshot of stored tokens.
@@ -126,22 +319,56 @@ func (bm *BetaMemory) Tokens() []*Token {
 func (bm *BetaMemory) LeftActivation(token *Token, tag PropagationTag) {
 	bm.mu.Lock()
 	sig := tokenSignature(token)
+	var transition int // 1: 0 -> 1, -1: 1 -> 0
+
 	if tag == TagAdd {
 		bm.tokens[sig] = token
 		for _, idx := range bm.indexes {
 			idx.Add(token)
+		}
+		if len(bm.tokens) == 1 {
+			transition = 1
 		}
 	} else {
 		delete(bm.tokens, sig)
 		for _, idx := range bm.indexes {
 			idx.Remove(token)
 		}
+		if len(bm.tokens) == 0 {
+			transition = -1
+		}
 	}
-	succs := append([]LeftActivatable(nil), bm.successors...)
+
+	var notifyNodes []LeftUnlinkable
+	if transition != 0 {
+		notifyNodes = append([]LeftUnlinkable(nil), bm.unlinkableNodes...)
+	}
 	bm.mu.Unlock()
+
+	// If transitioning 0 -> 1: Re-link child nodes to their AlphaMemories
+	if transition == 1 {
+		for _, node := range notifyNodes {
+			node.OnLeftMemoryNonEmpty()
+		}
+	}
+
+	// Snapshot active successors from the doubly-linked list
+	bm.mu.RLock()
+	var succs []LeftActivatable
+	for curr := bm.activeHead; curr != nil; curr = curr.next {
+		succs = append(succs, curr.target)
+	}
+	bm.mu.RUnlock()
 
 	for _, s := range succs {
 		s.LeftActivation(token, tag)
+	}
+
+	// If transitioning 1 -> 0: Unlink child nodes from their AlphaMemories (after retraction)
+	if transition == -1 {
+		for _, node := range notifyNodes {
+			node.OnLeftMemoryEmpty()
+		}
 	}
 }
 
@@ -165,6 +392,9 @@ type JoinNode struct {
 	alphaIndex  *AlphaIndex
 	ce          *model.ConditionElement
 	successors  []LeftActivatable
+
+	leftLink  LeftLink  // links to betaMemory.activeHead
+	rightLink RightLink // links to alphaMemory.activeHead
 }
 
 // NewJoinNode creates a new two-input join node.
@@ -192,7 +422,7 @@ func NewJoinNode(betaMem *BetaMemory, alphaMem *AlphaMemory, ce *model.Condition
 		ai = alphaMem.GetOrCreateIndex(rightSpecs)
 	}
 
-	return &JoinNode{
+	jn := &JoinNode{
 		betaMemory:  betaMem,
 		alphaMemory: alphaMem,
 		joinTests:   tests,
@@ -201,15 +431,78 @@ func NewJoinNode(betaMem *BetaMemory, alphaMem *AlphaMemory, ce *model.Condition
 		ce:          ce,
 		successors:  make([]LeftActivatable, 0),
 	}
+	jn.leftLink.target = jn
+	jn.rightLink.target = jn
+	return jn
 }
 
-// Attach connects the join node to its parent memories and triggers catch-up.
+// Attach connects the join node to its parent memories and sets up unlinking.
 func (jn *JoinNode) Attach() {
 	if jn.alphaMemory != nil {
 		jn.alphaMemory.AddSuccessor(jn)
+		// If betaMemory already has tokens, link rightLink into alphaMemory
+		if jn.betaMemory != nil && jn.betaMemory.TokenCount() > 0 {
+			jn.alphaMemory.LinkSuccessor(&jn.rightLink)
+		}
 	}
 	if jn.betaMemory != nil {
+		// If alphaMemory already has WMEs, link leftLink into betaMemory
+		if jn.alphaMemory != nil && jn.alphaMemory.ItemCount() > 0 {
+			jn.betaMemory.LinkSuccessor(&jn.leftLink)
+		}
 		jn.betaMemory.AddSuccessor(jn)
+	}
+}
+
+// LeftLink returns the LeftLink associated with this join node.
+func (jn *JoinNode) LeftLink() *LeftLink {
+	return &jn.leftLink
+}
+
+// RightLink returns the RightLink associated with this join node.
+func (jn *JoinNode) RightLink() *RightLink {
+	return &jn.rightLink
+}
+
+// IsLeftLinked returns true if this join node is linked to receive left activations from its BetaMemory.
+func (jn *JoinNode) IsLeftLinked() bool {
+	return jn.leftLink.IsLinked()
+}
+
+// IsRightLinked returns true if this join node is linked to receive right activations from its AlphaMemory.
+func (jn *JoinNode) IsRightLinked() bool {
+	return jn.rightLink.IsLinked()
+}
+
+// OnRightMemoryNonEmpty is called when alphaMemory item count transitions 0 -> 1.
+// Re-links this join node to its BetaMemory (Right Unlinking).
+func (jn *JoinNode) OnRightMemoryNonEmpty() {
+	if jn.betaMemory != nil {
+		jn.betaMemory.LinkSuccessor(&jn.leftLink)
+	}
+}
+
+// OnRightMemoryEmpty is called when alphaMemory item count transitions 1 -> 0.
+// Unlinks this join node from its BetaMemory (Right Unlinking).
+func (jn *JoinNode) OnRightMemoryEmpty() {
+	if jn.betaMemory != nil {
+		jn.betaMemory.UnlinkSuccessor(&jn.leftLink)
+	}
+}
+
+// OnLeftMemoryNonEmpty is called when betaMemory token count transitions 0 -> 1.
+// Re-links this join node to its AlphaMemory (Left Unlinking).
+func (jn *JoinNode) OnLeftMemoryNonEmpty() {
+	if jn.alphaMemory != nil {
+		jn.alphaMemory.LinkSuccessor(&jn.rightLink)
+	}
+}
+
+// OnLeftMemoryEmpty is called when betaMemory token count transitions 1 -> 0.
+// Unlinks this join node from its AlphaMemory (Left Unlinking).
+func (jn *JoinNode) OnLeftMemoryEmpty() {
+	if jn.alphaMemory != nil {
+		jn.alphaMemory.UnlinkSuccessor(&jn.rightLink)
 	}
 }
 
@@ -483,6 +776,9 @@ type NegativeJoinNode struct {
 	matches    map[string]map[int64]bool
 	tokens     map[string]*Token
 	successors []LeftActivatable
+
+	leftLink  LeftLink  // always linked to betaMemory (negative conditions need left activations when alpha is empty!)
+	rightLink RightLink // unlinked from alphaMemory when betaMemory has 0 tokens
 }
 
 // NewNegativeJoinNode creates a new NegativeJoinNode.
@@ -505,7 +801,7 @@ func NewNegativeJoinNode(betaMem *BetaMemory, alphaMem *AlphaMemory, ce *model.C
 		ai = alphaMem.GetOrCreateIndex(rightSpecs)
 	}
 
-	return &NegativeJoinNode{
+	njn := &NegativeJoinNode{
 		betaMemory:  betaMem,
 		alphaMemory: alphaMem,
 		joinTests:   tests,
@@ -516,15 +812,59 @@ func NewNegativeJoinNode(betaMem *BetaMemory, alphaMem *AlphaMemory, ce *model.C
 		tokens:      make(map[string]*Token),
 		successors:  make([]LeftActivatable, 0),
 	}
+	njn.leftLink.target = njn
+	njn.rightLink.target = njn
+	return njn
 }
 
-// Attach connects the negative join node to its parent memories and triggers catch-up.
+// Attach connects the negative join node to its parent memories and sets up unlinking.
 func (njn *NegativeJoinNode) Attach() {
 	if njn.alphaMemory != nil {
 		njn.alphaMemory.AddSuccessor(njn)
+		if njn.betaMemory != nil && njn.betaMemory.TokenCount() > 0 {
+			njn.alphaMemory.LinkSuccessor(&njn.rightLink)
+		}
 	}
 	if njn.betaMemory != nil {
+		// Negative joins are ALWAYS left-linked (tokens must pass through when alpha is empty)
+		njn.betaMemory.LinkSuccessor(&njn.leftLink)
 		njn.betaMemory.AddSuccessor(njn)
+	}
+}
+
+// LeftLink returns the LeftLink associated with this negative join node.
+func (njn *NegativeJoinNode) LeftLink() *LeftLink {
+	return &njn.leftLink
+}
+
+// RightLink returns the RightLink associated with this negative join node.
+func (njn *NegativeJoinNode) RightLink() *RightLink {
+	return &njn.rightLink
+}
+
+// IsLeftLinked returns true (negative joins are always left-linked).
+func (njn *NegativeJoinNode) IsLeftLinked() bool {
+	return njn.leftLink.IsLinked()
+}
+
+// IsRightLinked returns true if this negative join node is linked to its AlphaMemory.
+func (njn *NegativeJoinNode) IsRightLinked() bool {
+	return njn.rightLink.IsLinked()
+}
+
+// OnLeftMemoryNonEmpty is called when betaMemory token count transitions 0 -> 1.
+// Re-links this negative join node to its AlphaMemory (Left Unlinking).
+func (njn *NegativeJoinNode) OnLeftMemoryNonEmpty() {
+	if njn.alphaMemory != nil {
+		njn.alphaMemory.LinkSuccessor(&njn.rightLink)
+	}
+}
+
+// OnLeftMemoryEmpty is called when betaMemory token count transitions 1 -> 0.
+// Unlinks this negative join node from its AlphaMemory (Left Unlinking).
+func (njn *NegativeJoinNode) OnLeftMemoryEmpty() {
+	if njn.alphaMemory != nil {
+		njn.alphaMemory.UnlinkSuccessor(&njn.rightLink)
 	}
 }
 

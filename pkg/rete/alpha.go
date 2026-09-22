@@ -16,34 +16,165 @@ type RightActivatable interface {
 	RightActivation(wme *model.WME, tag PropagationTag)
 }
 
+// RightLink represents a doubly-linked list node connecting a RightActivatable to an AlphaMemory's active list.
+type RightLink struct {
+	prev     *RightLink
+	next     *RightLink
+	target   RightActivatable
+	isLinked bool
+}
+
+// Target returns the RightActivatable node associated with this link.
+func (r *RightLink) Target() RightActivatable {
+	return r.target
+}
+
+// IsLinked returns true if this link is currently linked into its AlphaMemory.
+func (r *RightLink) IsLinked() bool {
+	return r.isLinked
+}
+
+// RightUnlinkable represents a two-input beta node that can be unlinked from its parent BetaMemory
+// when its AlphaMemory has 0 WMEs (Right Unlinking).
+type RightUnlinkable interface {
+	OnRightMemoryEmpty()
+	OnRightMemoryNonEmpty()
+	IsLeftLinked() bool
+}
+
+// RightLinkProvider allows beta nodes to expose their RightLink for O(1) doubly-linked unlinking.
+type RightLinkProvider interface {
+	RightLink() *RightLink
+}
+
 // AlphaMemory stores WMEs that satisfy all intra-element condition tests for a pattern.
 type AlphaMemory struct {
-	mu         sync.RWMutex
-	items      map[int64]*model.WME
-	successors []RightActivatable
-	indexes    []*AlphaIndex
+	mu              sync.RWMutex
+	items           map[int64]*model.WME
+	successors      []RightActivatable // All structural successors (for inspection, export, etc.)
+	activeHead      *RightLink         // Doubly-linked list head for active right activations
+	activeTail      *RightLink         // Doubly-linked list tail
+	activeCount     int
+	indexes         []*AlphaIndex
+	unlinkableNodes []RightUnlinkable // Nodes to notify on 0 <-> 1 WME transitions
 }
 
 // NewAlphaMemory creates a new AlphaMemory.
 func NewAlphaMemory() *AlphaMemory {
 	return &AlphaMemory{
-		items:      make(map[int64]*model.WME),
-		successors: make([]RightActivatable, 0),
-		indexes:    make([]*AlphaIndex, 0),
+		items:           make(map[int64]*model.WME),
+		successors:      make([]RightActivatable, 0),
+		indexes:         make([]*AlphaIndex, 0),
+		unlinkableNodes: make([]RightUnlinkable, 0),
 	}
+}
+
+// LinkSuccessor adds a RightLink to the active doubly-linked list in O(1) time.
+func (am *AlphaMemory) LinkSuccessor(link *RightLink) {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+	if link.isLinked {
+		return
+	}
+	link.prev = am.activeTail
+	link.next = nil
+	link.isLinked = true
+	if am.activeTail != nil {
+		am.activeTail.next = link
+	} else {
+		am.activeHead = link
+	}
+	am.activeTail = link
+	am.activeCount++
+}
+
+// UnlinkSuccessor removes a RightLink from the active doubly-linked list in O(1) time.
+func (am *AlphaMemory) UnlinkSuccessor(link *RightLink) {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+	if !link.isLinked {
+		return
+	}
+	if link.prev != nil {
+		link.prev.next = link.next
+	} else {
+		am.activeHead = link.next
+	}
+	if link.next != nil {
+		link.next.prev = link.prev
+	} else {
+		am.activeTail = link.prev
+	}
+	link.prev = nil
+	link.next = nil
+	link.isLinked = false
+	am.activeCount--
+}
+
+// ActiveSuccessorCount returns the number of currently linked (active) successors in this AlphaMemory.
+func (am *AlphaMemory) ActiveSuccessorCount() int {
+	am.mu.RLock()
+	defer am.mu.RUnlock()
+	return am.activeCount
+}
+
+// IsSuccessorActive returns true if the specified node is currently linked to receive right activations.
+func (am *AlphaMemory) IsSuccessorActive(node RightActivatable) bool {
+	am.mu.RLock()
+	defer am.mu.RUnlock()
+	if provider, ok := node.(RightLinkProvider); ok {
+		return provider.RightLink().IsLinked()
+	}
+	for curr := am.activeHead; curr != nil; curr = curr.next {
+		if curr.target == node {
+			return true
+		}
+	}
+	return false
 }
 
 // AddSuccessor registers a beta node to receive right activations.
 func (am *AlphaMemory) AddSuccessor(node RightActivatable) {
 	am.mu.Lock()
-	defer am.mu.Unlock()
 	am.successors = append(am.successors, node)
+
+	if unlinkable, ok := node.(RightUnlinkable); ok {
+		am.unlinkableNodes = append(am.unlinkableNodes, unlinkable)
+	}
+
+	if provider, ok := node.(RightLinkProvider); ok {
+		link := provider.RightLink()
+		link.target = node
+		if link.isLinked && link.prev == nil && link.next == nil && am.activeHead != link {
+			link.prev = am.activeTail
+			link.next = nil
+			if am.activeTail != nil {
+				am.activeTail.next = link
+			} else {
+				am.activeHead = link
+			}
+			am.activeTail = link
+			am.activeCount++
+		}
+	} else {
+		// Non-unlinkable successor: permanently active
+		link := &RightLink{target: node, isLinked: true}
+		if am.activeTail != nil {
+			am.activeTail.next = link
+			link.prev = am.activeTail
+			am.activeTail = link
+		} else {
+			am.activeHead = link
+			am.activeTail = link
+		}
+		am.activeCount++
+	}
+	am.mu.Unlock()
 }
 
 // RemoveSuccessor unregisters a beta node from receiving right activations.
 func (am *AlphaMemory) RemoveSuccessor(node RightActivatable) {
 	am.mu.Lock()
-	defer am.mu.Unlock()
 	var newSuccs []RightActivatable
 	for _, s := range am.successors {
 		if s != node {
@@ -51,6 +182,57 @@ func (am *AlphaMemory) RemoveSuccessor(node RightActivatable) {
 		}
 	}
 	am.successors = newSuccs
+
+	if unlinkable, ok := node.(RightUnlinkable); ok {
+		var newUnlinkables []RightUnlinkable
+		for _, u := range am.unlinkableNodes {
+			if u != unlinkable {
+				newUnlinkables = append(newUnlinkables, u)
+			}
+		}
+		am.unlinkableNodes = newUnlinkables
+	}
+
+	if provider, ok := node.(RightLinkProvider); ok {
+		link := provider.RightLink()
+		if link.isLinked {
+			if link.prev != nil {
+				link.prev.next = link.next
+			} else {
+				am.activeHead = link.next
+			}
+			if link.next != nil {
+				link.next.prev = link.prev
+			} else {
+				am.activeTail = link.prev
+			}
+			link.prev = nil
+			link.next = nil
+			link.isLinked = false
+			am.activeCount--
+		}
+	} else {
+		for curr := am.activeHead; curr != nil; curr = curr.next {
+			if curr.target == node {
+				if curr.prev != nil {
+					curr.prev.next = curr.next
+				} else {
+					am.activeHead = curr.next
+				}
+				if curr.next != nil {
+					curr.next.prev = curr.prev
+				} else {
+					am.activeTail = curr.prev
+				}
+				curr.prev = nil
+				curr.next = nil
+				curr.isLinked = false
+				am.activeCount--
+				break
+			}
+		}
+	}
+	am.mu.Unlock()
 }
 
 // GetOrCreateIndex returns an existing AlphaIndex matching specs or creates and populates a new one.
@@ -105,22 +287,56 @@ func (am *AlphaMemory) ItemCount() int {
 // Activation processes an incoming WME assertion or retraction.
 func (am *AlphaMemory) Activation(wme *model.WME, tag PropagationTag) {
 	am.mu.Lock()
+	var transition int // 1: 0 -> 1, -1: 1 -> 0
+
 	if tag == TagAdd {
 		am.items[wme.Timetag] = wme
 		for _, idx := range am.indexes {
 			idx.Add(wme)
+		}
+		if len(am.items) == 1 {
+			transition = 1
 		}
 	} else {
 		delete(am.items, wme.Timetag)
 		for _, idx := range am.indexes {
 			idx.Remove(wme)
 		}
+		if len(am.items) == 0 {
+			transition = -1
+		}
 	}
-	succs := append([]RightActivatable(nil), am.successors...)
+
+	var notifyNodes []RightUnlinkable
+	if transition != 0 {
+		notifyNodes = append([]RightUnlinkable(nil), am.unlinkableNodes...)
+	}
 	am.mu.Unlock()
+
+	// If transitioning 0 -> 1: Re-link downstream nodes to their parent BetaMemories
+	if transition == 1 {
+		for _, node := range notifyNodes {
+			node.OnRightMemoryNonEmpty()
+		}
+	}
+
+	// Snapshot active successors from the doubly-linked list
+	am.mu.RLock()
+	var succs []RightActivatable
+	for curr := am.activeHead; curr != nil; curr = curr.next {
+		succs = append(succs, curr.target)
+	}
+	am.mu.RUnlock()
 
 	for _, s := range succs {
 		s.RightActivation(wme, tag)
+	}
+
+	// If transitioning 1 -> 0: Unlink downstream nodes from their parent BetaMemories (after retraction)
+	if transition == -1 {
+		for _, node := range notifyNodes {
+			node.OnRightMemoryEmpty()
+		}
 	}
 }
 
