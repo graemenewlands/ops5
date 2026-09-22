@@ -761,6 +761,65 @@ func (e *Engine) Schemas() []*model.ClassSchema {
 	return res
 }
 
+// LoadScript parses and executes top-level OPS5 statements from a script string:
+// literalize, vector-attribute, rules, and makes.
+func (e *Engine) LoadScript(script string) error {
+	p, err := parser.NewParser(script)
+	if err != nil {
+		return err
+	}
+
+	for _, va := range e.VectorAttributes() {
+		p.RegisterVectorAttribute(va)
+	}
+	for _, s := range e.Schemas() {
+		p.RegisterSchema(s)
+	}
+
+	for {
+		stmt, err := p.NextStatement()
+		if err != nil {
+			return err
+		}
+		if stmt == nil {
+			break
+		}
+
+		switch stmt.Type {
+		case parser.StmtRule:
+			for _, s := range p.Schemas() {
+				if _, ok := e.GetSchema(s.Class); !ok {
+					e.DeclareClass(s.Class, s.Attributes)
+				}
+			}
+			e.AddRule(stmt.Rule)
+		case parser.StmtMake:
+			for _, s := range p.Schemas() {
+				if _, ok := e.GetSchema(s.Class); !ok {
+					e.DeclareClass(s.Class, s.Attributes)
+				}
+			}
+			e.Make(stmt.MakeClass, stmt.MakeAttributes)
+		case parser.StmtLiteralize:
+			e.DeclareClass(stmt.LiteralizeClass, stmt.LiteralizeAttrs)
+		case parser.StmtVectorAttribute:
+			for _, a := range stmt.VectorAttrs {
+				e.DeclareVectorAttribute(a)
+			}
+		}
+	}
+	return nil
+}
+
+// LoadFile reads an OPS5 source file and loads all statements into the engine.
+func (e *Engine) LoadFile(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("cannot read file %s: %w", path, err)
+	}
+	return e.LoadScript(string(data))
+}
+
 // Litval returns the 1-based WME element index of the given attribute (or attribute in class).
 func (e *Engine) Litval(class, attr string) (int, bool) {
 	e.mu.Lock()

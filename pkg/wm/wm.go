@@ -208,3 +208,10 @@ func (wm *WorkingMemory) Reset() {
 		}
 	}
 }
+
+// TotalAsserted returns the total number of WMEs that have been asserted.
+func (wm *WorkingMemory) TotalAsserted() int64 {
+	wm.mu.RLock()
+	defer wm.mu.RUnlock()
+	return wm.nextTimetag - 1
+}

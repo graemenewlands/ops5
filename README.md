@@ -57,6 +57,10 @@ This engine provides a complete, modern execution environment for rule-based sys
    - [Quick Start Example](#quick-start-example)
    - [Package Breakdown](#package-breakdown)
    - [Extensibility & Custom Actions](#extensibility--custom-actions)
+8. [Canonical Benchmark Suite](#canonical-benchmark-suite)
+   - [Benchmark Problems (Manners, Waltz, Zebra)](#benchmark-problems-manners-waltz-zebra)
+   - [Running the Benchmarks](#running-the-benchmarks)
+   - [Benchmark Results & Performance Profile](#benchmark-results--performance-profile)
 
 ---
 
@@ -1077,6 +1081,60 @@ rule.AddAction(model.CustomAction{
 })
 eng.AddRule(rule)
 ```
+
+---
+
+## Canonical Benchmark Suite
+
+The engine includes classic academic production-system benchmark suites located in [`benchmarks/`](benchmarks/):
+
+### Benchmark Problems (Manners, Waltz, Zebra)
+
+1. **Miss Manners (`benchmarks/manners/`)**:
+   - Solves the dinner guest seating arrangement problem via combinatorial constraint satisfaction (alternating male/female seating where adjacent guests share at least one hobby).
+   - Generates reproducible, deterministic test sets for 16, 32, 64, and 128 guests (`manners16.ops`, `manners32.ops`, `manners64.ops`, `manners128.ops`).
+   - Stresses cross-product beta joins, deep recursion, and state-space exploration.
+
+2. **Waltz Line Labeling (`benchmarks/waltz/`)**:
+   - Implements David Waltz's 2D line-labeling algorithm for 3D polyhedral wireframe scenes.
+   - Categorizes edges into convex (`+`), concave (`-`), and boundary occlusions (`>`) using junction constraints (corners, forks, arrows, multijunctions).
+   - Datasets: `waltz12.ops` (12-edge wireframe) and `waltz50.ops` (50-edge complex scene).
+   - Stresses rapid transitive constraint propagation, edge modifications, and negation satisfaction.
+
+3. **Zebra Puzzle / Einstein's Logic Riddle (`benchmarks/zebra/`)**:
+   - Classic 5-house logic puzzle with 14 relational clues across house colors, nationalities, pets, drinks, and cigarette brands.
+   - Solves for the water drinker (Norwegian in House 1) and zebra owner (Japanese in House 5).
+   - Stresses multi-condition beta joins with cross-element equality and inequality constraints.
+
+### Running the Benchmarks
+
+Run the complete benchmark suite test:
+```bash
+# Fast run (skips Manners-64):
+go test -v -short ./benchmarks
+
+# Full suite with all scales:
+go test -v ./benchmarks
+```
+
+Run Go microbenchmarks reporting `cycles/s` and `wmes/s`:
+```bash
+go test -bench=. -benchtime=1x -run=^$ ./benchmarks
+```
+
+### Benchmark Results & Performance Profile
+
+Representative metrics measured on a standard developer workstation (12th Gen Intel Core i7-1260P, Go 1.24):
+
+| Benchmark | Cycles | WMEs Asserted | Time to Quiescence | Throughput (Cycles/s) | WME Assertions/s | Total Heap Alloc |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **Manners-16** | 2,009 | 2,744 | 1.81 s | 1,110.5 | 1,516.8 | ~978 MB |
+| **Manners-32** | 3,914 | 4,649 | 3.59 s | 1,088.8 | 1,293.2 | ~1,933 MB |
+| **Manners-64** | 19,381 | 21,152 | 37.35 s | 518.9 | 566.3 | ~20.1 GB |
+| **Waltz-12** | 608 | 1,238 | 68 ms | 8,944.6 | 18,212.8 | ~38 MB |
+| **Waltz-50** | 2,268 | 4,654 | 689 ms | 3,291.0 | 6,753.2 | ~437 MB |
+| **Zebra-5** | 7 | 19 | 0.20 ms | 32,396.5 | 87,933.2 | 133 KB |
+
 
 ---
 

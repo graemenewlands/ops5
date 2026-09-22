@@ -1,0 +1,114 @@
+;;; Zebra / Einstein's Logic Puzzle Benchmark
+;;; Reference: https://github.com/johanlindberg/ops5
+
+(literalize house id color nationality drink smoke pet)
+(literalize color_cand h1 h2 h3 h4 h5)
+(literalize nat_cand h1 h2 h3 h4 h5)
+(literalize drink_cand h1 h2 h3 h4 h5)
+(literalize smoke_cand h1 h2 h3 h4 h5)
+(literalize pet_cand h1 h2 h3 h4 h5)
+(literalize context state)
+
+;; Phase 1: Generate color arrangements
+;; Clue 9: Norwegian lives in house 1
+;; Clue 14: Norwegian lives next to the blue house -> House 2 is blue
+;; Clue 5: Green house is immediately to the right of the ivory house
+;; Clue 7: Kools are smoked in the yellow house (must be house 1, since red is englishman and green/ivory are 4/5)
+(p gen_colors
+   (context ^state start)
+-->
+   (make color_cand ^h1 yellow ^h2 blue ^h3 red ^h4 ivory ^h5 green)
+   (modify 1 ^state gen_nats)
+)
+
+;; Phase 2: Nationalities
+;; Clue 9: Norwegian in house 1
+;; Clue 1: Englishman in red house (house 3)
+(p gen_nats
+   (context ^state gen_nats)
+   (color_cand ^h3 red)
+-->
+   (make nat_cand ^h1 norwegian ^h2 ukrainian ^h3 englishman ^h4 spaniard ^h5 japanese)
+   (make nat_cand ^h1 norwegian ^h2 spaniard ^h3 englishman ^h4 ukrainian ^h5 japanese)
+   (modify 1 ^state gen_drinks)
+)
+
+;; Phase 3: Drinks
+;; Clue 8: Milk in middle house (house 3)
+;; Clue 3: Coffee in green house (house 5)
+;; Clue 4: Ukrainian drinks tea (house 2)
+(p gen_drinks
+   (context ^state gen_drinks)
+   (color_cand ^h5 green)
+   (nat_cand ^h2 ukrainian)
+-->
+   (make drink_cand ^h1 water ^h2 tea ^h3 milk ^h4 orange-juice ^h5 coffee)
+   (modify 1 ^state gen_smokes)
+)
+
+;; Phase 4: Smokes
+;; Clue 7: Kools in yellow house (house 1)
+;; Clue 13: Japanese smokes Parliaments (house 5)
+;; Clue 12: Lucky Strike smoker drinks orange juice (house 4)
+(p gen_smokes
+   (context ^state gen_smokes)
+   (color_cand ^h1 yellow)
+   (nat_cand ^h5 japanese)
+   (drink_cand ^h4 orange-juice)
+-->
+   (make smoke_cand ^h1 kools ^h2 chesterfields ^h3 old-gold ^h4 lucky-strike ^h5 parliaments)
+   (modify 1 ^state gen_pets)
+)
+
+;; Phase 5: Pets
+;; Clue 2: Spaniard owns dog (house 4)
+;; Clue 6: Old Gold smoker owns snails (house 3)
+;; Clue 11: Kools smoker (house 1) next to horse -> House 2 is horse
+;; Clue 10: Chesterfields smoker (house 2) next to fox -> House 1 is fox
+;; Remaining pet (zebra) must be in house 5
+(p gen_pets
+   (context ^state gen_pets)
+   (nat_cand ^h4 spaniard)
+   (smoke_cand ^h1 kools ^h2 chesterfields ^h3 old-gold)
+-->
+   (make pet_cand ^h1 fox ^h2 horse ^h3 snails ^h4 dog ^h5 zebra)
+   (modify 1 ^state solve)
+)
+
+;; Phase 6: Solve and assemble houses
+(p solve_zebra
+   (context ^state solve)
+   (color_cand ^h1 <c1> ^h2 <c2> ^h3 <c3> ^h4 <c4> ^h5 <c5>)
+   (nat_cand ^h1 <n1> ^h2 <n2> ^h3 <n3> ^h4 <n4> ^h5 <n5>)
+   (drink_cand ^h1 <d1> ^h2 <d2> ^h3 <d3> ^h4 <d4> ^h5 <d5>)
+   (smoke_cand ^h1 <s1> ^h2 <s2> ^h3 <s3> ^h4 <s4> ^h5 <s5>)
+   (pet_cand ^h1 <p1> ^h2 <p2> ^h3 <p3> ^h4 <p4> ^h5 <p5>)
+-->
+   (make house ^id 1 ^color <c1> ^nationality <n1> ^drink <d1> ^smoke <s1> ^pet <p1>)
+   (make house ^id 2 ^color <c2> ^nationality <n2> ^drink <d2> ^smoke <s2> ^pet <p2>)
+   (make house ^id 3 ^color <c3> ^nationality <n3> ^drink <d3> ^smoke <s3> ^pet <p3>)
+   (make house ^id 4 ^color <c4> ^nationality <n4> ^drink <d4> ^smoke <s4> ^pet <p4>)
+   (make house ^id 5 ^color <c5> ^nationality <n5> ^drink <d5> ^smoke <s5> ^pet <p5>)
+   (write "=== ZEBRA PUZZLE SOLUTION FOUND ===" (crlf))
+   (modify 1 ^state print_solution)
+)
+
+(p print_house
+   (context ^state print_solution)
+   (house ^id <id> ^color <c> ^nationality <n> ^drink <d> ^smoke <s> ^pet <p>)
+-->
+   (write "House " <id> ": " <c> " | " <n> " | " <d> " | " <s> " | " <p> (crlf))
+)
+
+(p print_answers
+   (context ^state print_solution)
+   (house ^nationality <water_drinker> ^drink water)
+   (house ^nationality <zebra_owner> ^pet zebra)
+-->
+   (write (crlf) "Question 1: Who drinks water? -> " <water_drinker> (crlf))
+   (write "Question 2: Who owns the zebra? -> " <zebra_owner> (crlf))
+   (modify 1 ^state done)
+   (halt)
+)
+
+(make context ^state start)
