@@ -1,5 +1,8 @@
 # OPS5 Go Runtime & Engine Specification
 
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![Go Reference](https://pkg.go.dev/badge/ops5.svg)](https://pkg.go.dev/ops5)
+
 A minimal, robust, and high-performance Go implementation of Charles Forgy's classic **OPS5** production rule system using the **Rete** pattern matching algorithm.
 
 This engine provides a complete, modern execution environment for rule-based systems, featuring dynamic working memory, Rete alpha/beta network compilation with structural node sharing, negative condition elements, LEX and MEA conflict resolution strategies with strict refraction, retroactive rule compilation, an interactive CLI REPL, cycle tracing, and an automated JSON test harness.
@@ -62,6 +65,7 @@ This engine provides a complete, modern execution environment for rule-based sys
    - [Benchmark Problems (Manners, Waltz, Zebra)](#benchmark-problems-manners-waltz-zebra)
    - [Running the Benchmarks](#running-the-benchmarks)
    - [Benchmark Results & Performance Profile](#benchmark-results--performance-profile)
+9. [License](#license)
 
 ---
 
@@ -1147,3 +1151,10 @@ Representative metrics measured on a standard developer workstation (12th Gen In
   ```bash
   go test -race -cover ./...
   ```
+
+---
+
+## License
+
+This project is licensed under the Apache License, Version 2.0. See the [LICENSE](LICENSE) file for the full license text.
+
