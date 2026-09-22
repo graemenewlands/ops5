@@ -355,14 +355,22 @@ func (bm *BetaMemory) LeftActivation(token *Token, tag PropagationTag) {
 
 	// Snapshot active successors from the doubly-linked list
 	bm.mu.RLock()
-	var succs []LeftActivatable
-	for curr := bm.activeHead; curr != nil; curr = curr.next {
-		succs = append(succs, curr.target)
-	}
-	bm.mu.RUnlock()
-
-	for _, s := range succs {
+	if bm.activeHead == nil {
+		bm.mu.RUnlock()
+	} else if bm.activeHead.next == nil {
+		s := bm.activeHead.target
+		bm.mu.RUnlock()
 		s.LeftActivation(token, tag)
+	} else {
+		var succs []LeftActivatable
+		for curr := bm.activeHead; curr != nil; curr = curr.next {
+			succs = append(succs, curr.target)
+		}
+		bm.mu.RUnlock()
+
+		for _, s := range succs {
+			s.LeftActivation(token, tag)
+		}
 	}
 
 	// If transitioning 1 -> 0: Unlink child nodes from their AlphaMemories (after retraction)
@@ -566,7 +574,7 @@ func matchesJoinTests(tests []JoinTest, token *Token, wme *model.WME) bool {
 						continue
 					}
 					var found bool
-					targetVal, found = token.Bindings[dj.Value.VariableName()]
+					targetVal, found = token.GetBinding(dj.Value.VariableName())
 					if !found {
 						continue
 					}
@@ -584,7 +592,7 @@ func matchesJoinTests(tests []JoinTest, token *Token, wme *model.WME) bool {
 			continue
 		}
 
-		boundVal, exists := token.Bindings[jt.Variable]
+		boundVal, exists := token.GetBinding(jt.Variable)
 		if !exists {
 			return false
 		}
@@ -646,13 +654,15 @@ func matchValueOrVector(targetVal, existing model.Value) bool {
 }
 
 // extractBindings extracts new variable bindings introduced by this condition element on wme.
-func (jn *JoinNode) extractBindings(token *Token, wme *model.WME) (map[string]model.Value, bool) {
-	var newBindings map[string]model.Value
+func (jn *JoinNode) extractBindings(token *Token, wme *model.WME, buf []Binding) ([]Binding, bool) {
+	newBindings := buf
 
 	if jn.ce != nil {
 		if jn.ce.ElementVariable != "" {
-			newBindings = make(map[string]model.Value, 2)
-			newBindings[jn.ce.ElementVariable] = model.NewInt(wme.Timetag)
+			newBindings = append(newBindings, Binding{
+				Name:  jn.ce.ElementVariable,
+				Value: model.NewInt(wme.Timetag),
+			})
 		}
 
 		for _, at := range jn.ce.Tests {
@@ -685,21 +695,24 @@ func (jn *JoinNode) extractBindings(token *Token, wme *model.WME) (map[string]mo
 						}
 
 						// Check if already bound in parent token
-						if existing, ok := token.Bindings[vName]; ok {
+						if existing, ok := token.GetBinding(vName); ok {
 							if !hasVal || !matchValueOrVector(targetVal, existing) {
 								return nil, false
 							}
-						} else if intraVal, ok := newBindings[vName]; ok {
-							// Check intra-condition consistency
-							if !hasVal || !matchValueOrVector(targetVal, intraVal) {
-								return nil, false
-							}
 						} else {
-							if hasVal {
-								if newBindings == nil {
-									newBindings = make(map[string]model.Value, 4)
+							// Check intra-condition consistency within newBindings
+							foundIntra := false
+							for _, b := range newBindings {
+								if b.Name == vName {
+									if !hasVal || !matchValueOrVector(targetVal, b.Value) {
+										return nil, false
+									}
+									foundIntra = true
+									break
 								}
-								newBindings[vName] = targetVal
+							}
+							if !foundIntra && hasVal {
+								newBindings = append(newBindings, Binding{Name: vName, Value: targetVal})
 							}
 						}
 					}
@@ -719,9 +732,10 @@ func (jn *JoinNode) LeftActivation(token *Token, tag PropagationTag) {
 
 	key := jn.betaIndex.KeyForToken(token)
 	wmes := jn.alphaIndex.Lookup(key)
+	var bindBuf [4]Binding
 	for _, wme := range wmes {
 		if jn.matches(token, wme) {
-			newBindings, ok := jn.extractBindings(token, wme)
+			newBindings, ok := jn.extractBindings(token, wme, bindBuf[:0])
 			if ok {
 				childToken := NewToken(token, wme, newBindings)
 				jn.propagate(childToken, tag)
@@ -740,11 +754,12 @@ func (jn *JoinNode) RightActivation(wme *model.WME, tag PropagationTag) {
 	if len(keys) == 0 {
 		return
 	}
+	var bindBuf [4]Binding
 	if len(keys) == 1 {
 		tokens := jn.betaIndex.Lookup(keys[0])
 		for _, token := range tokens {
 			if jn.matches(token, wme) {
-				newBindings, ok := jn.extractBindings(token, wme)
+				newBindings, ok := jn.extractBindings(token, wme, bindBuf[:0])
 				if ok {
 					childToken := NewToken(token, wme, newBindings)
 					jn.propagate(childToken, tag)
@@ -764,7 +779,7 @@ func (jn *JoinNode) RightActivation(wme *model.WME, tag PropagationTag) {
 			}
 			seen[sig] = true
 			if jn.matches(token, wme) {
-				newBindings, ok := jn.extractBindings(token, wme)
+				newBindings, ok := jn.extractBindings(token, wme, bindBuf[:0])
 				if ok {
 					childToken := NewToken(token, wme, newBindings)
 					jn.propagate(childToken, tag)
@@ -776,6 +791,24 @@ func (jn *JoinNode) RightActivation(wme *model.WME, tag PropagationTag) {
 
 func (jn *JoinNode) propagate(token *Token, tag PropagationTag) {
 	jn.mu.RLock()
+	n := len(jn.successors)
+	if n == 0 {
+		jn.mu.RUnlock()
+		return
+	}
+	if n == 1 {
+		s := jn.successors[0]
+		jn.mu.RUnlock()
+		s.LeftActivation(token, tag)
+		return
+	}
+	if n == 2 {
+		s0, s1 := jn.successors[0], jn.successors[1]
+		jn.mu.RUnlock()
+		s0.LeftActivation(token, tag)
+		s1.LeftActivation(token, tag)
+		return
+	}
 	succs := append([]LeftActivatable(nil), jn.successors...)
 	jn.mu.RUnlock()
 

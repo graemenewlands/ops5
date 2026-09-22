@@ -30,7 +30,7 @@ func TestEvalNodeSimpleComparison(t *testing.T) {
 	node.AddSuccessor(receiver)
 
 	// Token 1: <x>=20, <y>=10 (should pass)
-	tok1 := NewToken(nil, nil, map[string]model.Value{
+	tok1 := NewTokenWithMap(nil, nil, map[string]model.Value{
 		"x": model.NewInt(20),
 		"y": model.NewInt(10),
 	})
@@ -44,7 +44,7 @@ func TestEvalNodeSimpleComparison(t *testing.T) {
 	}
 
 	// Token 2: <x>=5, <y>=10 (should be filtered)
-	tok2 := NewToken(nil, nil, map[string]model.Value{
+	tok2 := NewTokenWithMap(nil, nil, map[string]model.Value{
 		"x": model.NewInt(5),
 		"y": model.NewInt(10),
 	})
@@ -82,7 +82,7 @@ func TestEvalNodeComputeArithmetic(t *testing.T) {
 	node.AddSuccessor(receiver)
 
 	// Item 1: price 25 * qty 4 = 100 (passes)
-	tok1 := NewToken(nil, nil, map[string]model.Value{
+	tok1 := NewTokenWithMap(nil, nil, map[string]model.Value{
 		"price": model.NewInt(25),
 		"qty":   model.NewInt(4),
 	})
@@ -92,7 +92,7 @@ func TestEvalNodeComputeArithmetic(t *testing.T) {
 	}
 
 	// Item 2: price 15 * qty 5 = 75 (blocked)
-	tok2 := NewToken(nil, nil, map[string]model.Value{
+	tok2 := NewTokenWithMap(nil, nil, map[string]model.Value{
 		"price": model.NewInt(15),
 		"qty":   model.NewInt(5),
 	})
@@ -121,21 +121,21 @@ func TestEvalNodeMultipleComparisons(t *testing.T) {
 	node.AddSuccessor(receiver)
 
 	// Test 15 (passes both)
-	tok1 := NewToken(nil, nil, map[string]model.Value{"x": model.NewInt(15)})
+	tok1 := NewTokenWithMap(nil, nil, map[string]model.Value{"x": model.NewInt(15)})
 	node.LeftActivation(tok1, TagAdd)
 	if len(receiver.tokens) != 1 {
 		t.Errorf("expected 15 to pass")
 	}
 
 	// Test 5 (fails cmp1)
-	tok2 := NewToken(nil, nil, map[string]model.Value{"x": model.NewInt(5)})
+	tok2 := NewTokenWithMap(nil, nil, map[string]model.Value{"x": model.NewInt(5)})
 	node.LeftActivation(tok2, TagAdd)
 	if len(receiver.tokens) != 1 {
 		t.Errorf("expected 5 to fail")
 	}
 
 	// Test 25 (fails cmp2)
-	tok3 := NewToken(nil, nil, map[string]model.Value{"x": model.NewInt(25)})
+	tok3 := NewTokenWithMap(nil, nil, map[string]model.Value{"x": model.NewInt(25)})
 	node.LeftActivation(tok3, TagAdd)
 	if len(receiver.tokens) != 1 {
 		t.Errorf("expected 25 to fail")
@@ -154,8 +154,8 @@ func TestEvalPredicateNode(t *testing.T) {
 	receiver := &mockBetaReceiver{}
 	node.AddSuccessor(receiver)
 
-	tokEven := NewToken(nil, nil, map[string]model.Value{"num": model.NewInt(42)})
-	tokOdd := NewToken(nil, nil, map[string]model.Value{"num": model.NewInt(43)})
+	tokEven := NewTokenWithMap(nil, nil, map[string]model.Value{"num": model.NewInt(42)})
+	tokOdd := NewTokenWithMap(nil, nil, map[string]model.Value{"num": model.NewInt(43)})
 
 	node.LeftActivation(tokEven, TagAdd)
 	node.LeftActivation(tokOdd, TagAdd)
@@ -163,8 +163,8 @@ func TestEvalPredicateNode(t *testing.T) {
 	if len(receiver.tokens) != 1 {
 		t.Fatalf("expected only even token to pass, got %d", len(receiver.tokens))
 	}
-	if receiver.tokens[0].Bindings["num"].Raw().(int64) != 42 {
-		t.Errorf("expected token with num=42, got %v", receiver.tokens[0].Bindings["num"])
+	if receiver.tokens[0].Bindings()["num"].Raw().(int64) != 42 {
+		t.Errorf("expected token with num=42, got %v", receiver.tokens[0].Bindings()["num"])
 	}
 }
 
@@ -178,7 +178,7 @@ func TestEvalNodeRemoveSuccessor(t *testing.T) {
 	receiver := &mockBetaReceiver{}
 	node.AddSuccessor(receiver)
 
-	tok := NewToken(nil, nil, map[string]model.Value{"x": model.NewInt(1)})
+	tok := NewTokenWithMap(nil, nil, map[string]model.Value{"x": model.NewInt(1)})
 	node.LeftActivation(tok, TagAdd)
 	if len(receiver.tokens) != 1 {
 		t.Fatalf("expected 1 token")

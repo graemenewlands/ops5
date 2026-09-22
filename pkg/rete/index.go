@@ -73,14 +73,14 @@ func (bi *BetaIndex) KeyForToken(tok *Token) string {
 		return ""
 	}
 	if len(bi.variables) == 1 {
-		if val, ok := tok.Bindings[bi.variables[0]]; ok {
+		if val, ok := tok.GetBinding(bi.variables[0]); ok {
 			return CanonicalValueKey(val)
 		}
 		return "s:nil"
 	}
 	keys := make([]string, len(bi.variables))
 	for i, v := range bi.variables {
-		if val, ok := tok.Bindings[v]; ok {
+		if val, ok := tok.GetBinding(v); ok {
 			keys[i] = CanonicalValueKey(val)
 		} else {
 			keys[i] = "s:nil"

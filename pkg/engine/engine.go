@@ -1461,10 +1461,7 @@ func (e *Engine) Step() (bool, error) {
 	}
 
 	// Local bindings for this rule firing, initialized with token bindings
-	localBindings := make(map[string]model.Value, len(dominant.Token.Bindings))
-	for k, v := range dominant.Token.Bindings {
-		localBindings[k] = v
-	}
+	localBindings := dominant.Token.Bindings()
 
 	// Execute RHS actions
 	for _, action := range dominant.Rule.Actions {

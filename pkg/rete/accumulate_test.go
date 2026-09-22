@@ -34,7 +34,7 @@ func TestAccumulateNodeCount(t *testing.T) {
 	accNode.Attach()
 
 	// 1. Assert parent order token: oid=100
-	orderTok := NewToken(nil, nil, map[string]model.Value{"oid": model.NewInt(100)})
+	orderTok := NewTokenWithMap(nil, nil, map[string]model.Value{"oid": model.NewInt(100)})
 	betaMem.LeftActivation(orderTok, TagAdd)
 
 	// Since count works on empty sets, it should immediately emit count=0!
@@ -44,8 +44,8 @@ func TestAccumulateNodeCount(t *testing.T) {
 	if receiver.tags[0] != TagAdd {
 		t.Fatalf("expected TagAdd, got %v", receiver.tags[0])
 	}
-	if receiver.tokens[0].Bindings["total-items"].Raw().(int64) != 0 {
-		t.Fatalf("expected count 0, got %v", receiver.tokens[0].Bindings["total-items"])
+	if receiver.tokens[0].Bindings()["total-items"].Raw().(int64) != 0 {
+		t.Fatalf("expected count 0, got %v", receiver.tokens[0].Bindings()["total-items"])
 	}
 
 	// 2. Assert first item
@@ -56,11 +56,11 @@ func TestAccumulateNodeCount(t *testing.T) {
 	if len(receiver.tokens) != 3 {
 		t.Fatalf("expected 3 total events, got %d", len(receiver.tokens))
 	}
-	if receiver.tags[1] != TagRemove || receiver.tokens[1].Bindings["total-items"].Raw().(int64) != 0 {
-		t.Errorf("expected TagRemove count=0, got %v with %v", receiver.tags[1], receiver.tokens[1].Bindings["total-items"])
+	if receiver.tags[1] != TagRemove || receiver.tokens[1].Bindings()["total-items"].Raw().(int64) != 0 {
+		t.Errorf("expected TagRemove count=0, got %v with %v", receiver.tags[1], receiver.tokens[1].Bindings()["total-items"])
 	}
-	if receiver.tags[2] != TagAdd || receiver.tokens[2].Bindings["total-items"].Raw().(int64) != 1 {
-		t.Errorf("expected TagAdd count=1, got %v with %v", receiver.tags[2], receiver.tokens[2].Bindings["total-items"])
+	if receiver.tags[2] != TagAdd || receiver.tokens[2].Bindings()["total-items"].Raw().(int64) != 1 {
+		t.Errorf("expected TagAdd count=1, got %v with %v", receiver.tags[2], receiver.tokens[2].Bindings()["total-items"])
 	}
 
 	// 3. Assert second item
@@ -70,11 +70,11 @@ func TestAccumulateNodeCount(t *testing.T) {
 	if len(receiver.tokens) != 5 {
 		t.Fatalf("expected 5 total events, got %d", len(receiver.tokens))
 	}
-	if receiver.tags[3] != TagRemove || receiver.tokens[3].Bindings["total-items"].Raw().(int64) != 1 {
-		t.Errorf("expected TagRemove count=1, got %v", receiver.tokens[3].Bindings["total-items"])
+	if receiver.tags[3] != TagRemove || receiver.tokens[3].Bindings()["total-items"].Raw().(int64) != 1 {
+		t.Errorf("expected TagRemove count=1, got %v", receiver.tokens[3].Bindings()["total-items"])
 	}
-	if receiver.tags[4] != TagAdd || receiver.tokens[4].Bindings["total-items"].Raw().(int64) != 2 {
-		t.Errorf("expected TagAdd count=2, got %v", receiver.tokens[4].Bindings["total-items"])
+	if receiver.tags[4] != TagAdd || receiver.tokens[4].Bindings()["total-items"].Raw().(int64) != 2 {
+		t.Errorf("expected TagAdd count=2, got %v", receiver.tokens[4].Bindings()["total-items"])
 	}
 
 	// 4. Retract item1
@@ -83,11 +83,11 @@ func TestAccumulateNodeCount(t *testing.T) {
 	if len(receiver.tokens) != 7 {
 		t.Fatalf("expected 7 total events, got %d", len(receiver.tokens))
 	}
-	if receiver.tags[5] != TagRemove || receiver.tokens[5].Bindings["total-items"].Raw().(int64) != 2 {
-		t.Errorf("expected TagRemove count=2, got %v", receiver.tokens[5].Bindings["total-items"])
+	if receiver.tags[5] != TagRemove || receiver.tokens[5].Bindings()["total-items"].Raw().(int64) != 2 {
+		t.Errorf("expected TagRemove count=2, got %v", receiver.tokens[5].Bindings()["total-items"])
 	}
-	if receiver.tags[6] != TagAdd || receiver.tokens[6].Bindings["total-items"].Raw().(int64) != 1 {
-		t.Errorf("expected TagAdd count=1, got %v", receiver.tokens[6].Bindings["total-items"])
+	if receiver.tags[6] != TagAdd || receiver.tokens[6].Bindings()["total-items"].Raw().(int64) != 1 {
+		t.Errorf("expected TagAdd count=1, got %v", receiver.tokens[6].Bindings()["total-items"])
 	}
 
 	// 5. Retract parent order token
@@ -95,8 +95,8 @@ func TestAccumulateNodeCount(t *testing.T) {
 	if len(receiver.tokens) != 8 {
 		t.Fatalf("expected 8 total events, got %d", len(receiver.tokens))
 	}
-	if receiver.tags[7] != TagRemove || receiver.tokens[7].Bindings["total-items"].Raw().(int64) != 1 {
-		t.Errorf("expected final TagRemove count=1, got %v", receiver.tokens[7].Bindings["total-items"])
+	if receiver.tags[7] != TagRemove || receiver.tokens[7].Bindings()["total-items"].Raw().(int64) != 1 {
+		t.Errorf("expected final TagRemove count=1, got %v", receiver.tokens[7].Bindings()["total-items"])
 	}
 }
 
@@ -129,11 +129,11 @@ func TestAccumulateNodeSum(t *testing.T) {
 	accNode.Attach()
 
 	// 1. Assert order token
-	orderTok := NewToken(nil, nil, map[string]model.Value{"oid": model.NewInt(50)})
+	orderTok := NewTokenWithMap(nil, nil, map[string]model.Value{"oid": model.NewInt(50)})
 	betaMem.LeftActivation(orderTok, TagAdd)
 
-	if len(receiver.tokens) != 1 || receiver.tokens[0].Bindings["total"].Raw().(int64) != 0 {
-		t.Fatalf("expected initial sum=0, got %v", receiver.tokens[0].Bindings["total"])
+	if len(receiver.tokens) != 1 || receiver.tokens[0].Bindings()["total"].Raw().(int64) != 0 {
+		t.Fatalf("expected initial sum=0, got %v", receiver.tokens[0].Bindings()["total"])
 	}
 
 	// 2. Assert line 1 (price 25)
@@ -144,8 +144,8 @@ func TestAccumulateNodeSum(t *testing.T) {
 	alphaMem.Activation(l1, TagAdd)
 
 	latest := receiver.tokens[len(receiver.tokens)-1]
-	if latest.Bindings["total"].Raw().(int64) != 25 {
-		t.Fatalf("expected sum=25, got %v", latest.Bindings["total"])
+	if latest.Bindings()["total"].Raw().(int64) != 25 {
+		t.Fatalf("expected sum=25, got %v", latest.Bindings()["total"])
 	}
 
 	// 3. Assert line 2 (price 50.5 float)
@@ -156,8 +156,8 @@ func TestAccumulateNodeSum(t *testing.T) {
 	alphaMem.Activation(l2, TagAdd)
 
 	latest = receiver.tokens[len(receiver.tokens)-1]
-	if math.Abs(latest.Bindings["total"].Raw().(float64)-75.5) > 1e-6 {
-		t.Fatalf("expected sum=75.5, got %v", latest.Bindings["total"])
+	if math.Abs(latest.Bindings()["total"].Raw().(float64)-75.5) > 1e-6 {
+		t.Fatalf("expected sum=75.5, got %v", latest.Bindings()["total"])
 	}
 }
 
@@ -190,7 +190,7 @@ func TestAccumulateNodeAverageMinMax(t *testing.T) {
 	accNode.Attach()
 
 	// Parent token for course "cs101"
-	tok := NewToken(nil, nil, map[string]model.Value{"c": model.NewSymbol("cs101")})
+	tok := NewTokenWithMap(nil, nil, map[string]model.Value{"c": model.NewSymbol("cs101")})
 	betaMem.LeftActivation(tok, TagAdd)
 
 	// For average on 0 items, NO token should be emitted!
@@ -208,8 +208,8 @@ func TestAccumulateNodeAverageMinMax(t *testing.T) {
 	if len(receiver.tokens) != 1 {
 		t.Fatalf("expected 1 token after student 1, got %d", len(receiver.tokens))
 	}
-	if receiver.tokens[0].Bindings["gpa"].Raw().(float64) != 80.0 {
-		t.Errorf("expected gpa 80.0, got %v", receiver.tokens[0].Bindings["gpa"])
+	if receiver.tokens[0].Bindings()["gpa"].Raw().(float64) != 80.0 {
+		t.Errorf("expected gpa 80.0, got %v", receiver.tokens[0].Bindings()["gpa"])
 	}
 
 	// Assert student 2: grade 90
@@ -220,8 +220,8 @@ func TestAccumulateNodeAverageMinMax(t *testing.T) {
 	alphaMem.Activation(s2, TagAdd)
 
 	latest := receiver.tokens[len(receiver.tokens)-1]
-	if latest.Bindings["gpa"].Raw().(float64) != 85.0 {
-		t.Errorf("expected gpa 85.0, got %v", latest.Bindings["gpa"])
+	if latest.Bindings()["gpa"].Raw().(float64) != 85.0 {
+		t.Errorf("expected gpa 85.0, got %v", latest.Bindings()["gpa"])
 	}
 
 	// Retract both students -> drops to 0, should retract token with no new assertion
@@ -262,14 +262,14 @@ func TestAccumulateNodeCollect(t *testing.T) {
 	accNode.AddSuccessor(receiver)
 	accNode.Attach()
 
-	tok := NewToken(nil, nil, map[string]model.Value{"bname": model.NewSymbol("b1")})
+	tok := NewTokenWithMap(nil, nil, map[string]model.Value{"bname": model.NewSymbol("b1")})
 	betaMem.LeftActivation(tok, TagAdd)
 
 	// Collect on empty set produces empty vector
 	if len(receiver.tokens) != 1 {
 		t.Fatalf("expected 1 token, got %d", len(receiver.tokens))
 	}
-	v0 := receiver.tokens[0].Bindings["item-list"]
+	v0 := receiver.tokens[0].Bindings()["item-list"]
 	if !v0.IsVector() || len(v0.VectorElements()) != 0 {
 		t.Fatalf("expected empty vector, got %v", v0)
 	}
@@ -281,7 +281,7 @@ func TestAccumulateNodeCollect(t *testing.T) {
 	alphaMem.Activation(i2, TagAdd)
 
 	latest := receiver.tokens[len(receiver.tokens)-1]
-	vec := latest.Bindings["item-list"].VectorElements()
+	vec := latest.Bindings()["item-list"].VectorElements()
 	if len(vec) != 2 {
 		t.Fatalf("expected vector of 2 elements, got %d", len(vec))
 	}
@@ -321,7 +321,7 @@ func TestAccumulateNodeComputeTarget(t *testing.T) {
 	accNode.AddSuccessor(receiver)
 	accNode.Attach()
 
-	cartTok := NewToken(nil, nil, map[string]model.Value{"cid": model.NewInt(1)})
+	cartTok := NewTokenWithMap(nil, nil, map[string]model.Value{"cid": model.NewInt(1)})
 	betaMem.LeftActivation(cartTok, TagAdd)
 
 	// Add item 1: 3 * 10 = 30
@@ -339,7 +339,7 @@ func TestAccumulateNodeComputeTarget(t *testing.T) {
 	}), TagAdd)
 
 	latest := receiver.tokens[len(receiver.tokens)-1]
-	if latest.Bindings["grand-total"].Raw().(int64) != 80 {
-		t.Fatalf("expected grand-total 80, got %v", latest.Bindings["grand-total"])
+	if latest.Bindings()["grand-total"].Raw().(int64) != 80 {
+		t.Fatalf("expected grand-total 80, got %v", latest.Bindings()["grand-total"])
 	}
 }

@@ -58,20 +58,39 @@ func (en *EvalNode) RemoveSuccessor(node LeftActivatable) {
 
 // LeftActivation handles an incoming token from the parent BetaMemory.
 func (en *EvalNode) LeftActivation(token *Token, tag PropagationTag) {
+	b := token.Bindings()
 	if en.predicate != nil {
-		if !en.predicate(token.Bindings) {
+		if !en.predicate(b) {
 			return
 		}
 	}
 
 	if en.test != nil {
-		ok, err := en.test.Evaluate(token.Bindings)
+		ok, err := en.test.Evaluate(b)
 		if err != nil || !ok {
 			return
 		}
 	}
 
 	en.mu.RLock()
+	n := len(en.successors)
+	if n == 0 {
+		en.mu.RUnlock()
+		return
+	}
+	if n == 1 {
+		s := en.successors[0]
+		en.mu.RUnlock()
+		s.LeftActivation(token, tag)
+		return
+	}
+	if n == 2 {
+		s0, s1 := en.successors[0], en.successors[1]
+		en.mu.RUnlock()
+		s0.LeftActivation(token, tag)
+		s1.LeftActivation(token, tag)
+		return
+	}
 	succs := append([]LeftActivatable(nil), en.successors...)
 	en.mu.RUnlock()
 

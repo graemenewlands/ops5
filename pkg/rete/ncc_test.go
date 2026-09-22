@@ -21,7 +21,7 @@ func TestNccNodeUnitLifecycle(t *testing.T) {
 
 	// 1. Assert parent order token (timetag 1)
 	orderWME := model.NewWME(1, "order", map[string]model.Value{"id": model.NewInt(10)})
-	parentTok := NewToken(nil, orderWME, map[string]model.Value{"id": model.NewInt(10)})
+	parentTok := NewTokenWithMap(nil, orderWME, map[string]model.Value{"id": model.NewInt(10)})
 	betaMem.LeftActivation(parentTok, TagAdd)
 	nccNode.LeftActivation(parentTok, TagAdd)
 

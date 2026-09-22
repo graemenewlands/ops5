@@ -27,14 +27,21 @@ func (t PropagationTag) String() string {
 	}
 }
 
-// Token represents a chain of matching WMEs in the Beta network.
+// Binding represents an individual variable binding introduced at a condition element.
+type Binding struct {
+	Name  string
+	Value model.Value
+}
+
+// Token represents a chain of matching WMEs along an ancestor spine in the Beta network.
+// Variable bindings are maintained incrementally along the spine without copying parent bindings.
 type Token struct {
 	Parent        *Token
 	WME           *model.WME
-	Bindings      map[string]model.Value
 	Tag           PropagationTag
 	ExtraTimetags []int64
 	sig           string
+	bindings      []Binding
 }
 
 // Signature returns the cached unique signature string for this token.
@@ -48,25 +55,52 @@ func (t *Token) Signature() string {
 	return fmt.Sprintf("%v", t.Timetags())
 }
 
-// NewToken creates a child token with an added WME and merged variable bindings.
-func NewToken(parent *Token, wme *model.WME, newBindings map[string]model.Value) *Token {
-	var bindings map[string]model.Value
-	if len(newBindings) == 0 {
-		if parent != nil {
-			bindings = parent.Bindings
-		} else {
-			bindings = make(map[string]model.Value)
+// GetBinding returns the value bound to the specified variable name, searching up the ancestor spine.
+// This is an allocation-free O(depth) operation over small L1-cached slices.
+func (t *Token) GetBinding(name string) (model.Value, bool) {
+	for curr := t; curr != nil; curr = curr.Parent {
+		for i := len(curr.bindings) - 1; i >= 0; i-- {
+			if curr.bindings[i].Name == name {
+				return curr.bindings[i].Value, true
+			}
 		}
-	} else if parent == nil || len(parent.Bindings) == 0 {
-		bindings = newBindings
-	} else {
-		bindings = make(map[string]model.Value, len(parent.Bindings)+len(newBindings))
-		for k, v := range parent.Bindings {
-			bindings[k] = v
+	}
+	return model.Value{}, false
+}
+
+// Bindings returns a map containing all variable bindings accumulated along this token spine.
+// Materialized on demand when needed for RHS execution or external inspection.
+func (t *Token) Bindings() map[string]model.Value {
+	if t == nil {
+		return nil
+	}
+	var chain []*Token
+	for curr := t; curr != nil; curr = curr.Parent {
+		chain = append(chain, curr)
+	}
+	m := make(map[string]model.Value)
+	for i := len(chain) - 1; i >= 0; i-- {
+		for _, b := range chain[i].bindings {
+			m[b.Name] = b.Value
 		}
-		for k, v := range newBindings {
-			bindings[k] = v
-		}
+	}
+	return m
+}
+
+// LocalBindings returns the bindings directly introduced by this token node.
+func (t *Token) LocalBindings() []Binding {
+	if t == nil {
+		return nil
+	}
+	return t.bindings
+}
+
+// NewToken creates a child token with an added WME and local variable bindings.
+func NewToken(parent *Token, wme *model.WME, bindings []Binding) *Token {
+	var b []Binding
+	if len(bindings) > 0 {
+		b = make([]Binding, len(bindings))
+		copy(b, bindings)
 	}
 
 	var sig string
@@ -88,31 +122,30 @@ func NewToken(parent *Token, wme *model.WME, newBindings map[string]model.Value)
 	return &Token{
 		Parent:   parent,
 		WME:      wme,
-		Bindings: bindings,
+		bindings: b,
 		Tag:      TagAdd,
 		sig:      sig,
 	}
 }
 
-// NewAccumulateToken creates a child token representing an aggregated result with extra timetags.
-func NewAccumulateToken(parent *Token, newBindings map[string]model.Value, extraTimetags []int64) *Token {
-	var bindings map[string]model.Value
+// NewTokenWithMap creates a child token using a map of variable bindings (convenience/test helper).
+func NewTokenWithMap(parent *Token, wme *model.WME, newBindings map[string]model.Value) *Token {
 	if len(newBindings) == 0 {
-		if parent != nil {
-			bindings = parent.Bindings
-		} else {
-			bindings = make(map[string]model.Value)
-		}
-	} else if parent == nil || len(parent.Bindings) == 0 {
-		bindings = newBindings
-	} else {
-		bindings = make(map[string]model.Value, len(parent.Bindings)+len(newBindings))
-		for k, v := range parent.Bindings {
-			bindings[k] = v
-		}
-		for k, v := range newBindings {
-			bindings[k] = v
-		}
+		return NewToken(parent, wme, nil)
+	}
+	slice := make([]Binding, 0, len(newBindings))
+	for k, v := range newBindings {
+		slice = append(slice, Binding{Name: k, Value: v})
+	}
+	return NewToken(parent, wme, slice)
+}
+
+// NewAccumulateToken creates a child token representing an aggregated result with extra timetags.
+func NewAccumulateToken(parent *Token, bindings []Binding, extraTimetags []int64) *Token {
+	var b []Binding
+	if len(bindings) > 0 {
+		b = make([]Binding, len(bindings))
+		copy(b, bindings)
 	}
 
 	var sig string
@@ -149,11 +182,23 @@ func NewAccumulateToken(parent *Token, newBindings map[string]model.Value, extra
 	return &Token{
 		Parent:        parent,
 		WME:           nil,
-		Bindings:      bindings,
+		bindings:      b,
 		Tag:           TagAdd,
 		ExtraTimetags: extraTimetags,
 		sig:           sig,
 	}
+}
+
+// NewAccumulateTokenWithMap creates a child token representing an aggregated result with map bindings.
+func NewAccumulateTokenWithMap(parent *Token, newBindings map[string]model.Value, extraTimetags []int64) *Token {
+	if len(newBindings) == 0 {
+		return NewAccumulateToken(parent, nil, extraTimetags)
+	}
+	slice := make([]Binding, 0, len(newBindings))
+	for k, v := range newBindings {
+		slice = append(slice, Binding{Name: k, Value: v})
+	}
+	return NewAccumulateToken(parent, slice, extraTimetags)
 }
 
 // DummyRootToken represents the top of the beta network.
@@ -161,7 +206,7 @@ func DummyRootToken() *Token {
 	return &Token{
 		Parent:   nil,
 		WME:      nil,
-		Bindings: make(map[string]model.Value),
+		bindings: nil,
 		Tag:      TagAdd,
 		sig:      "[]",
 	}
@@ -169,39 +214,55 @@ func DummyRootToken() *Token {
 
 // WMEs returns all non-nil WMEs contained in this token chain, in order from first CE to last.
 func (t *Token) WMEs() []*model.WME {
-	var list []*model.WME
-	curr := t
-	for curr != nil {
-		if curr.WME != nil {
-			list = append(list, curr.WME)
-		}
-		curr = curr.Parent
+	if t == nil {
+		return nil
 	}
-
-	// Reverse to get chronological/CE order
-	for i, j := 0, len(list)-1; i < j; i, j = i+1, j-1 {
-		list[i], list[j] = list[j], list[i]
+	count := 0
+	for curr := t; curr != nil; curr = curr.Parent {
+		if curr.WME != nil {
+			count++
+		}
+	}
+	if count == 0 {
+		return nil
+	}
+	list := make([]*model.WME, count)
+	idx := count - 1
+	for curr := t; curr != nil; curr = curr.Parent {
+		if curr.WME != nil {
+			list[idx] = curr.WME
+			idx--
+		}
 	}
 	return list
 }
 
 // Timetags returns the list of timetags for all WMEs and extra timetags in this token in condition element order.
 func (t *Token) Timetags() []int64 {
-	var chain []*Token
-	curr := t
-	for curr != nil {
-		chain = append(chain, curr)
-		curr = curr.Parent
+	if t == nil {
+		return nil
+	}
+	count := 0
+	for curr := t; curr != nil; curr = curr.Parent {
+		if curr.WME != nil {
+			count++
+		}
+		count += len(curr.ExtraTimetags)
+	}
+	if count == 0 {
+		return nil
 	}
 
-	var tags []int64
-	for i := len(chain) - 1; i >= 0; i-- {
-		tok := chain[i]
-		if tok.WME != nil {
-			tags = append(tags, tok.WME.Timetag)
+	tags := make([]int64, count)
+	idx := count - 1
+	for curr := t; curr != nil; curr = curr.Parent {
+		for i := len(curr.ExtraTimetags) - 1; i >= 0; i-- {
+			tags[idx] = curr.ExtraTimetags[i]
+			idx--
 		}
-		if len(tok.ExtraTimetags) > 0 {
-			tags = append(tags, tok.ExtraTimetags...)
+		if curr.WME != nil {
+			tags[idx] = curr.WME.Timetag
+			idx--
 		}
 	}
 	return tags
@@ -210,9 +271,14 @@ func (t *Token) Timetags() []int64 {
 // String returns a readable representation of the token.
 func (t *Token) String() string {
 	tags := t.Timetags()
-	var parts []string
-	for _, tt := range tags {
-		parts = append(parts, fmt.Sprintf("%d", tt))
+	var sb strings.Builder
+	sb.WriteString("Token[timetags=[")
+	for i, tt := range tags {
+		if i > 0 {
+			sb.WriteString(", ")
+		}
+		sb.WriteString(strconv.FormatInt(tt, 10))
 	}
-	return fmt.Sprintf("Token[timetags=[%s]]", strings.Join(parts, ", "))
+	sb.WriteString("]]")
+	return sb.String()
 }

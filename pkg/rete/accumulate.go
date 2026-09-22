@@ -175,7 +175,7 @@ func (an *AccumulateNode) extractTargetValue(parentToken *Token, wme *model.WME)
 	// Build local bindings combining parent token bindings and matching WME attribute variables
 	bindings := make(map[string]model.Value)
 	if parentToken != nil {
-		for k, v := range parentToken.Bindings {
+		for k, v := range parentToken.Bindings() {
 			bindings[k] = v
 		}
 	}
@@ -360,7 +360,7 @@ func (an *AccumulateNode) LeftActivation(token *Token, tag PropagationTag) {
 		val, timetags, ok := an.evaluateAggregate(token, matched)
 		if ok {
 			resVar := strings.TrimPrefix(strings.TrimSuffix(an.spec.ResultVar, ">"), "<")
-			childToken := NewAccumulateToken(token, map[string]model.Value{resVar: val}, timetags)
+			childToken := NewAccumulateToken(token, []Binding{{Name: resVar, Value: val}}, timetags)
 			an.activeTokens[sig] = childToken
 			succs := append([]LeftActivatable(nil), an.successors...)
 			an.mu.Unlock()
@@ -443,8 +443,8 @@ func (an *AccumulateNode) RightActivation(wme *model.WME, tag PropagationTag) {
 
 		// If nothing changed in aggregate value or underlying WME timetags, skip churn
 		if oldChild != nil && ok {
-			oldVal := oldChild.Bindings[resVar]
-			if oldVal.Equal(val) && int64SliceEqual(oldChild.ExtraTimetags, timetags) {
+			oldVal, found := oldChild.GetBinding(resVar)
+			if found && oldVal.Equal(val) && int64SliceEqual(oldChild.ExtraTimetags, timetags) {
 				continue
 			}
 		}
@@ -460,7 +460,7 @@ func (an *AccumulateNode) RightActivation(wme *model.WME, tag PropagationTag) {
 
 		// If the new aggregate is valid, assert it
 		if ok {
-			newChild := NewAccumulateToken(token, map[string]model.Value{resVar: val}, timetags)
+			newChild := NewAccumulateToken(token, []Binding{{Name: resVar, Value: val}}, timetags)
 			an.activeTokens[sig] = newChild
 			succs := append([]LeftActivatable(nil), an.successors...)
 			for _, s := range succs {

@@ -21,7 +21,7 @@ func BenchmarkJoinRightUnlinked(b *testing.B) {
 
 	tokens := make([]*Token, b.N)
 	for i := 0; i < b.N; i++ {
-		tokens[i] = NewToken(nil, nil, map[string]model.Value{"id": model.NewInt(int64(i))})
+		tokens[i] = NewTokenWithMap(nil, nil, map[string]model.Value{"id": model.NewInt(int64(i))})
 	}
 
 	b.ResetTimer()
@@ -48,7 +48,7 @@ func BenchmarkJoinRightLinkedEmptyMatches(b *testing.B) {
 
 	tokens := make([]*Token, b.N)
 	for i := 0; i < b.N; i++ {
-		tokens[i] = NewToken(nil, nil, map[string]model.Value{"id": model.NewInt(int64(i))})
+		tokens[i] = NewTokenWithMap(nil, nil, map[string]model.Value{"id": model.NewInt(int64(i))})
 	}
 
 	b.ResetTimer()
@@ -93,7 +93,7 @@ func BenchmarkJoinLeftLinkedEmptyMatches(b *testing.B) {
 	jn.Attach()
 
 	// Assert 1 non-matching token so join is right-linked
-	nonMatchingTok := NewToken(nil, nil, map[string]model.Value{"id": model.NewInt(-1)})
+	nonMatchingTok := NewTokenWithMap(nil, nil, map[string]model.Value{"id": model.NewInt(-1)})
 	bm.LeftActivation(nonMatchingTok, TagAdd)
 
 	wmes := make([]*model.WME, b.N)

@@ -29,7 +29,7 @@ func TestExistentialJoinNodeBasicLifecycle(t *testing.T) {
 	existNode.Attach()
 
 	// Assert order token: oid=100
-	orderTok := NewToken(nil, nil, map[string]model.Value{"oid": model.NewInt(100)})
+	orderTok := NewTokenWithMap(nil, nil, map[string]model.Value{"oid": model.NewInt(100)})
 	betaMem.LeftActivation(orderTok, TagAdd)
 
 	// No items yet -> 0 activations
@@ -127,7 +127,7 @@ func TestExistentialJoinNodeLeftArrivalWithExistingWMEs(t *testing.T) {
 	existNode.Attach()
 
 	// Order arrives: should match existing items and emit EXACTLY 1 token with TagAdd
-	orderTok := NewToken(nil, nil, map[string]model.Value{"oid": model.NewInt(42)})
+	orderTok := NewTokenWithMap(nil, nil, map[string]model.Value{"oid": model.NewInt(42)})
 	betaMem.LeftActivation(orderTok, TagAdd)
 
 	if len(receiver.tokens) != 1 {
@@ -169,7 +169,7 @@ func TestExistentialJoinNodeNonMatchingWMEs(t *testing.T) {
 	existNode.Attach()
 
 	// Order token with oid=10
-	orderTok := NewToken(nil, nil, map[string]model.Value{"oid": model.NewInt(10)})
+	orderTok := NewTokenWithMap(nil, nil, map[string]model.Value{"oid": model.NewInt(10)})
 	betaMem.LeftActivation(orderTok, TagAdd)
 
 	// Items for different orders (oid=20, 30)

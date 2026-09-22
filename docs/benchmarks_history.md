@@ -43,21 +43,21 @@ go test -bench=. -benchtime=1x -run=^$ ./benchmarks
 
 | Version / Tag | Release Date | Key Optimizations / Features | Manners-16 | Manners-32 | Manners-64 | Waltz-12 | Waltz-50 | Zebra-5 |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **`v0.2.0`** | 2026-09-22 | Token signature caching, binding sharing, binary heap agenda (O(1) dominant dispatch) | **855 ms** (-51%) | **1.54 s** (-52%) | **16.42 s** (-52%) | **18 ms** (-72%) | **69 ms** (-90%) | **0.16 ms** (-16%) |
+| **`v0.2.0`** | 2026-09-22 | Token prefix spine sharing, binary heap agenda, zero-copy bindings, single-pass timetags | **442 ms** (-75%) | **744 ms** (-77%) | **8.56 s** (-75%) | **17 ms** (-74%) | **58 ms** (-91%) | **0.12 ms** (-37%) |
 | **[`v0.1.0`](#v010---2026-09-22-baseline)** | 2026-09-22 | Dual-sided join hashing, Structural beta sharing, Left/Right node unlinking, Rule salience | 1.74 s | 3.23 s | 34.20 s | 65 ms | 662 ms | 0.19 ms |
 
 ---
 
 ## Version Release Logs
 
-### `v0.2.0` - 2026-09-22 (Token Signature Caching, Binding Sharing & Binary Heap Agenda)
+### `v0.2.0` - 2026-09-22 (Token Prefix Spine Sharing, Binary Heap Agenda & Zero-Copy Bindings)
 
 * **Key Optimizations**:
-  - **Binary Max-Heap Agenda (`conflict.Set`)**: Transformed conflict set agenda into a container/heap binary max-heap with an auxiliary index map. Dominant instantiation selection is now $O(1)$ and activation addition/refraction/removal is $O(\log K)$, producing a **9.6x speedup on Waltz-50** (659ms -> 69ms) and saving hundreds of megabytes of transient map allocations.
-  - **Token Signature Caching**: Precomputed `sig` string at token creation via incremental string derivation, eliminating hundreds of thousands of `fmt.Sprintf` calls, slice allocations, and recursive `Timetags()` walks in beta memory indexing and duplicate detection.
-  - **Zero-Copy Binding Sharing**: When a condition element introduces no new variable bindings, child tokens share the parent's binding map directly instead of copying, saving thousands of map allocations.
-  - **Single-Key RightActivation Fast Path**: Bypasses allocating a `seen map[string]bool` when an incoming WME matches a single join key (the common case).
-  - **Index Key Optimizations**: Direct `strconv.FormatInt` formatting in `CanonicalValueKey` and fast-path single-variable key extraction in `KeyForToken`.
+  - **Token Prefix Spine Sharing & Allocation-Free Variable Lookups (`Token.GetBinding`)**: Completely eliminated dynamic map allocation and map copying across beta memory token trees. Condition elements accumulate bindings in stack-allocated slices (`[]Binding`), while variable lookups traverse the token ancestor spine in L1 cache ($O(\text{depth})$) with zero hashing and zero heap allocations. Saved **17.3 GB of heap churn (-84%)** on Manners-64 and cut runtimes by up to **4.3x** across all scales.
+  - **Indexed Binary Max-Heap Agenda (`conflict.Set`)**: Transformed conflict set agenda into a container/heap binary max-heap with an auxiliary index map. Dominant instantiation selection is now $O(1)$ and activation addition/refraction/removal is $O(\log K)$, delivering an **11.4x speedup on Waltz-50** (662ms -> 58ms) and reducing Waltz heap allocation from 447 MB to 22 MB.
+  - **Single-Pass Allocation-Free Timetag & WME Materialization**: Rewrote `Token.Timetags()` and `Token.WMEs()` to pre-count elements and fill slices backwards in condition element order, eliminating intermediate reverse-chain slice allocations.
+  - **Single & Double Successor Propagation Fast Paths**: Direct unrolled calls in `JoinNode.propagate`, `BetaMemory.LeftActivation`, and `EvalNode.LeftActivation` when successor count $\le 2$, eliminating millions of transient `[]LeftActivatable` slice allocations during pattern matching.
+  - **Token Signature Caching & Index Key Optimizations**: Precomputed `sig` string at token creation via incremental string derivation and direct `strconv.FormatInt` formatting.
 
 #### Benchmark Suite Results
 
@@ -65,23 +65,23 @@ go test -bench=. -benchtime=1x -run=^$ ./benchmarks
 ========================================================================================================================
 Benchmark    |   Cycles | WMEs Assert |   Quiescence |     Cycles/sec |       WMEs/sec |   Heap Alloc
 ------------------------------------------------------------------------------------------------------------------------
-Manners-16   |     2009 |       2744 |        855ms |         2349.5 |         3209.1 |  537410.03 KB (~525 MB)
-Manners-32   |     3914 |       4649 |       1.542s |         2538.6 |         3015.3 | 1049629.58 KB (~1.00 GB)
-Manners-64   |    19381 |      21152 |      16.417s |         1180.6 |         1288.4 | 10960309.74 KB (~10.5 GB)
-Waltz-12     |      608 |       1238 |         18ms |        33944.0 |        69116.2 |    8466.45 KB (~8.3 MB)
-Waltz-50     |     2268 |       4654 |         69ms |        33077.3 |        67875.6 |   33007.95 KB (~32.2 MB)
-Zebra-5      |        7 |         19 |       0.16ms |        35862.3 |        97340.6 |      94.10 KB (~94 KB)
+Manners-16   |     2009 |       2744 |        442ms |         4542.4 |         6204.2 |  167786.16 KB (~164 MB)
+Manners-32   |     3914 |       4649 |        744ms |         5259.5 |         6247.2 |  322188.17 KB (~315 MB)
+Manners-64   |    19381 |      21152 |       8.563s |         2263.5 |         2470.3 | 3321618.89 KB (~3.17 GB)
+Waltz-12     |      608 |       1238 |         17ms |        35827.9 |        72952.2 |    5707.52 KB (~5.6 MB)
+Waltz-50     |     2268 |       4654 |         58ms |        38818.0 |        79655.7 |   22167.38 KB (~21.6 MB)
+Zebra-5      |        7 |         19 |       0.12ms |        25360.9 |        68836.8 |      72.44 KB (~72 KB)
 ========================================================================================================================
 ```
 
 #### Go Microbenchmark Metrics (`go test -bench`)
 
 ```
-BenchmarkSuiteManners16-16    1     835280698 ns/op    2405 cycles/s    3285 wmes/s
-BenchmarkSuiteManners32-16    1    1554918841 ns/op    2517 cycles/s    2990 wmes/s
-BenchmarkSuiteWaltz12-16      1      23850596 ns/op   25496 cycles/s   51914 wmes/s
-BenchmarkSuiteWaltz50-16      1      74783025 ns/op   30329 cycles/s   62236 wmes/s
-BenchmarkSuiteZebra-16        1        177934 ns/op   39826 cycles/s  108100 wmes/s
+BenchmarkSuiteManners16-16    1     427775686 ns/op    4696 cycles/s     6415 wmes/s
+BenchmarkSuiteManners32-16    1     765413524 ns/op    5114 cycles/s     6074 wmes/s
+BenchmarkSuiteWaltz12-16      1      13583807 ns/op   44771 cycles/s    91162 wmes/s
+BenchmarkSuiteWaltz50-16      1      57755099 ns/op   39272 cycles/s    80586 wmes/s
+BenchmarkSuiteZebra-16        1        116198 ns/op   61350 cycles/s   166522 wmes/s
 ```
 
 ---

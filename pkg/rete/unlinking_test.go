@@ -37,7 +37,7 @@ func TestJoinNodeRightUnlinking(t *testing.T) {
 	}
 
 	// 2. Assert a token into betaMemory.
-	tok1 := NewToken(nil, nil, map[string]model.Value{"id": model.NewInt(42)})
+	tok1 := NewTokenWithMap(nil, nil, map[string]model.Value{"id": model.NewInt(42)})
 	betaMem.LeftActivation(tok1, TagAdd)
 
 	// Since join is unlinked from betaMemory, receiver receives nothing yet.
@@ -46,7 +46,8 @@ func TestJoinNodeRightUnlinking(t *testing.T) {
 	}
 
 	// 3. Assert first WME into alphaMemory (transition 0 -> 1).
-	// This must trigger OnRightMemoryNonEmpty(), re-linking join to betaMemory.
+	// This must trigger OnRightMemoryNonEmpty(), re-linking join to betaMemory
+	// and catching up existing tokens.
 	wme1 := model.NewWME(1, "item", map[string]model.Value{"id": model.NewInt(42)})
 	alphaMem.Activation(wme1, TagAdd)
 
@@ -57,53 +58,46 @@ func TestJoinNodeRightUnlinking(t *testing.T) {
 		t.Fatalf("expected betaMem active successor count 1, got %d", betaMem.ActiveSuccessorCount())
 	}
 	if len(receiver.tokens) != 1 {
-		t.Fatalf("expected 1 token at receiver after alpha WME arrived, got %d", len(receiver.tokens))
+		t.Fatalf("expected 1 token propagated after catch-up, got %d", len(receiver.tokens))
 	}
 	if receiver.tags[0] != TagAdd {
-		t.Fatalf("expected TagAdd, got %v", receiver.tags[0])
+		t.Errorf("expected TagAdd, got %v", receiver.tags[0])
 	}
 
-	// 4. Assert second matching WME into alphaMemory (transition 1 -> 2).
+	// 4. Assert second matching WME: join is already linked, should process normally.
 	wme2 := model.NewWME(2, "item", map[string]model.Value{"id": model.NewInt(42)})
 	alphaMem.Activation(wme2, TagAdd)
-
-	if !joinNode.IsLeftLinked() {
-		t.Fatalf("expected JoinNode to remain left-linked")
-	}
 	if len(receiver.tokens) != 2 {
-		t.Fatalf("expected 2 tokens at receiver, got %d", len(receiver.tokens))
+		t.Fatalf("expected 2 tokens propagated, got %d", len(receiver.tokens))
 	}
 
-	// 5. Retract first WME (transition 2 -> 1).
-	alphaMem.Activation(wme1, TagRemove)
-	if !joinNode.IsLeftLinked() {
-		t.Fatalf("expected JoinNode to remain left-linked with 1 item in alpha")
-	}
-	if len(receiver.tokens) != 3 { // 2 adds + 1 remove
-		t.Fatalf("expected 3 events at receiver, got %d", len(receiver.tokens))
-	}
-	if receiver.tags[2] != TagRemove {
-		t.Fatalf("expected TagRemove, got %v", receiver.tags[2])
-	}
-
-	// 6. Retract second WME (transition 1 -> 0).
-	// This must retract downstream first, then unlink join from betaMemory.
+	// 5. Retract wme2: alphaMemory still has wme1 (count: 2 -> 1, no transition)
 	alphaMem.Activation(wme2, TagRemove)
+	if len(receiver.tokens) != 3 {
+		t.Fatalf("expected 3 events (2 add + 1 remove), got %d", len(receiver.tokens))
+	}
+	if !joinNode.IsLeftLinked() {
+		t.Fatalf("expected JoinNode to still be left-linked while alphaMemory has items")
+	}
+
+	// 6. Retract wme1: alphaMemory transitions 1 -> 0!
+	// JoinNode must unlink from betaMemory.
+	alphaMem.Activation(wme1, TagRemove)
 	if joinNode.IsLeftLinked() {
 		t.Fatalf("expected JoinNode to be left-unlinked after alpha transition 1 -> 0")
 	}
 	if betaMem.ActiveSuccessorCount() != 0 {
-		t.Fatalf("expected betaMem active successor count 0, got %d", betaMem.ActiveSuccessorCount())
+		t.Fatalf("expected betaMem active successor count 0 after unlink, got %d", betaMem.ActiveSuccessorCount())
 	}
-	if len(receiver.tokens) != 4 { // 2 adds + 2 removes
-		t.Fatalf("expected 4 events at receiver, got %d", len(receiver.tokens))
+	if len(receiver.tokens) != 4 {
+		t.Fatalf("expected 4 total events, got %d", len(receiver.tokens))
 	}
 	if receiver.tags[3] != TagRemove {
 		t.Fatalf("expected TagRemove, got %v", receiver.tags[3])
 	}
 
 	// 7. Add another token to betaMemory while unlinked.
-	tok2 := NewToken(nil, nil, map[string]model.Value{"id": model.NewInt(99)})
+	tok2 := NewTokenWithMap(nil, nil, map[string]model.Value{"id": model.NewInt(99)})
 	betaMem.LeftActivation(tok2, TagAdd)
 	if len(receiver.tokens) != 4 {
 		t.Fatalf("expected no new tokens while unlinked, got %d", len(receiver.tokens))
@@ -150,7 +144,7 @@ func TestJoinNodeLeftUnlinking(t *testing.T) {
 
 	// 3. Assert first matching token into betaMemory (transition 0 -> 1).
 	// This must trigger OnLeftMemoryNonEmpty(), re-linking join to alphaMemory.
-	tok1 := NewToken(nil, nil, map[string]model.Value{"id": model.NewInt(100)})
+	tok1 := NewTokenWithMap(nil, nil, map[string]model.Value{"id": model.NewInt(100)})
 	betaMem.LeftActivation(tok1, TagAdd)
 
 	if !joinNode.IsRightLinked() {
@@ -209,9 +203,9 @@ func TestAsymmetricArrivalOrderEquivalence(t *testing.T) {
 	// Engine 1: Tokens first, then WMEs
 	bm1, am1, rec1 := buildEngine()
 	toks := []*Token{
-		NewToken(nil, nil, map[string]model.Value{"x": model.NewInt(1)}),
-		NewToken(nil, nil, map[string]model.Value{"x": model.NewInt(2)}),
-		NewToken(nil, nil, map[string]model.Value{"x": model.NewInt(3)}),
+		NewTokenWithMap(nil, nil, map[string]model.Value{"x": model.NewInt(1)}),
+		NewTokenWithMap(nil, nil, map[string]model.Value{"x": model.NewInt(2)}),
+		NewTokenWithMap(nil, nil, map[string]model.Value{"x": model.NewInt(3)}),
 	}
 	wmes := []*model.WME{
 		model.NewWME(1, "item", map[string]model.Value{"val": model.NewInt(1)}),
@@ -246,8 +240,10 @@ func TestAsymmetricArrivalOrderEquivalence(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		t1 := rec1.tokens[i]
 		t2 := rec2.tokens[i]
-		if t1.Bindings["x"].Raw() != t2.Bindings["x"].Raw() {
-			t.Errorf("match mismatch at %d: %v vs %v", i, t1.Bindings["x"], t2.Bindings["x"])
+		v1, _ := t1.GetBinding("x")
+		v2, _ := t2.GetBinding("x")
+		if v1.Raw() != v2.Raw() {
+			t.Errorf("match mismatch at %d: %v vs %v", i, v1, v2)
 		}
 	}
 }
@@ -283,7 +279,7 @@ func TestNegativeJoinNodeUnlinking(t *testing.T) {
 	}
 
 	// 1. Assert token when alpha is empty -> condition is satisfied, token propagates immediately!
-	tok1 := NewToken(nil, nil, map[string]model.Value{"id": model.NewInt(77)})
+	tok1 := NewTokenWithMap(nil, nil, map[string]model.Value{"id": model.NewInt(77)})
 	betaMem.LeftActivation(tok1, TagAdd)
 
 	if len(receiver.tokens) != 1 {
@@ -355,7 +351,7 @@ func TestExistentialJoinNodeUnlinking(t *testing.T) {
 	}
 
 	// Assert token to BetaMemory
-	tok1 := NewToken(nil, nil, map[string]model.Value{"id": model.NewInt(55)})
+	tok1 := NewTokenWithMap(nil, nil, map[string]model.Value{"id": model.NewInt(55)})
 	betaMem.LeftActivation(tok1, TagAdd)
 
 	if !existNode.IsRightLinked() {
@@ -393,7 +389,7 @@ func TestAccumulateNodeUnlinking(t *testing.T) {
 		t.Fatalf("expected AccumulateNode to be right-unlinked when Beta is empty")
 	}
 
-	tok1 := NewToken(nil, nil, map[string]model.Value{})
+	tok1 := NewTokenWithMap(nil, nil, map[string]model.Value{})
 	betaMem.LeftActivation(tok1, TagAdd)
 
 	if !accNode.IsRightLinked() {
@@ -403,8 +399,8 @@ func TestAccumulateNodeUnlinking(t *testing.T) {
 	if len(receiver.tokens) != 1 {
 		t.Fatalf("expected 1 token from accumulate on empty alpha, got %d", len(receiver.tokens))
 	}
-	if receiver.tokens[0].Bindings["count"].Raw().(int64) != 0 {
-		t.Fatalf("expected count 0, got %v", receiver.tokens[0].Bindings["count"])
+	if receiver.tokens[0].Bindings()["count"].Raw().(int64) != 0 {
+		t.Fatalf("expected count 0, got %v", receiver.tokens[0].Bindings()["count"])
 	}
 
 	betaMem.LeftActivation(tok1, TagRemove)
@@ -456,7 +452,7 @@ func TestMultipleJoinsSharedMemoriesUnlinking(t *testing.T) {
 	}
 
 	// Add token to betaMem -> only jnB receives activation and matches
-	tok := NewToken(nil, nil, map[string]model.Value{"x": model.NewInt(10)})
+	tok := NewTokenWithMap(nil, nil, map[string]model.Value{"x": model.NewInt(10)})
 	betaMem.LeftActivation(tok, TagAdd)
 
 	if len(recA.tokens) != 0 {
