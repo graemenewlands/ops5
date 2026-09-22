@@ -1,7 +1,6 @@
 package rete
 
 import (
-	"fmt"
 	"sync"
 
 	"github.com/graemenewlands/ops5/pkg/model"
@@ -151,8 +150,10 @@ func (bm *BetaMemory) TokenCount() int {
 }
 
 func tokenSignature(t *Token) string {
-	tags := t.Timetags()
-	return fmt.Sprintf("%v", tags)
+	if t == nil {
+		return ""
+	}
+	return t.Signature()
 }
 
 // GetOrCreateIndex returns an existing BetaIndex matching variables or creates and populates a new one.
@@ -646,10 +647,11 @@ func matchValueOrVector(targetVal, existing model.Value) bool {
 
 // extractBindings extracts new variable bindings introduced by this condition element on wme.
 func (jn *JoinNode) extractBindings(token *Token, wme *model.WME) (map[string]model.Value, bool) {
-	newBindings := make(map[string]model.Value)
+	var newBindings map[string]model.Value
 
 	if jn.ce != nil {
 		if jn.ce.ElementVariable != "" {
+			newBindings = make(map[string]model.Value, 2)
 			newBindings[jn.ce.ElementVariable] = model.NewInt(wme.Timetag)
 		}
 
@@ -694,6 +696,9 @@ func (jn *JoinNode) extractBindings(token *Token, wme *model.WME) (map[string]mo
 							}
 						} else {
 							if hasVal {
+								if newBindings == nil {
+									newBindings = make(map[string]model.Value, 4)
+								}
 								newBindings[vName] = targetVal
 							}
 						}
@@ -732,6 +737,23 @@ func (jn *JoinNode) RightActivation(wme *model.WME, tag PropagationTag) {
 	}
 
 	keys := jn.alphaIndex.KeysForWME(wme)
+	if len(keys) == 0 {
+		return
+	}
+	if len(keys) == 1 {
+		tokens := jn.betaIndex.Lookup(keys[0])
+		for _, token := range tokens {
+			if jn.matches(token, wme) {
+				newBindings, ok := jn.extractBindings(token, wme)
+				if ok {
+					childToken := NewToken(token, wme, newBindings)
+					jn.propagate(childToken, tag)
+				}
+			}
+		}
+		return
+	}
+
 	seen := make(map[string]bool)
 	for _, key := range keys {
 		tokens := jn.betaIndex.Lookup(key)

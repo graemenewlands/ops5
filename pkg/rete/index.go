@@ -2,6 +2,7 @@ package rete
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -14,11 +15,11 @@ import (
 func CanonicalValueKey(v model.Value) string {
 	switch v.Type() {
 	case model.TypeInteger:
-		return fmt.Sprintf("i:%d", v.Raw().(int64))
+		return "i:" + strconv.FormatInt(v.Raw().(int64), 10)
 	case model.TypeFloat:
 		f := v.Raw().(float64)
 		if f == float64(int64(f)) {
-			return fmt.Sprintf("i:%d", int64(f))
+			return "i:" + strconv.FormatInt(int64(f), 10)
 		}
 		return fmt.Sprintf("f:%g", f)
 	case model.TypeSymbol:
@@ -70,6 +71,12 @@ func NewBetaIndex(variables []string) *BetaIndex {
 func (bi *BetaIndex) KeyForToken(tok *Token) string {
 	if len(bi.variables) == 0 {
 		return ""
+	}
+	if len(bi.variables) == 1 {
+		if val, ok := tok.Bindings[bi.variables[0]]; ok {
+			return CanonicalValueKey(val)
+		}
+		return "s:nil"
 	}
 	keys := make([]string, len(bi.variables))
 	for i, v := range bi.variables {

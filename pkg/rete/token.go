@@ -2,6 +2,7 @@ package rete
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/graemenewlands/ops5/pkg/model"
@@ -33,18 +34,55 @@ type Token struct {
 	Bindings      map[string]model.Value
 	Tag           PropagationTag
 	ExtraTimetags []int64
+	sig           string
+}
+
+// Signature returns the cached unique signature string for this token.
+func (t *Token) Signature() string {
+	if t == nil {
+		return ""
+	}
+	if t.sig != "" {
+		return t.sig
+	}
+	return fmt.Sprintf("%v", t.Timetags())
 }
 
 // NewToken creates a child token with an added WME and merged variable bindings.
 func NewToken(parent *Token, wme *model.WME, newBindings map[string]model.Value) *Token {
-	bindings := make(map[string]model.Value)
-	if parent != nil {
+	var bindings map[string]model.Value
+	if len(newBindings) == 0 {
+		if parent != nil {
+			bindings = parent.Bindings
+		} else {
+			bindings = make(map[string]model.Value)
+		}
+	} else if parent == nil || len(parent.Bindings) == 0 {
+		bindings = newBindings
+	} else {
+		bindings = make(map[string]model.Value, len(parent.Bindings)+len(newBindings))
 		for k, v := range parent.Bindings {
 			bindings[k] = v
 		}
+		for k, v := range newBindings {
+			bindings[k] = v
+		}
 	}
-	for k, v := range newBindings {
-		bindings[k] = v
+
+	var sig string
+	if wme != nil {
+		wmeTagStr := strconv.FormatInt(wme.Timetag, 10)
+		if parent == nil || parent.sig == "" || parent.sig == "[]" {
+			sig = "[" + wmeTagStr + "]"
+		} else {
+			sig = parent.sig[:len(parent.sig)-1] + " " + wmeTagStr + "]"
+		}
+	} else {
+		if parent != nil {
+			sig = parent.sig
+		} else {
+			sig = "[]"
+		}
 	}
 
 	return &Token{
@@ -52,19 +90,60 @@ func NewToken(parent *Token, wme *model.WME, newBindings map[string]model.Value)
 		WME:      wme,
 		Bindings: bindings,
 		Tag:      TagAdd,
+		sig:      sig,
 	}
 }
 
 // NewAccumulateToken creates a child token representing an aggregated result with extra timetags.
 func NewAccumulateToken(parent *Token, newBindings map[string]model.Value, extraTimetags []int64) *Token {
-	bindings := make(map[string]model.Value)
-	if parent != nil {
+	var bindings map[string]model.Value
+	if len(newBindings) == 0 {
+		if parent != nil {
+			bindings = parent.Bindings
+		} else {
+			bindings = make(map[string]model.Value)
+		}
+	} else if parent == nil || len(parent.Bindings) == 0 {
+		bindings = newBindings
+	} else {
+		bindings = make(map[string]model.Value, len(parent.Bindings)+len(newBindings))
 		for k, v := range parent.Bindings {
 			bindings[k] = v
 		}
+		for k, v := range newBindings {
+			bindings[k] = v
+		}
 	}
-	for k, v := range newBindings {
-		bindings[k] = v
+
+	var sig string
+	if parent != nil && parent.sig != "" && parent.sig != "[]" {
+		if len(extraTimetags) > 0 {
+			var sb strings.Builder
+			sb.WriteString(parent.sig[:len(parent.sig)-1])
+			for _, tt := range extraTimetags {
+				sb.WriteString(" ")
+				sb.WriteString(strconv.FormatInt(tt, 10))
+			}
+			sb.WriteString("]")
+			sig = sb.String()
+		} else {
+			sig = parent.sig
+		}
+	} else {
+		if len(extraTimetags) > 0 {
+			var sb strings.Builder
+			sb.WriteString("[")
+			for i, tt := range extraTimetags {
+				if i > 0 {
+					sb.WriteString(" ")
+				}
+				sb.WriteString(strconv.FormatInt(tt, 10))
+			}
+			sb.WriteString("]")
+			sig = sb.String()
+		} else {
+			sig = "[]"
+		}
 	}
 
 	return &Token{
@@ -73,6 +152,7 @@ func NewAccumulateToken(parent *Token, newBindings map[string]model.Value, extra
 		Bindings:      bindings,
 		Tag:           TagAdd,
 		ExtraTimetags: extraTimetags,
+		sig:           sig,
 	}
 }
 
@@ -83,6 +163,7 @@ func DummyRootToken() *Token {
 		WME:      nil,
 		Bindings: make(map[string]model.Value),
 		Tag:      TagAdd,
+		sig:      "[]",
 	}
 }
 
