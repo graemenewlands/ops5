@@ -11,16 +11,14 @@ import (
 
 type terminalInfo struct {
 	terminal *TerminalNode
-	parent   interface {
-		RemoveSuccessor(node LeftActivatable)
-	}
+	parent   BetaNode
 }
 
 // betaNodeEntry tracks a shared beta node and its downstream BetaMemory.
 type betaNodeEntry struct {
 	key       string
 	parentMem *BetaMemory
-	node      LeftActivatable
+	node      BetaNode
 	alphaMem  *AlphaMemory
 	betaMem   *BetaMemory
 	rules     map[string]bool
@@ -498,36 +496,63 @@ func (net *Network) AddRuleWithWMEs(rule *model.Rule, listener ConflictSetListen
 			if entry, ok := net.betaNodePool[stepKey]; ok {
 				entry.rules[rule.Name] = true
 				net.ruleBetaNodes[rule.Name] = append(net.ruleBetaNodes[rule.Name], entry)
-				nextBetaMem = entry.betaMem
+				if isLast {
+					terminal := NewTerminalNode(effectiveRule, listener)
+					ruleNodeInfo.Terminal = terminal
+					entry.node.AddSuccessor(terminal)
+					net.terminals[rule.Name] = terminalInfo{
+						terminal: terminal,
+						parent:   entry.node,
+					}
+				} else {
+					if entry.betaMem == nil {
+						entry.betaMem = net.newBetaMemoryLocked()
+						entry.node.AddSuccessor(entry.betaMem)
+					}
+					nextBetaMem = entry.betaMem
+					ruleNodeInfo.BetaMems = append(ruleNodeInfo.BetaMems, nextBetaMem)
+					currBetaMem = nextBetaMem
+				}
 			} else {
 				evalNode := NewEvalNode(ce.EvalTest)
-				nextBetaMem = net.newBetaMemoryLocked()
-				evalNode.AddSuccessor(nextBetaMem)
-				currBetaMem.AddSuccessor(evalNode)
+				if isLast {
+					terminal := NewTerminalNode(effectiveRule, listener)
+					ruleNodeInfo.Terminal = terminal
+					evalNode.AddSuccessor(terminal)
+					evalNode.Attach(currBetaMem)
 
-				entry := &betaNodeEntry{
-					key:       stepKey,
-					parentMem: currBetaMem,
-					node:      evalNode,
-					alphaMem:  nil,
-					betaMem:   nextBetaMem,
-					rules:     map[string]bool{rule.Name: true},
-				}
-				net.betaNodePool[stepKey] = entry
-				net.ruleBetaNodes[rule.Name] = append(net.ruleBetaNodes[rule.Name], entry)
-			}
+					entry := &betaNodeEntry{
+						key:       stepKey,
+						parentMem: currBetaMem,
+						node:      evalNode,
+						alphaMem:  nil,
+						betaMem:   nil,
+						rules:     map[string]bool{rule.Name: true},
+					}
+					net.betaNodePool[stepKey] = entry
+					net.ruleBetaNodes[rule.Name] = append(net.ruleBetaNodes[rule.Name], entry)
+					net.terminals[rule.Name] = terminalInfo{
+						terminal: terminal,
+						parent:   evalNode,
+					}
+				} else {
+					nextBetaMem = net.newBetaMemoryLocked()
+					evalNode.AddSuccessor(nextBetaMem)
+					evalNode.Attach(currBetaMem)
 
-			if isLast {
-				terminal := NewTerminalNode(effectiveRule, listener)
-				ruleNodeInfo.Terminal = terminal
-				nextBetaMem.AddSuccessor(terminal)
-				net.terminals[rule.Name] = terminalInfo{
-					terminal: terminal,
-					parent:   nextBetaMem,
+					entry := &betaNodeEntry{
+						key:       stepKey,
+						parentMem: currBetaMem,
+						node:      evalNode,
+						alphaMem:  nil,
+						betaMem:   nextBetaMem,
+						rules:     map[string]bool{rule.Name: true},
+					}
+					net.betaNodePool[stepKey] = entry
+					net.ruleBetaNodes[rule.Name] = append(net.ruleBetaNodes[rule.Name], entry)
+					ruleNodeInfo.BetaMems = append(ruleNodeInfo.BetaMems, nextBetaMem)
+					currBetaMem = nextBetaMem
 				}
-			} else {
-				ruleNodeInfo.BetaMems = append(ruleNodeInfo.BetaMems, nextBetaMem)
-				currBetaMem = nextBetaMem
 			}
 			continue
 		}
@@ -540,7 +565,23 @@ func (net *Network) AddRuleWithWMEs(rule *model.Rule, listener ConflictSetListen
 			if entry, ok := net.betaNodePool[stepKey]; ok {
 				entry.rules[rule.Name] = true
 				net.ruleBetaNodes[rule.Name] = append(net.ruleBetaNodes[rule.Name], entry)
-				nextBetaMem = entry.betaMem
+				if isLast {
+					terminal := NewTerminalNode(effectiveRule, listener)
+					ruleNodeInfo.Terminal = terminal
+					entry.node.AddSuccessor(terminal)
+					net.terminals[rule.Name] = terminalInfo{
+						terminal: terminal,
+						parent:   entry.node,
+					}
+				} else {
+					if entry.betaMem == nil {
+						entry.betaMem = net.newBetaMemoryLocked()
+						entry.node.AddSuccessor(entry.betaMem)
+					}
+					nextBetaMem = entry.betaMem
+					ruleNodeInfo.BetaMems = append(ruleNodeInfo.BetaMems, nextBetaMem)
+					currBetaMem = nextBetaMem
+				}
 			} else {
 				subConditions := ce.NCCConditions
 				partner := NewNccPartnerNode(len(subConditions))
@@ -641,33 +682,44 @@ func (net *Network) AddRuleWithWMEs(rule *model.Rule, listener ConflictSetListen
 					}
 				}
 
-				nextBetaMem = net.newBetaMemoryLocked()
-				nccNode.AddSuccessor(nextBetaMem)
-				currBetaMem.AddSuccessor(nccNode)
+				if isLast {
+					terminal := NewTerminalNode(effectiveRule, listener)
+					ruleNodeInfo.Terminal = terminal
+					nccNode.AddSuccessor(terminal)
+					currBetaMem.AddSuccessor(nccNode)
 
-				entry := &betaNodeEntry{
-					key:       stepKey,
-					parentMem: currBetaMem,
-					node:      nccNode,
-					alphaMem:  nil,
-					betaMem:   nextBetaMem,
-					rules:     map[string]bool{rule.Name: true},
-				}
-				net.betaNodePool[stepKey] = entry
-				net.ruleBetaNodes[rule.Name] = append(net.ruleBetaNodes[rule.Name], entry)
-			}
+					entry := &betaNodeEntry{
+						key:       stepKey,
+						parentMem: currBetaMem,
+						node:      nccNode,
+						alphaMem:  nil,
+						betaMem:   nil,
+						rules:     map[string]bool{rule.Name: true},
+					}
+					net.betaNodePool[stepKey] = entry
+					net.ruleBetaNodes[rule.Name] = append(net.ruleBetaNodes[rule.Name], entry)
+					net.terminals[rule.Name] = terminalInfo{
+						terminal: terminal,
+						parent:   nccNode,
+					}
+				} else {
+					nextBetaMem = net.newBetaMemoryLocked()
+					nccNode.AddSuccessor(nextBetaMem)
+					currBetaMem.AddSuccessor(nccNode)
 
-			if isLast {
-				terminal := NewTerminalNode(effectiveRule, listener)
-				ruleNodeInfo.Terminal = terminal
-				nextBetaMem.AddSuccessor(terminal)
-				net.terminals[rule.Name] = terminalInfo{
-					terminal: terminal,
-					parent:   nextBetaMem,
+					entry := &betaNodeEntry{
+						key:       stepKey,
+						parentMem: currBetaMem,
+						node:      nccNode,
+						alphaMem:  nil,
+						betaMem:   nextBetaMem,
+						rules:     map[string]bool{rule.Name: true},
+					}
+					net.betaNodePool[stepKey] = entry
+					net.ruleBetaNodes[rule.Name] = append(net.ruleBetaNodes[rule.Name], entry)
+					ruleNodeInfo.BetaMems = append(ruleNodeInfo.BetaMems, nextBetaMem)
+					currBetaMem = nextBetaMem
 				}
-			} else {
-				ruleNodeInfo.BetaMems = append(ruleNodeInfo.BetaMems, nextBetaMem)
-				currBetaMem = nextBetaMem
 			}
 			continue
 		}
@@ -719,29 +771,55 @@ func (net *Network) AddRuleWithWMEs(rule *model.Rule, listener ConflictSetListen
 		if entry, ok := net.betaNodePool[stepKey]; ok {
 			entry.rules[rule.Name] = true
 			net.ruleBetaNodes[rule.Name] = append(net.ruleBetaNodes[rule.Name], entry)
-			nextBetaMem = entry.betaMem
+			if isLast {
+				terminal := NewTerminalNode(effectiveRule, listener)
+				ruleNodeInfo.Terminal = terminal
+				entry.node.AddSuccessor(terminal)
+				net.terminals[rule.Name] = terminalInfo{
+					terminal: terminal,
+					parent:   entry.node,
+				}
+			} else {
+				if entry.betaMem == nil {
+					entry.betaMem = net.newBetaMemoryLocked()
+					entry.node.AddSuccessor(entry.betaMem)
+				}
+				nextBetaMem = entry.betaMem
+				ruleNodeInfo.BetaMems = append(ruleNodeInfo.BetaMems, nextBetaMem)
+				currBetaMem = nextBetaMem
+			}
 		} else {
-			nextBetaMem = net.newBetaMemoryLocked()
+			var joinNode BetaNode
+			var terminal *TerminalNode
+			var downstream LeftActivatable
 
-			var joinNode LeftActivatable
+			if isLast {
+				terminal = NewTerminalNode(effectiveRule, listener)
+				ruleNodeInfo.Terminal = terminal
+				downstream = terminal
+			} else {
+				nextBetaMem = net.newBetaMemoryLocked()
+				downstream = nextBetaMem
+			}
+
 			if ce.IsNegative {
 				njn := NewNegativeJoinNode(currBetaMem, alphaMem, ce, joinTests)
-				njn.AddSuccessor(nextBetaMem)
+				njn.AddSuccessor(downstream)
 				njn.Attach()
 				joinNode = njn
 			} else if ce.IsExistential {
 				ejn := NewExistentialJoinNode(currBetaMem, alphaMem, ce, joinTests)
-				ejn.AddSuccessor(nextBetaMem)
+				ejn.AddSuccessor(downstream)
 				ejn.Attach()
 				joinNode = ejn
 			} else if ce.IsAccumulate {
 				an := NewAccumulateNode(currBetaMem, alphaMem, ce, ce.Accumulate, joinTests)
-				an.AddSuccessor(nextBetaMem)
+				an.AddSuccessor(downstream)
 				an.Attach()
 				joinNode = an
 			} else {
 				jn := NewJoinNode(currBetaMem, alphaMem, ce, joinTests)
-				jn.AddSuccessor(nextBetaMem)
+				jn.AddSuccessor(downstream)
 				jn.Attach()
 				joinNode = jn
 			}
@@ -756,19 +834,16 @@ func (net *Network) AddRuleWithWMEs(rule *model.Rule, listener ConflictSetListen
 			}
 			net.betaNodePool[stepKey] = entry
 			net.ruleBetaNodes[rule.Name] = append(net.ruleBetaNodes[rule.Name], entry)
-		}
 
-		if isLast {
-			terminal := NewTerminalNode(effectiveRule, listener)
-			ruleNodeInfo.Terminal = terminal
-			nextBetaMem.AddSuccessor(terminal)
-			net.terminals[rule.Name] = terminalInfo{
-				terminal: terminal,
-				parent:   nextBetaMem,
+			if isLast {
+				net.terminals[rule.Name] = terminalInfo{
+					terminal: terminal,
+					parent:   joinNode,
+				}
+			} else {
+				ruleNodeInfo.BetaMems = append(ruleNodeInfo.BetaMems, nextBetaMem)
+				currBetaMem = nextBetaMem
 			}
-		} else {
-			ruleNodeInfo.BetaMems = append(ruleNodeInfo.BetaMems, nextBetaMem)
-			currBetaMem = nextBetaMem
 		}
 
 		// Update bound variables for subsequent condition elements
@@ -823,7 +898,25 @@ func (net *Network) removeRuleLocked(ruleName string) bool {
 					entry.alphaMem.RemoveSuccessor(ra)
 				}
 			}
+			if entry.betaMem != nil && entry.node != nil {
+				entry.node.RemoveSuccessor(entry.betaMem)
+			}
 			delete(net.betaNodePool, entry.key)
+		} else {
+			if entry.betaMem != nil && entry.node != nil {
+				stillNeeded := false
+				for rName := range entry.rules {
+					rEntries := net.ruleBetaNodes[rName]
+					if len(rEntries) > 0 && rEntries[len(rEntries)-1] != entry {
+						stillNeeded = true
+						break
+					}
+				}
+				if !stillNeeded {
+					entry.node.RemoveSuccessor(entry.betaMem)
+					entry.betaMem = nil
+				}
+			}
 		}
 	}
 	return true

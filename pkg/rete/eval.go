@@ -13,6 +13,8 @@ type EvalNode struct {
 	test       *model.EvalTest
 	predicate  func(bindings map[string]model.Value) bool
 	successors []LeftActivatable
+	parentMem  *BetaMemory
+	attached   bool
 }
 
 // NewEvalNode creates a new EvalNode with the specified model.EvalTest.
@@ -31,6 +33,17 @@ func NewEvalPredicateNode(fn func(bindings map[string]model.Value) bool) *EvalNo
 	}
 }
 
+// Attach connects the eval node to its parent BetaMemory.
+func (en *EvalNode) Attach(parent *BetaMemory) {
+	en.mu.Lock()
+	en.parentMem = parent
+	en.attached = true
+	en.mu.Unlock()
+	if parent != nil {
+		parent.AddSuccessor(en)
+	}
+}
+
 // Test returns the underlying EvalTest.
 func (en *EvalNode) Test() *model.EvalTest {
 	return en.test
@@ -39,8 +52,28 @@ func (en *EvalNode) Test() *model.EvalTest {
 // AddSuccessor registers a downstream beta node.
 func (en *EvalNode) AddSuccessor(node LeftActivatable) {
 	en.mu.Lock()
-	defer en.mu.Unlock()
 	en.successors = append(en.successors, node)
+	parent := en.parentMem
+	wasAttached := en.attached
+	en.mu.Unlock()
+
+	// Catch-up: replay matching tokens from parent BetaMemory if already attached
+	if wasAttached && parent != nil {
+		toks := parent.Tokens()
+		for _, tok := range toks {
+			b := tok.Bindings()
+			if en.predicate != nil && !en.predicate(b) {
+				continue
+			}
+			if en.test != nil {
+				ok, err := en.test.Evaluate(b)
+				if err != nil || !ok {
+					continue
+				}
+			}
+			node.LeftActivation(tok, TagAdd)
+		}
+	}
 }
 
 // RemoveSuccessor unregisters a downstream beta node.

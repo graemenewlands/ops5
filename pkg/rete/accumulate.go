@@ -126,11 +126,16 @@ func (an *AccumulateNode) OnLeftMemoryEmpty() {
 // AddSuccessor registers a downstream beta node.
 func (an *AccumulateNode) AddSuccessor(node LeftActivatable) {
 	an.mu.Lock()
-	defer an.mu.Unlock()
 	an.successors = append(an.successors, node)
 
+	var toks []*Token
 	// Catch-up: send existing active aggregate tokens to new successor
 	for _, tok := range an.activeTokens {
+		toks = append(toks, tok)
+	}
+	an.mu.Unlock()
+
+	for _, tok := range toks {
 		node.LeftActivation(tok, TagAdd)
 	}
 }

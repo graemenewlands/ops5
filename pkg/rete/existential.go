@@ -21,6 +21,7 @@ type ExistentialJoinNode struct {
 	matches    map[string]map[int64]bool
 	tokens     map[string]*Token
 	successors []LeftActivatable
+	attached   bool
 
 	leftLink  LeftLink  // always linked to betaMemory
 	rightLink RightLink // unlinked from alphaMemory when betaMemory has 0 tokens
@@ -64,6 +65,10 @@ func NewExistentialJoinNode(betaMem *BetaMemory, alphaMem *AlphaMemory, ce *mode
 
 // Attach connects the existential join node to its parent memories and sets up unlinking.
 func (ejn *ExistentialJoinNode) Attach() {
+	ejn.mu.Lock()
+	ejn.attached = true
+	ejn.mu.Unlock()
+
 	if ejn.alphaMemory != nil {
 		ejn.alphaMemory.AddSuccessor(ejn)
 		if ejn.betaMemory != nil && ejn.betaMemory.TokenCount() > 0 {
@@ -115,8 +120,21 @@ func (ejn *ExistentialJoinNode) OnLeftMemoryEmpty() {
 // AddSuccessor registers a downstream beta node.
 func (ejn *ExistentialJoinNode) AddSuccessor(node LeftActivatable) {
 	ejn.mu.Lock()
-	defer ejn.mu.Unlock()
 	ejn.successors = append(ejn.successors, node)
+	wasAttached := ejn.attached
+	var toks []*Token
+	if wasAttached {
+		for sig, tok := range ejn.tokens {
+			if len(ejn.matches[sig]) > 0 {
+				toks = append(toks, tok)
+			}
+		}
+	}
+	ejn.mu.Unlock()
+
+	for _, tok := range toks {
+		node.LeftActivation(tok, TagAdd)
+	}
 }
 
 // RemoveSuccessor unregisters a downstream beta node.

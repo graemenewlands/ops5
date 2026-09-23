@@ -554,4 +554,237 @@ func TestStructuralBetaSharingAttributeOrder(t *testing.T) {
 	}
 }
 
+func TestMemorylessTerminalJoinDirectAttachment(t *testing.T) {
+	net := NewNetwork()
+	mem := wm.New()
+	mem.AddListener(net)
+	listener := &recordListener{}
+
+	// 1. Positive join terminal
+	rPos := model.NewRule("r-pos")
+	rPos.AddCondition(model.NewPositiveCE("A").AddEqualTest("id", model.NewVariable("<x>")))
+	rPos.AddCondition(model.NewPositiveCE("B").AddEqualTest("a-id", model.NewVariable("<x>")))
+	net.AddRule(rPos, listener)
+
+	posInfo := net.terminals["r-pos"]
+	if _, ok := posInfo.parent.(*JoinNode); !ok {
+		t.Fatalf("expected r-pos terminal parent to be *JoinNode, got %T", posInfo.parent)
+	}
+
+	// 2. Negative join terminal
+	rNeg := model.NewRule("r-neg")
+	rNeg.AddCondition(model.NewPositiveCE("A").AddEqualTest("id", model.NewVariable("<x>")))
+	rNeg.AddCondition(model.NewNegativeCE("C").AddEqualTest("a-id", model.NewVariable("<x>")))
+	net.AddRule(rNeg, listener)
+
+	negInfo := net.terminals["r-neg"]
+	if _, ok := negInfo.parent.(*NegativeJoinNode); !ok {
+		t.Fatalf("expected r-neg terminal parent to be *NegativeJoinNode, got %T", negInfo.parent)
+	}
+
+	// 3. Existential join terminal
+	rExists := model.NewRule("r-exists")
+	rExists.AddCondition(model.NewPositiveCE("A").AddEqualTest("id", model.NewVariable("<x>")))
+	rExists.AddCondition(model.NewExistentialCE("D").AddEqualTest("a-id", model.NewVariable("<x>")))
+	net.AddRule(rExists, listener)
+
+	existsInfo := net.terminals["r-exists"]
+	if _, ok := existsInfo.parent.(*ExistentialJoinNode); !ok {
+		t.Fatalf("expected r-exists terminal parent to be *ExistentialJoinNode, got %T", existsInfo.parent)
+	}
+
+	// 4. Eval test terminal
+	rEval := model.NewRule("r-eval")
+	rEval.AddCondition(model.NewPositiveCE("A").AddEqualTest("id", model.NewVariable("<x>")))
+	rEval.AddCondition(model.NewTestCE(model.NewEvalTest(model.EvalComparison{
+		Left:  model.NewVariable("<x>"),
+		Op:    model.OpGreater,
+		Right: model.NewInt(5),
+	})))
+	net.AddRule(rEval, listener)
+
+	evalInfo := net.terminals["r-eval"]
+	if _, ok := evalInfo.parent.(*EvalNode); !ok {
+		t.Fatalf("expected r-eval terminal parent to be *EvalNode, got %T", evalInfo.parent)
+	}
+
+	// 5. Test activations directly through memoryless shortcuts
+	wA := mem.Make("A", map[string]model.Value{"id": model.NewInt(10)})
+	// r-neg should immediately activate because no C exists
+	if posInfo.terminal.ActivationCount() != 0 {
+		t.Fatalf("expected r-pos activation count 0, got %d", posInfo.terminal.ActivationCount())
+	}
+	if negInfo.terminal.ActivationCount() != 1 {
+		t.Fatalf("expected r-neg activation count 1, got %d", negInfo.terminal.ActivationCount())
+	}
+	if evalInfo.terminal.ActivationCount() != 1 {
+		t.Fatalf("expected r-eval activation count 1 (10 > 5), got %d", evalInfo.terminal.ActivationCount())
+	}
+
+	// Assert B -> r-pos activates
+	wB := mem.Make("B", map[string]model.Value{"a-id": model.NewInt(10)})
+	if posInfo.terminal.ActivationCount() != 1 {
+		t.Fatalf("expected r-pos activation count 1, got %d", posInfo.terminal.ActivationCount())
+	}
+
+	// Assert D -> r-exists activates
+	wD := mem.Make("D", map[string]model.Value{"a-id": model.NewInt(10)})
+	if existsInfo.terminal.ActivationCount() != 1 {
+		t.Fatalf("expected r-exists activation count 1, got %d", existsInfo.terminal.ActivationCount())
+	}
+
+	// Assert C -> r-neg deactivates
+	wC := mem.Make("C", map[string]model.Value{"a-id": model.NewInt(10)})
+	if negInfo.terminal.ActivationCount() != 0 {
+		t.Fatalf("expected r-neg activation count 0 after C asserted, got %d", negInfo.terminal.ActivationCount())
+	}
+
+	// Retract C -> r-neg reactivates
+	mem.Remove(wC.Timetag)
+	if negInfo.terminal.ActivationCount() != 1 {
+		t.Fatalf("expected r-neg activation count 1 after C retracted, got %d", negInfo.terminal.ActivationCount())
+	}
+
+	// Retract B and D
+	mem.Remove(wB.Timetag)
+	mem.Remove(wD.Timetag)
+	if posInfo.terminal.ActivationCount() != 0 {
+		t.Fatalf("expected r-pos activation count 0 after B retracted, got %d", posInfo.terminal.ActivationCount())
+	}
+	if existsInfo.terminal.ActivationCount() != 0 {
+		t.Fatalf("expected r-exists activation count 0 after D retracted, got %d", existsInfo.terminal.ActivationCount())
+	}
+
+	_ = wA
+}
+
+func TestMemorylessTerminalJoinLazyPromotionAndPruning(t *testing.T) {
+	net := NewNetwork()
+	mem := wm.New()
+	mem.AddListener(net)
+	listener := &recordListener{}
+
+	// Rule 1: (A ^id <x>) (B ^a-id <x>) [terminal at B]
+	r1 := model.NewRule("r1")
+	r1.AddCondition(model.NewPositiveCE("A").AddEqualTest("id", model.NewVariable("<x>")))
+	r1.AddCondition(model.NewPositiveCE("B").AddEqualTest("a-id", model.NewVariable("<x>")))
+	net.AddRule(r1, listener)
+
+	// Step B entry should have betaMem == nil
+	bEntries := net.ruleBetaNodes["r1"]
+	if len(bEntries) != 2 {
+		t.Fatalf("expected 2 beta entries for r1, got %d", len(bEntries))
+	}
+	bEntry := bEntries[1]
+	if bEntry.betaMem != nil {
+		t.Fatalf("expected bEntry.betaMem to be nil for terminal join, got %v", bEntry.betaMem)
+	}
+
+	// Assert A and B -> r1 activates memorylessly
+	mem.Make("A", map[string]model.Value{"id": model.NewInt(100)})
+	mem.Make("B", map[string]model.Value{"a-id": model.NewInt(100)})
+
+	t1 := net.terminals["r1"]
+	if t1.terminal.ActivationCount() != 1 {
+		t.Fatalf("expected r1 activation count 1, got %d", t1.terminal.ActivationCount())
+	}
+
+	// Rule 2: (A ^id <x>) (B ^a-id <x>) (C ^val <x>) [longer rule extending past B]
+	r2 := model.NewRule("r2")
+	r2.AddCondition(model.NewPositiveCE("A").AddEqualTest("id", model.NewVariable("<x>")))
+	r2.AddCondition(model.NewPositiveCE("B").AddEqualTest("a-id", model.NewVariable("<x>")))
+	r2.AddCondition(model.NewPositiveCE("C").AddEqualTest("val", model.NewVariable("<x>")))
+	net.AddRule(r2, listener)
+
+	// Step B entry must now be lazily promoted!
+	if bEntry.betaMem == nil {
+		t.Fatalf("expected bEntry.betaMem to be lazily promoted (non-nil)")
+	}
+	// The catch-up replay should have populated bEntry.betaMem with the existing [A, B] token
+	if bEntry.betaMem.TokenCount() != 1 {
+		t.Fatalf("expected 1 token in lazily promoted beta memory, got %d", bEntry.betaMem.TokenCount())
+	}
+
+	// Rule 1 should still have its activation
+	if t1.terminal.ActivationCount() != 1 {
+		t.Fatalf("expected r1 activation count to remain 1, got %d", t1.terminal.ActivationCount())
+	}
+
+	// Assert C -> r2 should now activate!
+	mem.Make("C", map[string]model.Value{"val": model.NewInt(100)})
+	t2 := net.terminals["r2"]
+	if t2.terminal.ActivationCount() != 1 {
+		t.Fatalf("expected r2 activation count 1, got %d", t2.terminal.ActivationCount())
+	}
+
+	// Excise r2: bEntry.betaMem should be detached and nil'd out because only terminal r1 remains!
+	if !net.RemoveRule("r2") {
+		t.Fatalf("expected r2 to be removed")
+	}
+	if bEntry.betaMem != nil {
+		t.Fatalf("expected bEntry.betaMem to be pruned to nil when only terminal r1 remains, got %v", bEntry.betaMem)
+	}
+
+	// r1 terminal should still be fully functional
+	if t1.terminal.ActivationCount() != 1 {
+		t.Fatalf("expected r1 activation count 1 after r2 removal, got %d", t1.terminal.ActivationCount())
+	}
+
+	// Excise r1: all beta nodes pruned
+	if !net.RemoveRule("r1") {
+		t.Fatalf("expected r1 to be removed")
+	}
+	if net.BetaNodeCount() != 0 {
+		t.Fatalf("expected 0 beta nodes after all rules excised, got %d", net.BetaNodeCount())
+	}
+}
+
+func TestMemorylessTerminalMultipleSharedTerminals(t *testing.T) {
+	net := NewNetwork()
+	mem := wm.New()
+	mem.AddListener(net)
+	listener := &recordListener{}
+
+	// 3 rules with the exact same conditions: (A ^id <x>) (B ^a-id <x>)
+	for _, name := range []string{"r1", "r2", "r3"} {
+		r := model.NewRule(name)
+		r.AddCondition(model.NewPositiveCE("A").AddEqualTest("id", model.NewVariable("<x>")))
+		r.AddCondition(model.NewPositiveCE("B").AddEqualTest("a-id", model.NewVariable("<x>")))
+		net.AddRule(r, listener)
+	}
+
+	// All 3 share the 2 beta nodes (A, B)
+	if net.BetaNodeCount() != 2 {
+		t.Fatalf("expected 2 beta nodes, got %d", net.BetaNodeCount())
+	}
+
+	// Assert WMEs -> all 3 rules should activate
+	mem.Make("A", map[string]model.Value{"id": model.NewInt(42)})
+	mem.Make("B", map[string]model.Value{"a-id": model.NewInt(42)})
+
+	for _, name := range []string{"r1", "r2", "r3"} {
+		ti := net.terminals[name]
+		if ti.terminal.ActivationCount() != 1 {
+			t.Fatalf("expected %s activation count 1, got %d", name, ti.terminal.ActivationCount())
+		}
+	}
+
+	// Remove r2: r1 and r3 still activate
+	net.RemoveRule("r2")
+	if net.BetaNodeCount() != 2 {
+		t.Fatalf("expected 2 beta nodes after removing r2, got %d", net.BetaNodeCount())
+	}
+	if net.terminals["r1"].terminal.ActivationCount() != 1 || net.terminals["r3"].terminal.ActivationCount() != 1 {
+		t.Fatalf("expected r1 and r3 to remain active")
+	}
+
+	// Remove r1 and r3 -> all pruned
+	net.RemoveRule("r1")
+	net.RemoveRule("r3")
+	if net.BetaNodeCount() != 0 {
+		t.Fatalf("expected 0 beta nodes after all excised, got %d", net.BetaNodeCount())
+	}
+}
+
+
 

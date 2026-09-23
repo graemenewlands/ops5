@@ -11,6 +11,13 @@ type LeftActivatable interface {
 	LeftActivation(token *Token, tag PropagationTag)
 }
 
+// BetaNode represents a beta network node that accepts left activations and manages downstream successors.
+type BetaNode interface {
+	LeftActivatable
+	AddSuccessor(node LeftActivatable)
+	RemoveSuccessor(node LeftActivatable)
+}
+
 // ConflictSetListener is notified when full rule instantiations are added or removed.
 type ConflictSetListener interface {
 	OnActivationAdd(rule *model.Rule, token *Token)
@@ -401,6 +408,7 @@ type JoinNode struct {
 	alphaIndex  *AlphaIndex
 	ce          *model.ConditionElement
 	successors  []LeftActivatable
+	attached    bool
 
 	leftLink  LeftLink  // links to betaMemory.activeHead
 	rightLink RightLink // links to alphaMemory.activeHead
@@ -447,6 +455,10 @@ func NewJoinNode(betaMem *BetaMemory, alphaMem *AlphaMemory, ce *model.Condition
 
 // Attach connects the join node to its parent memories and sets up unlinking.
 func (jn *JoinNode) Attach() {
+	jn.mu.Lock()
+	jn.attached = true
+	jn.mu.Unlock()
+
 	if jn.alphaMemory != nil {
 		jn.alphaMemory.AddSuccessor(jn)
 		// If betaMemory already has tokens, link rightLink into alphaMemory
@@ -518,8 +530,28 @@ func (jn *JoinNode) OnLeftMemoryEmpty() {
 // AddSuccessor registers a downstream beta node.
 func (jn *JoinNode) AddSuccessor(node LeftActivatable) {
 	jn.mu.Lock()
-	defer jn.mu.Unlock()
 	jn.successors = append(jn.successors, node)
+	wasAttached := jn.attached
+	jn.mu.Unlock()
+
+	// Catch-up: if already attached, replay all current matches to the new successor
+	if wasAttached && jn.betaMemory != nil && jn.alphaIndex != nil {
+		toks := jn.betaMemory.Tokens()
+		var bindBuf [4]Binding
+		for _, token := range toks {
+			key := jn.betaIndex.KeyForToken(token)
+			wmes := jn.alphaIndex.Lookup(key)
+			for _, wme := range wmes {
+				if jn.matches(token, wme) {
+					newBindings, ok := jn.extractBindings(token, wme, bindBuf[:0])
+					if ok {
+						childToken := NewToken(token, wme, newBindings)
+						node.LeftActivation(childToken, TagAdd)
+					}
+				}
+			}
+		}
+	}
 }
 
 // RemoveSuccessor unregisters a downstream beta node.
@@ -831,6 +863,7 @@ type NegativeJoinNode struct {
 	matches    map[string]map[int64]bool
 	tokens     map[string]*Token
 	successors []LeftActivatable
+	attached   bool
 
 	leftLink  LeftLink  // always linked to betaMemory (negative conditions need left activations when alpha is empty!)
 	rightLink RightLink // unlinked from alphaMemory when betaMemory has 0 tokens
@@ -874,6 +907,10 @@ func NewNegativeJoinNode(betaMem *BetaMemory, alphaMem *AlphaMemory, ce *model.C
 
 // Attach connects the negative join node to its parent memories and sets up unlinking.
 func (njn *NegativeJoinNode) Attach() {
+	njn.mu.Lock()
+	njn.attached = true
+	njn.mu.Unlock()
+
 	if njn.alphaMemory != nil {
 		njn.alphaMemory.AddSuccessor(njn)
 		if njn.betaMemory != nil && njn.betaMemory.TokenCount() > 0 {
@@ -926,8 +963,21 @@ func (njn *NegativeJoinNode) OnLeftMemoryEmpty() {
 // AddSuccessor registers a downstream beta node.
 func (njn *NegativeJoinNode) AddSuccessor(node LeftActivatable) {
 	njn.mu.Lock()
-	defer njn.mu.Unlock()
 	njn.successors = append(njn.successors, node)
+	wasAttached := njn.attached
+	var toks []*Token
+	if wasAttached {
+		for sig, tok := range njn.tokens {
+			if len(njn.matches[sig]) == 0 {
+				toks = append(toks, tok)
+			}
+		}
+	}
+	njn.mu.Unlock()
+
+	for _, tok := range toks {
+		node.LeftActivation(tok, TagAdd)
+	}
 }
 
 // RemoveSuccessor unregisters a downstream beta node.

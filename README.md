@@ -112,7 +112,8 @@ flowchart TD
 
     BetaRoot --> JoinNode
     AlphaMem --> JoinNode
-    JoinNode --> BetaMem
+    JoinNode -->|Intermediate Join| BetaMem
+    JoinNode -->|Terminal Join Shortcut (Rete-NT)| TerminalNode
     BetaMem --> TerminalNode
 
     TerminalNode -->|Activation Add/Remove| CS
@@ -1134,12 +1135,12 @@ Current library performance measured on a dedicated test machine (12th Gen Intel
 
 | Benchmark | Cycles | WMEs Asserted | Time to Quiescence | Throughput (Cycles/s) | WME Assertions/s | Total Heap Alloc |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Manners-16** | 2,009 | 2,744 | **302 ms** | 6,651.2 | 9,084.5 | ~117 MB |
-| **Manners-32** | 3,914 | 4,649 | **620 ms** | 6,315.7 | 7,501.7 | ~246 MB |
-| **Manners-64** | 19,381 | 21,152 | **6.47 s** | 2,994.7 | 3,268.3 | ~2.40 GB |
-| **Waltz-12** | 608 | 1,238 | **12 ms** | 49,705.2 | 101,208.9 | ~5.7 MB |
-| **Waltz-50** | 2,268 | 4,654 | **54 ms** | 42,155.4 | 86,504.0 | ~22.3 MB |
-| **Zebra-5** | 7 | 19 | **0.10 ms** | 52,730.7 | 143,126.2 | ~73 KB |
+| **Manners-16** | 2,009 | 2,744 | **345 ms** | 5,829.9 | 7,962.9 | ~117 MB |
+| **Manners-32** | 3,914 | 4,649 | **645 ms** | 6,069.2 | 7,208.9 | ~246 MB |
+| **Manners-64** | 19,381 | 21,152 | **6.36 s** | 3,045.9 | 3,324.3 | ~2.40 GB |
+| **Waltz-12** | 608 | 1,238 | **14 ms** | 42,879.3 | 87,310.2 | ~5.6 MB |
+| **Waltz-50** | 2,268 | 4,654 | **51 ms** | 44,646.2 | 91,615.2 | ~21.8 MB |
+| **Zebra-5** | 7 | 19 | **0.09 ms** | 44,634.6 | 121,151.1 | ~70 KB |
 
 
 ---

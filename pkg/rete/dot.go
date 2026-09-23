@@ -343,7 +343,11 @@ func exportNetworkDOT(net *Network, w io.Writer) error {
 			}
 			for _, succ := range node.successors {
 				succID := d.getOrCreateBetaNodeID(succ)
-				d.betaEdges = append(d.betaEdges, fmt.Sprintf("    %s -> %s [style=solid, color=\"#e8710a\"];", jnID, succID))
+				if _, isTerm := succ.(*TerminalNode); isTerm {
+					d.betaEdges = append(d.betaEdges, fmt.Sprintf("    %s -> %s [label=\"activate\", style=solid, color=\"#8430ce\", fontcolor=\"#8430ce\"];", jnID, succID))
+				} else {
+					d.betaEdges = append(d.betaEdges, fmt.Sprintf("    %s -> %s [style=solid, color=\"#e8710a\"];", jnID, succID))
+				}
 				if !visited[succ] {
 					visited[succ] = true
 					queue = append(queue, succ)
@@ -361,7 +365,11 @@ func exportNetworkDOT(net *Network, w io.Writer) error {
 			}
 			for _, succ := range node.successors {
 				succID := d.getOrCreateBetaNodeID(succ)
-				d.betaEdges = append(d.betaEdges, fmt.Sprintf("    %s -> %s [style=solid, color=\"#c5221f\"];", njnID, succID))
+				if _, isTerm := succ.(*TerminalNode); isTerm {
+					d.betaEdges = append(d.betaEdges, fmt.Sprintf("    %s -> %s [label=\"activate\", style=solid, color=\"#8430ce\", fontcolor=\"#8430ce\"];", njnID, succID))
+				} else {
+					d.betaEdges = append(d.betaEdges, fmt.Sprintf("    %s -> %s [style=solid, color=\"#c5221f\"];", njnID, succID))
+				}
 				if !visited[succ] {
 					visited[succ] = true
 					queue = append(queue, succ)
@@ -379,7 +387,11 @@ func exportNetworkDOT(net *Network, w io.Writer) error {
 			}
 			for _, succ := range node.successors {
 				succID := d.getOrCreateBetaNodeID(succ)
-				d.betaEdges = append(d.betaEdges, fmt.Sprintf("    %s -> %s [style=solid, color=\"#b06000\"];", ejnID, succID))
+				if _, isTerm := succ.(*TerminalNode); isTerm {
+					d.betaEdges = append(d.betaEdges, fmt.Sprintf("    %s -> %s [label=\"activate\", style=solid, color=\"#8430ce\", fontcolor=\"#8430ce\"];", ejnID, succID))
+				} else {
+					d.betaEdges = append(d.betaEdges, fmt.Sprintf("    %s -> %s [style=solid, color=\"#b06000\"];", ejnID, succID))
+				}
 				if !visited[succ] {
 					visited[succ] = true
 					queue = append(queue, succ)
@@ -397,7 +409,11 @@ func exportNetworkDOT(net *Network, w io.Writer) error {
 			}
 			for _, succ := range node.successors {
 				succID := d.getOrCreateBetaNodeID(succ)
-				d.betaEdges = append(d.betaEdges, fmt.Sprintf("    %s -> %s [style=solid, color=\"#5f6368\"];", accID, succID))
+				if _, isTerm := succ.(*TerminalNode); isTerm {
+					d.betaEdges = append(d.betaEdges, fmt.Sprintf("    %s -> %s [label=\"activate\", style=solid, color=\"#8430ce\", fontcolor=\"#8430ce\"];", accID, succID))
+				} else {
+					d.betaEdges = append(d.betaEdges, fmt.Sprintf("    %s -> %s [style=solid, color=\"#5f6368\"];", accID, succID))
+				}
 				if !visited[succ] {
 					visited[succ] = true
 					queue = append(queue, succ)
@@ -416,7 +432,11 @@ func exportNetworkDOT(net *Network, w io.Writer) error {
 				evalID, escapeDOT(label)))
 			for _, succ := range node.successors {
 				succID := d.getOrCreateBetaNodeID(succ)
-				d.betaEdges = append(d.betaEdges, fmt.Sprintf("    %s -> %s [style=solid, color=\"#f9ab00\"];", evalID, succID))
+				if _, isTerm := succ.(*TerminalNode); isTerm {
+					d.betaEdges = append(d.betaEdges, fmt.Sprintf("    %s -> %s [label=\"activate\", style=solid, color=\"#8430ce\", fontcolor=\"#8430ce\"];", evalID, succID))
+				} else {
+					d.betaEdges = append(d.betaEdges, fmt.Sprintf("    %s -> %s [style=solid, color=\"#f9ab00\"];", evalID, succID))
+				}
 				if !visited[succ] {
 					visited[succ] = true
 					queue = append(queue, succ)
@@ -433,7 +453,11 @@ func exportNetworkDOT(net *Network, w io.Writer) error {
 			}
 			for _, succ := range node.successors {
 				succID := d.getOrCreateBetaNodeID(succ)
-				d.betaEdges = append(d.betaEdges, fmt.Sprintf("    %s -> %s [style=solid, color=\"#c5221f\"];", nccID, succID))
+				if _, isTerm := succ.(*TerminalNode); isTerm {
+					d.betaEdges = append(d.betaEdges, fmt.Sprintf("    %s -> %s [label=\"activate\", style=solid, color=\"#8430ce\", fontcolor=\"#8430ce\"];", nccID, succID))
+				} else {
+					d.betaEdges = append(d.betaEdges, fmt.Sprintf("    %s -> %s [style=solid, color=\"#c5221f\"];", nccID, succID))
+				}
 				if !visited[succ] {
 					visited[succ] = true
 					queue = append(queue, succ)
@@ -461,9 +485,9 @@ func exportNetworkDOT(net *Network, w io.Writer) error {
 			label := formatTerminalNode(ti.terminal)
 			d.betaNodes = append(d.betaNodes, fmt.Sprintf("    %s [label=\"%s\", shape=doublecircle, style=filled, fillcolor=\"#f3e8fd\", color=\"#8430ce\", fontcolor=\"#491380\"];",
 				termID, escapeDOT(label)))
-			if bm, ok := ti.parent.(*BetaMemory); ok {
-				bmID := d.getOrCreateBetaMemID(bm)
-				d.betaEdges = append(d.betaEdges, fmt.Sprintf("    %s -> %s [label=\"activate\", style=solid, color=\"#8430ce\", fontcolor=\"#8430ce\"];", bmID, termID))
+			if la, ok := ti.parent.(LeftActivatable); ok {
+				parentID := d.getOrCreateBetaNodeID(la)
+				d.betaEdges = append(d.betaEdges, fmt.Sprintf("    %s -> %s [label=\"activate\", style=solid, color=\"#8430ce\", fontcolor=\"#8430ce\"];", parentID, termID))
 			}
 		}
 	}

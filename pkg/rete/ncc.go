@@ -140,14 +140,19 @@ func NewNccNode(betaMem *BetaMemory, partner *NccPartnerNode, ce *model.Conditio
 // AddSuccessor registers a downstream beta node.
 func (node *NccNode) AddSuccessor(succ LeftActivatable) {
 	node.mu.Lock()
-	defer node.mu.Unlock()
 	node.successors = append(node.successors, succ)
 
+	var toks []*Token
 	// Catch-up: send currently satisfied tokens (match count == 0) to new successor
 	for sig, tok := range node.tokens {
 		if node.matchCounts[sig] == 0 {
-			succ.LeftActivation(tok, TagAdd)
+			toks = append(toks, tok)
 		}
+	}
+	node.mu.Unlock()
+
+	for _, tok := range toks {
+		succ.LeftActivation(tok, TagAdd)
 	}
 }
 
