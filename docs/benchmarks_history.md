@@ -43,9 +43,7 @@ go test -bench=. -benchtime=1x -run=^$ ./benchmarks
 
 | Version / Tag | Release Date | Key Optimizations / Features | Manners-16 | Manners-32 | Manners-64 | Waltz-12 | Waltz-50 | Zebra-5 |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| Version / Tag | Release Date | Key Optimizations / Features | Manners-16 | Manners-32 | Manners-64 | Waltz-12 | Waltz-50 | Zebra-5 |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **`v0.3.0-dev` (Current)** | 2026-09-22 | Static Heuristic Join Ordering (OPT-4), Memoryless Terminal Joins / Rete-NT (OPT-5), Precompiled RHS Closures (OPT-6) | **316 ms** (-82%) | **598 ms** (-81%) | **6.22 s** (-82%) | **11 ms** (-83%) | **52 ms** (-92%) | **0.08 ms** (-58%) |
+| **`v0.3.0` (Current)** | 2026-09-22 | Static Heuristic Join Ordering (OPT-4), Memoryless Terminal Joins / Rete-NT (OPT-5), Precompiled RHS Closures (OPT-6), ParaOPS5 Partitioned Concurrency (OPT-7) | **316 ms** (-82%) | **598 ms** (-81%) | **6.22 s** (-82%) | **11 ms** (-83%) | **52 ms** (-92%) | **0.08 ms** (-58%) |
 | **[`v0.2.0`](#v020---2026-09-22-token-prefix-spine-sharing-binary-heap-agenda-alpha-constant-switch-nodes--zero-copy-bindings)** | 2026-09-22 | Token prefix spine sharing, binary heap agenda, alpha switch nodes, zero-copy bindings | 413 ms (-76%) | 761 ms (-76%) | 8.41 s (-75%) | 15 ms (-77%) | 52 ms (-92%) | 0.12 ms (-37%) |
 | **[`v0.1.0`](#v010---2026-09-22-baseline)** | 2026-09-22 | Dual-sided join hashing, Structural beta sharing, Left/Right node unlinking, Rule salience | 1.74 s | 3.23 s | 34.20 s | 65 ms | 662 ms | 0.19 ms |
 
@@ -53,9 +51,11 @@ go test -bench=. -benchtime=1x -run=^$ ./benchmarks
 
 ## Version Release Logs
 
-### `v0.3.0-dev` - 2026-09-22 (Static Heuristic Join Ordering, Memoryless Terminal Joins / Rete-NT, & Precompiled RHS Closures - OPT-4, OPT-5, OPT-6)
+### `v0.3.0` - 2026-09-22 (Static Heuristic Join Ordering, Memoryless Terminal Joins / Rete-NT, Precompiled RHS Closures, & ParaOPS5 Partitioned Concurrency - OPT-4, OPT-5, OPT-6, OPT-7)
 
 * **Key Optimizations**:
+  - **Partitioned Multi-Core Concurrency & ParaOPS5 (`PartitionedEngine` & `Partition` - OPT-7)**: Multi-partition Rete engine architecture coordinating concurrent rule executions across isolated partitions with thread-safe cross-partition WME routing (`PartitionRouter`), channel inboxes, atomic worker counters, and global quiescence detection (`RunParallel`).
+  - **Parallel Alpha Batch Assertion (`Engine.MakeBatch` & `Engine.SetAlphaWorkers`)**: Parallelized alpha network evaluation distributing large batches of WME assertions across worker goroutines.
   - **Precompiled RHS Action Closures (`CompiledAction` - OPT-6)**: Precompiles all rule RHS actions (`make`, `modify`, `remove`, `write`, `bind`, `cbind`, `halt`, `build`) at rule compilation time into direct Go closures (`func(ctx *ActionContext) error`). Eliminates AST type-switch dispatching and string parsing on every rule execution cycle.
   - **Zero-Allocation Action Context & `sync.Pool`**: Completely eliminates the per-cycle `dominant.Token.Bindings()` map copy (~19,381 maps allocated per run on Manners-64). Pooled `ActionContext` instances query variables directly up the token ancestor spine (`ctx.GetVariable`) with zero heap allocations, while dynamically modified variables (`bind`, `cbind`, `modify`) are tracked with lazy override maps that are cleared and recycled.
   - **Compile-Time Attribute Ordering & Key Normalization**: Pre-computes normalized attribute strings and schema key sequences at rule compile time. Completely eliminates runtime `getOrderedAttributeKeys` calls, eliminating transient `seen` maps, `remaining` slices, and string sorting inside `make` and `modify`.

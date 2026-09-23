@@ -57,6 +57,19 @@ func (wm *WorkingMemory) Make(class string, attrs map[string]model.Value) *model
 	return wme
 }
 
+// MakeWithoutNotify creates and asserts a new WME without notifying listeners.
+// Useful for batch/parallel assertions where listeners are notified concurrently.
+func (wm *WorkingMemory) MakeWithoutNotify(class string, attrs map[string]model.Value) *model.WME {
+	wm.mu.Lock()
+	defer wm.mu.Unlock()
+	timetag := wm.nextTimetag
+	wm.nextTimetag++
+
+	wme := model.NewWME(timetag, class, attrs)
+	wm.wmes[timetag] = wme
+	return wme
+}
+
 // Remove retracts a WME by its timetag.
 func (wm *WorkingMemory) Remove(timetag int64) (*model.WME, error) {
 	wm.mu.Lock()

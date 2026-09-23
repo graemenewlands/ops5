@@ -63,6 +63,9 @@ type Engine struct {
 	// Precompiled RHS action closures
 	compiledRules     map[string]*CompiledRule
 	actionContextPool sync.Pool
+
+	// Concurrency (OPT-7 / ParaOPS5)
+	alphaWorkers int
 }
 
 // New creates a new Engine instance.
@@ -899,11 +902,38 @@ func (e *Engine) litvalLocked(class, attr string) (int, bool) {
 	return 0, false
 }
 
+// MakeRequest specifies an individual WME to be asserted in a batch.
+type MakeRequest struct {
+	Class      string
+	Attributes map[string]model.Value
+}
+
+// SetAlphaWorkers sets the number of worker goroutines for concurrent alpha network evaluation.
+// 0 or 1 disables concurrency (sequential evaluation).
+func (e *Engine) SetAlphaWorkers(workers int) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if workers < 0 {
+		workers = 0
+	}
+	e.alphaWorkers = workers
+}
+
+// AlphaWorkers returns the configured number of alpha worker goroutines.
+func (e *Engine) AlphaWorkers() int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.alphaWorkers
+}
+
 // Make asserts a new WME, resolving any RHS value functions (compute, accept, genatom, litval).
 func (e *Engine) Make(class string, attrs map[string]model.Value) *model.WME {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	return e.makeLocked(class, attrs)
+}
 
+func (e *Engine) makeLocked(class string, attrs map[string]model.Value) *model.WME {
 	normClass := strings.ToLower(class)
 	if schema, ok := e.schemas[normClass]; ok {
 		orderedKeys := e.getOrderedAttributeKeys(class, attrs)
@@ -940,6 +970,81 @@ func (e *Engine) Make(class string, attrs map[string]model.Value) *model.WME {
 	e.lastAddedTimetag = wme.Timetag
 	e.logWMAssertLocked(wme)
 	return wme
+}
+
+// MakeBatch asserts multiple WMEs into working memory.
+// When alphaWorkers > 1 and len(requests) > 1, alpha evaluation is parallelized across worker goroutines.
+func (e *Engine) MakeBatch(requests []MakeRequest) []*model.WME {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if len(requests) == 0 {
+		return nil
+	}
+
+	wmes := make([]*model.WME, len(requests))
+
+	if e.alphaWorkers > 1 && len(requests) > 1 {
+		// Parallel assertion: create WMEs in WM first
+		for i, req := range requests {
+			normClass := strings.ToLower(req.Class)
+			if schema, ok := e.schemas[normClass]; ok {
+				orderedKeys := e.getOrderedAttributeKeys(req.Class, req.Attributes)
+				for _, k := range orderedKeys {
+					schema.AddAttribute(k)
+					if idx, ok := schema.IndexOf(k); ok {
+						if _, exists := e.attrIndices[k]; !exists {
+							e.attrIndices[k] = idx + 2
+						}
+					}
+				}
+			}
+
+			resolvedAttrs := make(map[string]model.Value, len(req.Attributes))
+			orderedKeys := e.getOrderedAttributeKeys(req.Class, req.Attributes)
+			for _, k := range orderedKeys {
+				resolvedAttrs[k] = e.resolveValue(req.Attributes[k], nil)
+			}
+
+			wme := e.wm.MakeWithoutNotify(req.Class, resolvedAttrs)
+			wmes[i] = wme
+			e.lastAddedTimetag = wme.Timetag
+			e.logWMAssertLocked(wme)
+		}
+
+		numWorkers := e.alphaWorkers
+		if numWorkers > len(requests) {
+			numWorkers = len(requests)
+		}
+
+		var wg sync.WaitGroup
+		chunkSize := (len(requests) + numWorkers - 1) / numWorkers
+		for w := 0; w < numWorkers; w++ {
+			start := w * chunkSize
+			end := start + chunkSize
+			if end > len(requests) {
+				end = len(requests)
+			}
+			if start >= end {
+				break
+			}
+			wg.Add(1)
+			go func(items []*model.WME) {
+				defer wg.Done()
+				for _, item := range items {
+					e.network.OnAssert(item)
+				}
+			}(wmes[start:end])
+		}
+		wg.Wait()
+		return wmes
+	}
+
+	// Sequential fallback
+	for i, req := range requests {
+		wmes[i] = e.makeLocked(req.Class, req.Attributes)
+	}
+	return wmes
 }
 
 // Remove retracts a WME by timetag.
@@ -1955,6 +2060,13 @@ func (e *Engine) IsHalted() bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return e.halted
+}
+
+// Halt marks the engine as halted, stopping any running cycles.
+func (e *Engine) Halt() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.halted = true
 }
 
 func (e *Engine) getOrderedAttributeKeys(class string, attrs map[string]model.Value) []string {

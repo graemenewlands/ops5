@@ -59,6 +59,7 @@ This engine provides a complete, modern execution environment for rule-based sys
 7. [Programmatic Go API Reference](#programmatic-go-api-reference)
    - [Quick Start Example](#quick-start-example)
    - [Package Breakdown](#package-breakdown)
+   - [Partitioned Multi-Core Concurrency (ParaOPS5)](#partitioned-multi-core-concurrency-paraops5)
    - [Extensibility & Custom Actions](#extensibility--custom-actions)
 8. [Canonical Benchmark Suite](#canonical-benchmark-suite)
    - [Engine Comparison & Architectural Evaluation](docs/engine_comparison.md)
@@ -1072,6 +1073,49 @@ pkg/
 └── harness/      # JSON test suite loader, assertion checker, and runner
 ```
 
+### Partitioned Multi-Core Concurrency (ParaOPS5)
+
+For large distributed rule networks or high-throughput domains, `engine.PartitionedEngine` coordinates multiple isolated Rete partitions running concurrently across multi-core systems:
+
+```go
+// 1. Create a partitioned engine with a routing strategy
+pe := engine.NewPartitionedEngine(func(origin, class string, attrs map[string]model.Value) []string {
+    // Broadcast notifications to all partitions
+    if class == "broadcast" {
+        return []string{"*"}
+    }
+    // Route domain-specific facts
+    if dest, ok := attrs["target_partition"]; ok {
+        return []string{dest.String()}
+    }
+    return nil // Local to originating partition
+})
+
+// 2. Add partitions and declare schemas
+pe.DeclareClass("task", []string{"id", "status"})
+p1, _ := pe.AddPartition("worker-1")
+p2, _ := pe.AddPartition("worker-2")
+
+// 3. Register partition-specific or global rules
+pe.AddRule(globalMonitoringRule)
+pe.AddRuleToPartition("worker-1", worker1Rule)
+
+// 4. Run partitions in parallel until global quiescence
+ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+defer cancel()
+
+totalCycles, err := pe.RunParallel(ctx, 1000)
+```
+
+Additionally, single-engine instances support concurrent alpha evaluation for large-scale fact assertions:
+```go
+eng.SetAlphaWorkers(4)
+eng.MakeBatch([]engine.MakeRequest{
+    {Class: "item", Attributes: map[string]model.Value{"id": model.NewInt(1)}},
+    {Class: "item", Attributes: map[string]model.Value{"id": model.NewInt(2)}},
+})
+```
+
 ### Extensibility & Custom Actions
 
 In addition to standard OPS5 actions (`make`, `modify`, `remove`, `write`, `halt`), Go applications can register `CustomAction` handlers directly on rules:
@@ -1148,7 +1192,8 @@ Current library performance measured on a dedicated test machine (12th Gen Intel
 ## Verification & Concurrency Model
 
 - **Thread-Safety**: `WorkingMemory`, `Network`, `BetaMemory`, `AlphaMemory`, `ConflictSet`, and `Engine` protect shared mutable state with fine-grained read/write mutexes (`sync.RWMutex`), supporting thread-safe inspection and concurrent listener dispatch.
-- **Unit & Integration Tests**: Comprehensive tests in [`tests/suite_test.go`](tests/suite_test.go), [`pkg/rete/network_test.go`](pkg/rete/network_test.go), [`pkg/conflict/conflict_test.go`](pkg/conflict/conflict_test.go), and [`pkg/cli/repl_test.go`](pkg/cli/repl_test.go).
+- **ParaOPS5 Multi-Partition Concurrency**: `PartitionedEngine` enables parallel subnetwork execution with cross-partition routing channels, atomic quiescence tracking, and zero inter-partition lock contention.
+- **Unit & Integration Tests**: Comprehensive tests in [`tests/suite_test.go`](tests/suite_test.go), [`pkg/rete/network_test.go`](pkg/rete/network_test.go), [`pkg/conflict/conflict_test.go`](pkg/conflict/conflict_test.go), [`pkg/engine/partition_test.go`](pkg/engine/partition_test.go), and [`pkg/cli/repl_test.go`](pkg/cli/repl_test.go).
 - Run the full test suite with test coverage:
   ```bash
   go test -race -cover ./...
