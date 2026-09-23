@@ -43,13 +43,20 @@ go test -bench=. -benchtime=1x -run=^$ ./benchmarks
 
 | Version / Tag | Release Date | Key Optimizations / Features | Manners-16 | Manners-32 | Manners-64 | Waltz-12 | Waltz-50 | Zebra-5 |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **`v0.3.0` (Current)** | 2026-09-22 | Static Heuristic Join Ordering (OPT-4), Memoryless Terminal Joins / Rete-NT (OPT-5), Precompiled RHS Closures (OPT-6), ParaOPS5 Partitioned Concurrency (OPT-7) | **316 ms** (-82%) | **598 ms** (-81%) | **6.22 s** (-82%) | **11 ms** (-83%) | **52 ms** (-92%) | **0.08 ms** (-58%) |
+| **`v0.3.1` (Current)** | 2026-09-22 | GoDoc documentation overviews & runnable examples across `pkg/`; Static Heuristic Join Ordering (OPT-4), Memoryless Terminal Joins / Rete-NT (OPT-5), Precompiled RHS Closures (OPT-6), ParaOPS5 Partitioned Concurrency (OPT-7) | **316 ms** (-82%) | **598 ms** (-81%) | **6.22 s** (-82%) | **11 ms** (-83%) | **52 ms** (-92%) | **0.08 ms** (-58%) |
+| **[`v0.3.0`](#v030---2026-09-22-static-heuristic-join-ordering-memoryless-terminal-joins--rete-nt-precompiled-rhs-closures--paraops5-partitioned-concurrency---opt-4-opt-5-opt-6-opt-7)** | 2026-09-22 | Static Heuristic Join Ordering (OPT-4), Memoryless Terminal Joins / Rete-NT (OPT-5), Precompiled RHS Closures (OPT-6), ParaOPS5 Partitioned Concurrency (OPT-7) | **316 ms** (-82%) | **598 ms** (-81%) | **6.22 s** (-82%) | **11 ms** (-83%) | **52 ms** (-92%) | **0.08 ms** (-58%) |
 | **[`v0.2.0`](#v020---2026-09-22-token-prefix-spine-sharing-binary-heap-agenda-alpha-constant-switch-nodes--zero-copy-bindings)** | 2026-09-22 | Token prefix spine sharing, binary heap agenda, alpha switch nodes, zero-copy bindings | 413 ms (-76%) | 761 ms (-76%) | 8.41 s (-75%) | 15 ms (-77%) | 52 ms (-92%) | 0.12 ms (-37%) |
 | **[`v0.1.0`](#v010---2026-09-22-baseline)** | 2026-09-22 | Dual-sided join hashing, Structural beta sharing, Left/Right node unlinking, Rule salience | 1.74 s | 3.23 s | 34.20 s | 65 ms | 662 ms | 0.19 ms |
 
 ---
 
 ## Version Release Logs
+
+### `v0.3.1` - 2026-09-22 (GoDoc Documentation & Interactive Runnable Examples)
+
+* **Documentation & Developer Experience**:
+  - Added comprehensive GoDoc package overviews (`doc.go`) across all 8 library packages (`pkg/model`, `pkg/wm`, `pkg/rete`, `pkg/conflict`, `pkg/engine`, `pkg/parser`, `pkg/cli`, and `pkg/harness`).
+  - Added executable test examples (`example_test.go`) across all packages providing syntax-highlighted, runnable code samples on `pkg.go.dev`.
 
 ### `v0.3.0` - 2026-09-22 (Static Heuristic Join Ordering, Memoryless Terminal Joins / Rete-NT, Precompiled RHS Closures, & ParaOPS5 Partitioned Concurrency - OPT-4, OPT-5, OPT-6, OPT-7)
 
