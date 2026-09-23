@@ -237,6 +237,33 @@ func (t *Token) WMEs() []*model.WME {
 	return list
 }
 
+// WMEAt returns the non-nil WME at 1-based condition element index without slice allocation.
+func (t *Token) WMEAt(index int) (*model.WME, bool) {
+	if t == nil || index < 1 {
+		return nil, false
+	}
+	count := 0
+	for curr := t; curr != nil; curr = curr.Parent {
+		if curr.WME != nil {
+			count++
+		}
+	}
+	if index > count {
+		return nil, false
+	}
+	targetSteps := count - index
+	steps := 0
+	for curr := t; curr != nil; curr = curr.Parent {
+		if curr.WME != nil {
+			if steps == targetSteps {
+				return curr.WME, true
+			}
+			steps++
+		}
+	}
+	return nil, false
+}
+
 // Timetags returns the list of timetags for all WMEs and extra timetags in this token in condition element order.
 func (t *Token) Timetags() []int64 {
 	if t == nil {

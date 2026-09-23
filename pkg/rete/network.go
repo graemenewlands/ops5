@@ -456,17 +456,19 @@ func (net *Network) buildAlphaMemory(ce *model.ConditionElement, existingWMEs []
 }
 
 // AddRule compiles a rule into the Rete network and connects its terminal node to the listener.
-func (net *Network) AddRule(rule *model.Rule, listener ConflictSetListener) {
-	net.AddRuleWithWMEs(rule, listener, nil)
+// Returns the effective rule installed in the network.
+func (net *Network) AddRule(rule *model.Rule, listener ConflictSetListener) *model.Rule {
+	return net.AddRuleWithWMEs(rule, listener, nil)
 }
 
 // AddRuleWithWMEs compiles a rule and evaluates it against existing working memory elements.
-func (net *Network) AddRuleWithWMEs(rule *model.Rule, listener ConflictSetListener, existingWMEs []*model.WME) {
+// Returns the effective rule installed in the network.
+func (net *Network) AddRuleWithWMEs(rule *model.Rule, listener ConflictSetListener, existingWMEs []*model.WME) *model.Rule {
 	net.mu.Lock()
 	defer net.mu.Unlock()
 
 	if len(rule.Conditions) == 0 {
-		return
+		return rule
 	}
 
 	// If rule already exists in Rete network, remove previous version cleanly
@@ -858,6 +860,7 @@ func (net *Network) AddRuleWithWMEs(rule *model.Rule, listener ConflictSetListen
 		}
 	}
 	net.ruleNodeInfos[rule.Name] = ruleNodeInfo
+	return effectiveRule
 }
 
 // RemoveRule detaches and deactivates the terminal node for the specified rule,

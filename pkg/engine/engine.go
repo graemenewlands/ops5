@@ -59,6 +59,10 @@ type Engine struct {
 	breakpoints   map[string]bool
 	hitBreakpoint string
 	resumingRule  string
+
+	// Precompiled RHS action closures
+	compiledRules     map[string]*CompiledRule
+	actionContextPool sync.Pool
 }
 
 // New creates a new Engine instance.
@@ -70,7 +74,7 @@ func New() *Engine {
 	// Connect WM events to Rete Alpha Network
 	mem.AddListener(net)
 
-	return &Engine{
+	e := &Engine{
 		wm:                  mem,
 		network:             net,
 		conflictSet:         cs,
@@ -95,7 +99,14 @@ func New() *Engine {
 		inputReader:         os.Stdin,
 		stdinReader:         bufio.NewReader(os.Stdin),
 		breakpoints:         make(map[string]bool),
+		compiledRules:       make(map[string]*CompiledRule),
 	}
+	e.actionContextPool = sync.Pool{
+		New: func() any {
+			return &ActionContext{}
+		},
+	}
+	return e
 }
 
 // SetOutputWriter configures where WRITE actions emit output.
@@ -228,6 +239,7 @@ func (e *Engine) addRuleLocked(rule *model.Rule) {
 		if r.Name == rule.Name {
 			e.network.RemoveRule(rule.Name)
 			e.conflictSet.RemoveRule(rule.Name)
+			delete(e.compiledRules, rule.Name)
 			e.rules = append(e.rules[:i], e.rules[i+1:]...)
 			break
 		}
@@ -237,7 +249,11 @@ func (e *Engine) addRuleLocked(rule *model.Rule) {
 	rule.Index = e.ruleCount
 	e.rules = append(e.rules, rule)
 	existingWMEs := e.wm.All()
-	e.network.AddRuleWithWMEs(rule, e.conflictSet, existingWMEs)
+	effectiveRule := e.network.AddRuleWithWMEs(rule, e.conflictSet, existingWMEs)
+	if effectiveRule == nil {
+		effectiveRule = rule
+	}
+	e.compiledRules[rule.Name] = e.compileRule(effectiveRule)
 }
 
 // ExciseRule evicts a production rule by name from production memory,
@@ -266,6 +282,8 @@ func (e *Engine) ExciseRule(ruleName string) bool {
 
 	// Purge pending activations from conflict set
 	e.conflictSet.RemoveRule(ruleName)
+
+	delete(e.compiledRules, ruleName)
 
 	return true
 }
@@ -1476,7 +1494,23 @@ func (e *Engine) Step() (bool, error) {
 		}
 	}
 
-	// Local bindings for this rule firing, initialized with token bindings
+	// Try precompiled RHS actions first (zero-allocation execution)
+	if compiled := e.compiledRules[dominant.Rule.Name]; compiled != nil {
+		ctx := e.acquireActionContext(dominant)
+		defer e.releaseActionContext(ctx)
+
+		for _, action := range compiled.Actions {
+			if err := action(ctx); err != nil {
+				return true, err
+			}
+			if e.halted {
+				return true, nil
+			}
+		}
+		return true, nil
+	}
+
+	// Fallback for uncompiled rules: local bindings initialized with token bindings
 	localBindings := dominant.Token.Bindings()
 
 	// Execute RHS actions

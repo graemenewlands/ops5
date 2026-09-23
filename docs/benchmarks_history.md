@@ -43,7 +43,9 @@ go test -bench=. -benchtime=1x -run=^$ ./benchmarks
 
 | Version / Tag | Release Date | Key Optimizations / Features | Manners-16 | Manners-32 | Manners-64 | Waltz-12 | Waltz-50 | Zebra-5 |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **`v0.3.0-dev` (Current)** | 2026-09-22 | Static Heuristic Join Ordering & Variable Binding Graph (OPT-4), Memoryless Terminal Join Shortcuts / Rete-NT (OPT-5), Cartesian elimination | **304 ms** (-83%) | **620 ms** (-81%) | **6.36 s** (-81%) | **14 ms** (-78%) | **51 ms** (-92%) | **0.09 ms** (-53%) |
+| Version / Tag | Release Date | Key Optimizations / Features | Manners-16 | Manners-32 | Manners-64 | Waltz-12 | Waltz-50 | Zebra-5 |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **`v0.3.0-dev` (Current)** | 2026-09-22 | Static Heuristic Join Ordering (OPT-4), Memoryless Terminal Joins / Rete-NT (OPT-5), Precompiled RHS Closures (OPT-6) | **316 ms** (-82%) | **598 ms** (-81%) | **6.22 s** (-82%) | **11 ms** (-83%) | **52 ms** (-92%) | **0.08 ms** (-58%) |
 | **[`v0.2.0`](#v020---2026-09-22-token-prefix-spine-sharing-binary-heap-agenda-alpha-constant-switch-nodes--zero-copy-bindings)** | 2026-09-22 | Token prefix spine sharing, binary heap agenda, alpha switch nodes, zero-copy bindings | 413 ms (-76%) | 761 ms (-76%) | 8.41 s (-75%) | 15 ms (-77%) | 52 ms (-92%) | 0.12 ms (-37%) |
 | **[`v0.1.0`](#v010---2026-09-22-baseline)** | 2026-09-22 | Dual-sided join hashing, Structural beta sharing, Left/Right node unlinking, Rule salience | 1.74 s | 3.23 s | 34.20 s | 65 ms | 662 ms | 0.19 ms |
 
@@ -51,10 +53,15 @@ go test -bench=. -benchtime=1x -run=^$ ./benchmarks
 
 ## Version Release Logs
 
-### `v0.3.0-dev` - 2026-09-22 (Static Heuristic Join Ordering & Memoryless Terminal Join Shortcuts / Rete-NT - OPT-4 & OPT-5)
+### `v0.3.0-dev` - 2026-09-22 (Static Heuristic Join Ordering, Memoryless Terminal Joins / Rete-NT, & Precompiled RHS Closures - OPT-4, OPT-5, OPT-6)
 
 * **Key Optimizations**:
-  - **Memoryless Terminal Join Shortcuts (Rete-NT - OPT-5)**: Completely eliminated redundant terminal `BetaMemory` instances for final LHS conditions across all beta node types (`JoinNode`, `NegativeJoinNode`, `ExistentialJoinNode`, `AccumulateNode`, `EvalNode`, `NccNode`). Terminal joins feed directly into `TerminalNode`, bypassing intermediate `bm.tokens` map storage, hashing, and locking. Saves thousands of allocations on rule activations and retractions while cutting Zebra memory usage to 70 KB.
+  - **Precompiled RHS Action Closures (`CompiledAction` - OPT-6)**: Precompiles all rule RHS actions (`make`, `modify`, `remove`, `write`, `bind`, `cbind`, `halt`, `build`) at rule compilation time into direct Go closures (`func(ctx *ActionContext) error`). Eliminates AST type-switch dispatching and string parsing on every rule execution cycle.
+  - **Zero-Allocation Action Context & `sync.Pool`**: Completely eliminates the per-cycle `dominant.Token.Bindings()` map copy (~19,381 maps allocated per run on Manners-64). Pooled `ActionContext` instances query variables directly up the token ancestor spine (`ctx.GetVariable`) with zero heap allocations, while dynamically modified variables (`bind`, `cbind`, `modify`) are tracked with lazy override maps that are cleared and recycled.
+  - **Compile-Time Attribute Ordering & Key Normalization**: Pre-computes normalized attribute strings and schema key sequences at rule compile time. Completely eliminates runtime `getOrderedAttributeKeys` calls, eliminating transient `seen` maps, `remaining` slices, and string sorting inside `make` and `modify`.
+  - **Specialized Arithmetic Evaluation Closures**: Unrolls `(compute ...)` expressions into precompiled operand evaluators and operator chains, specializing binary operations (`<var> + 1`) to eliminate loop overhead, type checks, and allocations.
+  - **Allocation-Free CE Timetag Indexing (`Token.WMEAt`)**: Evaluates numeric condition element target indices (e.g., `(modify 1 ...)` or `(remove 2)`) via direct pointer traversal up the token spine without intermediate slice materialization (`Token.WMEs()`).
+  - **Memoryless Terminal Join Shortcuts (Rete-NT - OPT-5)**: Completely eliminated redundant terminal `BetaMemory` instances for final LHS conditions across all beta node types (`JoinNode`, `NegativeJoinNode`, `ExistentialJoinNode`, `AccumulateNode`, `EvalNode`, `NccNode`). Terminal joins feed directly into `TerminalNode`, bypassing intermediate `bm.tokens` map storage, hashing, and locking. Saves thousands of allocations on rule activations and retractions while cutting Zebra memory usage to 68 KB.
   - **Lazy BetaMemory Promotion & Demotion**: Shared beta nodes that begin as memoryless terminal joins for shorter rules are dynamically promoted to create a downstream `BetaMemory` if a longer rule subsequently shares that condition prefix, catching up existing tokens seamlessly. When longer rules are excised, unused beta memories are pruned automatically.
   - **Static Heuristic Join Ordering (`OptimizeRuleJoinOrder` - OPT-4)**: Offline compile-time optimization pass over rule LHS conditions using a Variable Binding Graph to strictly eliminate intermediate Cartesian cross-products. Reorders LHS condition elements based on variable connectivity, constant selectivity, and early pruning.
   - **MEA Condition 1 Anchor Invariant**: Strictly anchors Condition 1 ($C_1$) at index 0 across all rules to preserve MEA conflict resolution semantics 100% faithfully.
@@ -70,12 +77,12 @@ go test -bench=. -benchtime=1x -run=^$ ./benchmarks
 ========================================================================================================================
 Benchmark    |   Cycles | WMEs Assert |   Quiescence |     Cycles/sec |       WMEs/sec |   Heap Alloc
 ------------------------------------------------------------------------------------------------------------------------
-Manners-16   |     2009 |       2744 |        345ms |         5829.9 |         7962.9 |  120257.02 KB (~117 MB)
-Manners-32   |     3914 |       4649 |        645ms |         6069.2 |         7208.9 |  252077.12 KB (~246 MB)
-Manners-64   |    19381 |      21152 |       6.363s |         3045.9 |         3324.3 | 2518451.66 KB (~2.40 GB)
-Waltz-12     |      608 |       1238 |         14ms |        42879.3 |        87310.2 |    5760.08 KB (~5.6 MB)
-Waltz-50     |     2268 |       4654 |         51ms |        44646.2 |        91615.2 |   22379.72 KB (~21.8 MB)
-Zebra-5      |        7 |         19 |       0.09ms |        44634.6 |       121151.1 |      71.38 KB (~70 KB)
+Manners-16   |     2009 |       2744 |        316ms |         6364.9 |         8693.5 |  119905.55 KB (~117 MB)
+Manners-32   |     3914 |       4649 |        598ms |         6544.4 |         7773.3 |  251547.08 KB (~245 MB)
+Manners-64   |    19381 |      21152 |       6.219s |         3116.5 |         3401.3 | 2515364.82 KB (~2.40 GB)
+Waltz-12     |      608 |       1238 |         11ms |        53330.9 |       108591.6 |    5646.16 KB (~5.5 MB)
+Waltz-50     |     2268 |       4654 |         52ms |        43720.1 |        89714.9 |   21963.70 KB (~21.4 MB)
+Zebra-5      |        7 |         19 |       0.08ms |        83804.2 |       227468.6 |      68.02 KB (~68 KB)
 ========================================================================================================================
 ```
 
