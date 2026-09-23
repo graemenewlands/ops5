@@ -2563,3 +2563,82 @@ func TestParseDOTStatement(t *testing.T) {
 	}
 }
 
+func TestParseNoReorderProperty(t *testing.T) {
+	tests := []struct {
+		name          string
+		input         string
+		wantNoReorder bool
+		wantSalience  int
+	}{
+		{
+			name: "square bracket no-reorder",
+			input: `(p test-bracket [no-reorder]
+				(c1 ^x 1)
+			-->
+				(halt)
+			)`,
+			wantNoReorder: true,
+			wantSalience:  0,
+		},
+		{
+			name: "square bracket no_reorder and salience",
+			input: `(p test-both [salience 500] [no_reorder]
+				(c1 ^x 1)
+			-->
+				(halt)
+			)`,
+			wantNoReorder: true,
+			wantSalience:  500,
+		},
+		{
+			name: "paren no-reorder",
+			input: `(p test-paren (no-reorder)
+				(c1 ^x 1)
+			-->
+				(halt)
+			)`,
+			wantNoReorder: true,
+			wantSalience:  0,
+		},
+		{
+			name: "declare no-reorder",
+			input: `(p test-declare (declare (salience 200) (no-reorder))
+				(c1 ^x 1)
+			-->
+				(halt)
+			)`,
+			wantNoReorder: true,
+			wantSalience:  200,
+		},
+		{
+			name: "default is false",
+			input: `(p test-default
+				(c1 ^x 1)
+			-->
+				(halt)
+			)`,
+			wantNoReorder: false,
+			wantSalience:  0,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			p, err := NewParser(tc.input)
+			if err != nil {
+				t.Fatalf("unexpected NewParser error: %v", err)
+			}
+			rule, err := p.ParseRule()
+			if err != nil {
+				t.Fatalf("unexpected ParseRule error: %v", err)
+			}
+			if rule.NoReorder != tc.wantNoReorder {
+				t.Errorf("got NoReorder %v, want %v", rule.NoReorder, tc.wantNoReorder)
+			}
+			if rule.Salience != tc.wantSalience {
+				t.Errorf("got Salience %d, want %d", rule.Salience, tc.wantSalience)
+			}
+		})
+	}
+}
+

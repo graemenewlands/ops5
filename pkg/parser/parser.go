@@ -258,6 +258,11 @@ func (p *Parser) parseRuleProperties(rule *model.Rule) error {
 					return fmt.Errorf("invalid salience value at line %d: %w", p.current.Line, err)
 				}
 				rule.Salience = sal
+			} else if propName == "no-reorder" || propName == "noreorder" || propName == "no_reorder" {
+				rule.NoReorder = true
+				if err := p.advance(); err != nil {
+					return err
+				}
 			} else {
 				return fmt.Errorf("unknown rule property [%s] at line %d", p.current.Value, p.current.Line)
 			}
@@ -295,6 +300,11 @@ func (p *Parser) parseRuleProperties(rule *model.Rule) error {
 							return fmt.Errorf("invalid salience value at line %d: %w", p.current.Line, err)
 						}
 						rule.Salience = sal
+					} else if decName == "no-reorder" || decName == "noreorder" || decName == "no_reorder" {
+						rule.NoReorder = true
+						if err := p.advance(); err != nil {
+							return err
+						}
 					} else {
 						return fmt.Errorf("unknown declaration (%s) at line %d", p.current.Value, p.current.Line)
 					}
@@ -310,6 +320,19 @@ func (p *Parser) parseRuleProperties(rule *model.Rule) error {
 
 			peekLower := strings.ToLower(p.peek.Value)
 			peekClean := strings.TrimSuffix(peekLower, ":")
+			if peekClean == "no-reorder" || peekClean == "noreorder" || peekClean == "no_reorder" {
+				if err := p.advance(); err != nil { // consume '('
+					return err
+				}
+				if err := p.advance(); err != nil { // consume 'no-reorder'
+					return err
+				}
+				rule.NoReorder = true
+				if _, err := p.expect(TokenRParen); err != nil {
+					return err
+				}
+				continue
+			}
 			if peekClean == "salience" {
 				lx := *p.lexer
 				tok3, _ := lx.NextToken()

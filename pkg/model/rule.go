@@ -11,6 +11,7 @@ type Rule struct {
 	Name        string              // Rule name
 	Docstring   string              // Optional documentation string
 	Salience    int                 // Priority weight (default 0). Higher salience dominates in conflict resolution.
+	NoReorder   bool                // If true, disables static join ordering optimization for this rule.
 	Conditions  []*ConditionElement // LHS conditions
 	Actions     []Action            // RHS actions
 	specificity int                 // Cached specificity score
@@ -89,4 +90,24 @@ func (r *Rule) String() string {
 	}
 	b.WriteString(")")
 	return b.String()
+}
+
+// Clone creates a shallow structural copy of the rule, copying conditions and actions slices.
+func (r *Rule) Clone() *Rule {
+	if r == nil {
+		return nil
+	}
+	cloned := &Rule{
+		Index:       r.Index,
+		Name:        r.Name,
+		Docstring:   r.Docstring,
+		Salience:    r.Salience,
+		NoReorder:   r.NoReorder,
+		Conditions:  make([]*ConditionElement, len(r.Conditions)),
+		Actions:     make([]Action, len(r.Actions)),
+		specificity: r.specificity,
+	}
+	copy(cloned.Conditions, r.Conditions)
+	copy(cloned.Actions, r.Actions)
+	return cloned
 }

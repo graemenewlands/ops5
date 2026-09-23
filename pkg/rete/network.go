@@ -42,28 +42,45 @@ type Network struct {
 	alphaMemPool  map[string]*AlphaMemory
 	betaNodePool  map[string]*betaNodeEntry
 	ruleBetaNodes map[string][]*betaNodeEntry
-	nextBetaMemID int
-	terminals     map[string]terminalInfo
-	ruleNodeInfos map[string]*RuleNodeInfo
+	nextBetaMemID        int
+	terminals            map[string]terminalInfo
+	ruleNodeInfos        map[string]*RuleNodeInfo
+	joinOptimizerEnabled bool
 }
 
 // NewNetwork creates an initialized Rete network.
 func NewNetwork() *Network {
 	net := &Network{
-		alphaRoot:     NewAlphaRootNode(),
-		rootBetaMem:   NewBetaMemory(),
-		alphaMemPool:  make(map[string]*AlphaMemory),
-		betaNodePool:  make(map[string]*betaNodeEntry),
-		ruleBetaNodes: make(map[string][]*betaNodeEntry),
-		nextBetaMemID: 1,
-		terminals:     make(map[string]terminalInfo),
-		ruleNodeInfos: make(map[string]*RuleNodeInfo),
+		alphaRoot:            NewAlphaRootNode(),
+		rootBetaMem:          NewBetaMemory(),
+		alphaMemPool:         make(map[string]*AlphaMemory),
+		betaNodePool:         make(map[string]*betaNodeEntry),
+		ruleBetaNodes:        make(map[string][]*betaNodeEntry),
+		nextBetaMemID:        1,
+		terminals:            make(map[string]terminalInfo),
+		ruleNodeInfos:        make(map[string]*RuleNodeInfo),
+		joinOptimizerEnabled: true,
 	}
 	net.rootBetaMem.id = 0
 	// Seed the root BetaMemory with the dummy token
 	net.rootBetaMem.LeftActivation(DummyRootToken(), TagAdd)
 	return net
 }
+
+// SetJoinOptimizer enables or disables the static join ordering heuristic optimizer.
+func (net *Network) SetJoinOptimizer(enabled bool) {
+	net.mu.Lock()
+	defer net.mu.Unlock()
+	net.joinOptimizerEnabled = enabled
+}
+
+// JoinOptimizerEnabled returns whether the static join ordering optimizer is enabled.
+func (net *Network) JoinOptimizerEnabled() bool {
+	net.mu.RLock()
+	defer net.mu.RUnlock()
+	return net.joinOptimizerEnabled
+}
+
 
 // OnAssert implements wm.Listener to route WME assertions into the alpha network.
 func (net *Network) OnAssert(wme *model.WME) {
@@ -459,14 +476,19 @@ func (net *Network) AddRuleWithWMEs(rule *model.Rule, listener ConflictSetListen
 		net.removeRuleLocked(rule.Name)
 	}
 
+	effectiveRule := rule
+	if net.joinOptimizerEnabled && !rule.NoReorder {
+		effectiveRule = OptimizeRuleJoinOrder(rule)
+	}
+
 	boundVariables := make(map[string]bool)
 	currBetaMem := net.rootBetaMem
 	ruleNodeInfo := &RuleNodeInfo{
-		Rule: rule,
+		Rule: effectiveRule,
 	}
 
-	for i, ce := range rule.Conditions {
-		isLast := (i == len(rule.Conditions) - 1)
+	for i, ce := range effectiveRule.Conditions {
+		isLast := (i == len(effectiveRule.Conditions) - 1)
 
 		if ce.IsTest {
 			ruleNodeInfo.AlphaMems = append(ruleNodeInfo.AlphaMems, nil)
@@ -496,7 +518,7 @@ func (net *Network) AddRuleWithWMEs(rule *model.Rule, listener ConflictSetListen
 			}
 
 			if isLast {
-				terminal := NewTerminalNode(rule, listener)
+				terminal := NewTerminalNode(effectiveRule, listener)
 				ruleNodeInfo.Terminal = terminal
 				nextBetaMem.AddSuccessor(terminal)
 				net.terminals[rule.Name] = terminalInfo{
@@ -636,7 +658,7 @@ func (net *Network) AddRuleWithWMEs(rule *model.Rule, listener ConflictSetListen
 			}
 
 			if isLast {
-				terminal := NewTerminalNode(rule, listener)
+				terminal := NewTerminalNode(effectiveRule, listener)
 				ruleNodeInfo.Terminal = terminal
 				nextBetaMem.AddSuccessor(terminal)
 				net.terminals[rule.Name] = terminalInfo{
@@ -737,7 +759,7 @@ func (net *Network) AddRuleWithWMEs(rule *model.Rule, listener ConflictSetListen
 		}
 
 		if isLast {
-			terminal := NewTerminalNode(rule, listener)
+			terminal := NewTerminalNode(effectiveRule, listener)
 			ruleNodeInfo.Terminal = terminal
 			nextBetaMem.AddSuccessor(terminal)
 			net.terminals[rule.Name] = terminalInfo{

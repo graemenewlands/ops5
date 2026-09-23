@@ -193,6 +193,17 @@ func (e *Engine) SetStrategy(strategy conflict.StrategyType) {
 	e.conflictSet.SetStrategy(strategy)
 }
 
+// SetJoinOptimizer enables or disables the static join ordering heuristic optimizer.
+func (e *Engine) SetJoinOptimizer(enabled bool) {
+	e.network.SetJoinOptimizer(enabled)
+}
+
+// JoinOptimizerEnabled returns whether the static join ordering optimizer is enabled.
+func (e *Engine) JoinOptimizerEnabled() bool {
+	return e.network.JoinOptimizerEnabled()
+}
+
+
 // WorkingMemory returns the underlying working memory manager.
 func (e *Engine) WorkingMemory() *wm.WorkingMemory {
 	return e.wm
@@ -468,8 +479,13 @@ func (e *Engine) RuleMatches(ruleName string) (*RuleMatchReport, bool) {
 		RuleName: ruleName,
 	}
 
+	effectiveRule := rule
+	if nodeInfo.Rule != nil {
+		effectiveRule = nodeInfo.Rule
+	}
+
 	// 1. Alpha matches for each condition element
-	for i, ce := range rule.Conditions {
+	for i, ce := range effectiveRule.Conditions {
 		cm := CEConditionMatch{
 			Index:      i + 1,
 			Condition:  ce.String(),
@@ -1687,6 +1703,8 @@ func substituteRuleBindings(rule *model.Rule, bindings map[string]model.Value) *
 	}
 
 	newRule := model.NewRule(substituteString(rule.Name, bindings))
+	newRule.Salience = rule.Salience
+	newRule.NoReorder = rule.NoReorder
 
 	for _, ce := range rule.Conditions {
 		newCE := &model.ConditionElement{

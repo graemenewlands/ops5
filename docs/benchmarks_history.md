@@ -43,12 +43,41 @@ go test -bench=. -benchtime=1x -run=^$ ./benchmarks
 
 | Version / Tag | Release Date | Key Optimizations / Features | Manners-16 | Manners-32 | Manners-64 | Waltz-12 | Waltz-50 | Zebra-5 |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **`v0.2.0`** | 2026-09-22 | Token prefix spine sharing, binary heap agenda, alpha switch nodes, zero-copy bindings | **413 ms** (-76%) | **761 ms** (-76%) | **8.41 s** (-75%) | **15 ms** (-77%) | **52 ms** (-92%) | **0.12 ms** (-37%) |
+| **`v0.3.0-dev` (Current)** | 2026-09-22 | Static Heuristic Join Ordering & Variable Binding Graph (OPT-4), Cartesian elimination, Action remapping | **302 ms** (-83%) | **620 ms** (-81%) | **6.47 s** (-81%) | **12 ms** (-82%) | **54 ms** (-92%) | **0.10 ms** (-47%) |
+| **[`v0.2.0`](#v020---2026-09-22-token-prefix-spine-sharing-binary-heap-agenda-alpha-constant-switch-nodes--zero-copy-bindings)** | 2026-09-22 | Token prefix spine sharing, binary heap agenda, alpha switch nodes, zero-copy bindings | 413 ms (-76%) | 761 ms (-76%) | 8.41 s (-75%) | 15 ms (-77%) | 52 ms (-92%) | 0.12 ms (-37%) |
 | **[`v0.1.0`](#v010---2026-09-22-baseline)** | 2026-09-22 | Dual-sided join hashing, Structural beta sharing, Left/Right node unlinking, Rule salience | 1.74 s | 3.23 s | 34.20 s | 65 ms | 662 ms | 0.19 ms |
 
 ---
 
 ## Version Release Logs
+
+### `v0.3.0-dev` - 2026-09-22 (Static Heuristic Join Ordering & Variable Binding Graph Optimizer - OPT-4)
+
+* **Key Optimizations**:
+  - **Static Heuristic Join Ordering (`OptimizeRuleJoinOrder`)**: Offline compile-time optimization pass over rule LHS conditions using a Variable Binding Graph to strictly eliminate intermediate Cartesian cross-products. Reorders LHS condition elements based on variable connectivity, constant selectivity, and early pruning.
+  - **MEA Condition 1 Anchor Invariant**: Strictly anchors Condition 1 ($C_1$) at index 0 across all rules to preserve MEA conflict resolution semantics 100% faithfully.
+  - **Variable Prerequisite Dependency Analysis**: Analyzes variable definitions vs prerequisite requirements across equality (`=`), non-equality (`<>`, `>`, `<`, `<=`, `>=`), arithmetic `(compute ...)`, and predicate filters `(test ...)`. Conditions with non-equality tests or compute expressions are never placed before their variables are bound.
+  - **Early Filter & Negation Pruning**: Prioritizes `(test ...)` filters and negated conditions (`-(...)`, NCC) as soon as their required variables are bound, pruning invalid or negated tokens before they enter downstream beta join nodes.
+  - **Accurate Action Index Remapping**: Automatically remaps 1-based condition element indices in `ModifyAction.TargetIndex`, `RemoveAction.TargetIndex`, and `SubstrExpr.ElementRef` (across `make`, `modify`, `write`, `bind`, and `openfile`) from original to reordered positions.
+  - **Degree-0 Variable Graph Isolation Protection**: Identifies condition elements that do not participate in any joins (degree 0 in the Variable Binding Graph), preserving their authored relative order without disruption from constant counts.
+  - **Opt-Out Controls**: Supports per-rule opt-out via `[no-reorder]`, `(no-reorder)`, `(declare (no-reorder))` headers, and global engine control via `engine.SetJoinOptimizer(false)` / `net.SetJoinOptimizer(false)`.
+
+#### Benchmark Suite Results
+
+```
+========================================================================================================================
+Benchmark    |   Cycles | WMEs Assert |   Quiescence |     Cycles/sec |       WMEs/sec |   Heap Alloc
+------------------------------------------------------------------------------------------------------------------------
+Manners-16   |     2009 |       2744 |        302ms |         6651.2 |         9084.5 |  120279.33 KB (~117 MB)
+Manners-32   |     3914 |       4649 |        620ms |         6315.7 |         7501.7 |  252159.33 KB (~246 MB)
+Manners-64   |    19381 |      21152 |       6.472s |         2994.7 |         3268.3 | 2518522.38 KB (~2.40 GB)
+Waltz-12     |      608 |       1238 |         12ms |        49705.2 |       101208.9 |    5881.61 KB (~5.7 MB)
+Waltz-50     |     2268 |       4654 |         54ms |        42155.4 |        86504.0 |   22848.73 KB (~22.3 MB)
+Zebra-5      |        7 |         19 |       0.10ms |        52730.7 |       143126.2 |      72.95 KB (~73 KB)
+========================================================================================================================
+```
+
+---
 
 ### `v0.2.0` - 2026-09-22 (Token Prefix Spine Sharing, Binary Heap Agenda, Alpha Constant Switch Nodes & Zero-Copy Bindings)
 
