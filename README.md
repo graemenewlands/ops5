@@ -114,7 +114,7 @@ flowchart TD
     BetaRoot --> JoinNode
     AlphaMem --> JoinNode
     JoinNode -->|Intermediate Join| BetaMem
-    JoinNode -->|Terminal Join Shortcut (Rete-NT)| TerminalNode
+    JoinNode -->|"Terminal Join Shortcut (Rete-NT)"| TerminalNode
     BetaMem --> TerminalNode
 
     TerminalNode -->|Activation Add/Remove| CS
