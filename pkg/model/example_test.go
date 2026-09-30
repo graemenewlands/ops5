@@ -43,3 +43,19 @@ func ExampleValue() {
 	// Output:
 	// Int: 42 (integer), Symbol: active (symbol), String: "OPS5 Production System" (string)
 }
+
+func ExampleValue_temporal() {
+	d := model.NewDate(20260929)
+	dt := model.NewDateTime("2026-09-29T14:30:00")
+	utc := model.NewDateUTCDirect("2026-09-29T21:30:00Z")
+
+	fmt.Printf("Date: %s (%s)\n", d, d.Type())
+	fmt.Printf("DateTime: %s (%s)\n", dt, dt.Type())
+	fmt.Printf("DateUTCTime: %s (%s)\n", utc, utc.Type())
+
+	// Output:
+	// Date: 20260929 (date)
+	// DateTime: 2026-09-29T14:30:00 (datetime)
+	// DateUTCTime: 2026-09-29T21:30:00Z (dateutctime)
+}
+

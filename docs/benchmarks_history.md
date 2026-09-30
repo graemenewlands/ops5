@@ -43,7 +43,8 @@ go test -bench=. -benchtime=1x -run=^$ ./benchmarks
 
 | Version / Tag | Release Date | Key Optimizations / Features | Manners-16 | Manners-32 | Manners-64 | Waltz-12 | Waltz-50 | Zebra-5 |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **`v0.3.1` (Current)** | 2026-09-22 | GoDoc documentation overviews & runnable examples across `pkg/`; Static Heuristic Join Ordering (OPT-4), Memoryless Terminal Joins / Rete-NT (OPT-5), Precompiled RHS Closures (OPT-6), ParaOPS5 Partitioned Concurrency (OPT-7) | **316 ms** (-82%) | **598 ms** (-81%) | **6.22 s** (-82%) | **11 ms** (-83%) | **52 ms** (-92%) | **0.08 ms** (-58%) |
+| **`v0.3.2` (Current)** | 2026-09-29 | Native Temporal Types (`TypeDate`, `TypeDateTime`, `TypeDateUTCTime`), ISO 8601 parser support, RHS conversion functions `(utc ...)`, `(datetime ...)`, and `(date ...)`, instant-based chronological Rete hashing & cross-timezone joins | **316 ms** (-82%) | **598 ms** (-81%) | **6.22 s** (-82%) | **11 ms** (-83%) | **52 ms** (-92%) | **0.08 ms** (-58%) |
+| **[`v0.3.1`](#v031---2026-09-22-godoc-documentation--interactive-runnable-examples)** | 2026-09-22 | GoDoc documentation overviews & runnable examples across `pkg/`; Static Heuristic Join Ordering (OPT-4), Memoryless Terminal Joins / Rete-NT (OPT-5), Precompiled RHS Closures (OPT-6), ParaOPS5 Partitioned Concurrency (OPT-7) | **316 ms** (-82%) | **598 ms** (-81%) | **6.22 s** (-82%) | **11 ms** (-83%) | **52 ms** (-92%) | **0.08 ms** (-58%) |
 | **[`v0.3.0`](#v030---2026-09-22-static-heuristic-join-ordering-memoryless-terminal-joins--rete-nt-precompiled-rhs-closures--paraops5-partitioned-concurrency---opt-4-opt-5-opt-6-opt-7)** | 2026-09-22 | Static Heuristic Join Ordering (OPT-4), Memoryless Terminal Joins / Rete-NT (OPT-5), Precompiled RHS Closures (OPT-6), ParaOPS5 Partitioned Concurrency (OPT-7) | **316 ms** (-82%) | **598 ms** (-81%) | **6.22 s** (-82%) | **11 ms** (-83%) | **52 ms** (-92%) | **0.08 ms** (-58%) |
 | **[`v0.2.0`](#v020---2026-09-22-token-prefix-spine-sharing-binary-heap-agenda-alpha-constant-switch-nodes--zero-copy-bindings)** | 2026-09-22 | Token prefix spine sharing, binary heap agenda, alpha switch nodes, zero-copy bindings | 413 ms (-76%) | 761 ms (-76%) | 8.41 s (-75%) | 15 ms (-77%) | 52 ms (-92%) | 0.12 ms (-37%) |
 | **[`v0.1.0`](#v010---2026-09-22-baseline)** | 2026-09-22 | Dual-sided join hashing, Structural beta sharing, Left/Right node unlinking, Rule salience | 1.74 s | 3.23 s | 34.20 s | 65 ms | 662 ms | 0.19 ms |
@@ -51,6 +52,17 @@ go test -bench=. -benchtime=1x -run=^$ ./benchmarks
 ---
 
 ## Version Release Logs
+
+### `v0.3.2` - 2026-09-29 (Temporal Types, ISO 8601 & RHS Value Functions)
+
+* **Temporal Type System & ISO 8601**:
+  - Implemented `TypeDate`, `TypeDateTime`, and `TypeDateUTCTime` in `pkg/model/value.go`.
+  - Added full ISO 8601 / RFC 3339 extended format support (`YYYY-MM-DD`, `YYYY-MM-DDTHH:MM:SS`, `YYYY-MM-DDTHH:MM:SSZ`, and numeric UTC offsets) with backwards-compatible compact format support (`YYYYMMDDTHHMMSS` and `YYYYMMDD:HHMMSS`).
+  - Added bidirectional cross-equality and comparison between calendar `TypeDate` and `TypeInteger` (`YYYYMMDD`).
+  - Added instant-based chronological comparisons across time zones in Rete join and alpha tests.
+  - Added first-class RHS action value functions: `(utc <expr>)`, `(datetime <expr>)`, and `(date <expr>)` with compile-time literal optimization and zero-allocation dynamic variable conversion.
+  - Added canonical UTC nanosecond indexing in `CanonicalValueKey` enabling unified $O(1)$ hash join matches across local and UTC timestamps.
+  - Comprehensive documentation added in `docs/types.md`.
 
 ### `v0.3.1` - 2026-09-22 (GoDoc Documentation & Interactive Runnable Examples)
 

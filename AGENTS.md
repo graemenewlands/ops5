@@ -1,7 +1,7 @@
 # OPS5 Go Runtime & Engine - Agent Context & Guidelines
 
 > **Project Identity**: High-performance, pure Go implementation of Charles Forgy's classic **OPS5** production rule system using the **Rete** pattern matching algorithm.
-> **Current Version**: `v0.3.1` (tagged, pushed, and indexed on `proxy.golang.org` / `pkg.go.dev`).
+> **Current Version**: `v0.3.2` (tagged, pushed, and indexed on `proxy.golang.org` / `pkg.go.dev`).
 
 ---
 

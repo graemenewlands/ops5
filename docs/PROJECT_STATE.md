@@ -1,7 +1,7 @@
 # OPS5 Engine: Project State & Handover Snapshot
 
-> **Date of Snapshot**: September 23, 2026  
-> **Active Release**: `v0.3.1`  
+> **Date of Snapshot**: September 29, 2026  
+> **Active Release**: `v0.3.2`  
 > **Status**: Complete, Verified, Benchmarked, and Parked  
 > **License**: Apache 2.0  
 
@@ -23,6 +23,7 @@ The project implements a modern, robust, and zero-allocation Go implementation o
 | **`v0.2.0`** | 2026-09-22 | Memory & agenda leap: Token prefix spine sharing (OPT-1, -84% heap allocations), indexed binary heap agenda (OPT-2, $O(1)$ dominant selection, 9.6x Waltz-50 speedup), alpha constant switch nodes (OPT-3, $O(1)$ constant dispatch). |
 | **`v0.3.0`** | 2026-09-22 | Compiler & concurrency leap: Static heuristic join ordering (OPT-4, eliminating Cartesian products), memoryless terminal joins / Rete-NT (OPT-5), precompiled RHS closures (OPT-6, zero-allocation action context), and ParaOPS5 partitioned multi-core concurrency (OPT-7). |
 | **`v0.3.1`** | 2026-09-23 | Developer experience & documentation: Comprehensive GoDoc package overviews (`doc.go`) and interactive runnable test examples (`example_test.go`) across all 8 library packages. |
+| **`v0.3.2`** | 2026-09-29 | Temporal types & ISO 8601: Native `TypeDate`, `TypeDateTime`, and `TypeDateUTCTime` support, RHS functions `(utc ...)`, `(datetime ...)`, and `(date ...)`, instant-based chronological joins, and type documentation. |
 
 ---
 

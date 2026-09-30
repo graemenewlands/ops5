@@ -11,8 +11,9 @@
 //     increasing Timetag, an element Class (e.g. "goal", "stage"), and a set of attribute-value pairs.
 //
 //   - Value: Strongly-typed, immutable representation of OPS5 data types, including symbols, integers,
-//     floating-point numbers, strings, booleans, variables, and vectors, as well as dynamic value
-//     functions such as (compute ...), (accept), (genatom), (litval ...), and (substr ...).
+//     floating-point numbers, strings, booleans, calendar dates (TypeDate), timestamps (TypeDateTime,
+//     TypeDateUTCTime), variables, and vectors, as well as dynamic value functions such as (compute ...),
+//     (accept), (genatom), (litval ...), (substr ...), (utc ...), (datetime ...), and (date ...).
 //
 //   - Rule: Represents a production rule containing a Left-Hand Side (LHS) list of ConditionElements
 //     and a Right-Hand Side (RHS) list of Actions, along with priority Salience and documentation metadata.
