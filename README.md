@@ -18,7 +18,7 @@ This engine provides a complete, modern execution environment for rule-based sys
    - [Unique Atom Generation (`genatom`)](docs/genatom.md)
    - [Attribute Index Resolution (`litval`)](docs/litval.md)
    - [Subsequence & Vector Extraction (`substr`)](docs/substr.md)
-   - [Type System & Temporal Types (`date`, `datetime`, `utc`)](docs/types.md)
+   - [Type System & Temporal Types (`date`, `datetime`, `utc`, date arithmetic)](docs/types.md)
    - [LHS Condition Elements & Pattern Matching](docs/lhs_patterns.md)
    - [Design Patterns & Programming Idioms](docs/idioms.md)
    - [Lexical Elements & Data Types](#lexical-elements--data-types)
@@ -477,6 +477,16 @@ Dynamically compiles and adds a production rule to production memory at runtime:
 )
 ```
 Variable references from the enclosing rule firing are substituted into the new rule definition before compilation. The newly built rule immediately joins the active Rete network and matches against existing working memory elements. Can also be invoked as a top-level directive.
+
+#### Temporal Functions & Date Math
+> [!NOTE]
+> For complete specifications, parsing rules, and examples, see the [Type System & Temporal Reference](docs/types.md).
+
+Built-in date/time creation and manipulation functions usable in `bind`, `make`, `modify`, `write`, `(compute ...)`, and LHS `(test ...)` condition elements:
+- **Type Conversions**: `(date <val>)`, `(datetime <val>)`, `(utc <val>)`
+- **Date/Time Arithmetic**: `(dayadd <date> <n>)`, `(monthadd <date> <n>)`, `(yearadd <date> <n>)`, `(houradd <dt> <n>)`, `(minuteadd <dt> <n>)`, `(secondsadd <dt> <n>)`
+- **End-of-Month & Leap-Year Clamping**: `monthadd` and `yearadd` clamp overflow days to the last day of the destination month (e.g. `Jan 31 + 1 month -> Feb 28`, `Feb 29 + 1 year -> Feb 28`).
+- **Interval & Unit Conversion**: `(datediff <d1> <d2>)` (returns `d1 - d2` in seconds), `(minutes <seconds>)`, `(hours <seconds>)`, `(days <seconds>)`.
 
 ---
 

@@ -59,3 +59,26 @@ func ExampleValue_temporal() {
 	// DateUTCTime: 2026-09-29T21:30:00Z (dateutctime)
 }
 
+func ExampleValue_temporalArithmetic() {
+	d := model.NewDate(20260131)
+	// MonthAdd applies end-of-month clamping (Jan 31 + 1 month -> Feb 28)
+	nextMonth, _ := d.MonthAdd(1)
+	nextWeek, _ := d.DayAdd(7)
+
+	t1 := model.NewDateTime("2026-09-29T10:00:00")
+	t2 := model.NewDateTime("2026-10-01T14:30:00")
+	diffSec, _ := t2.DateDiff(t1) // 189000 seconds
+	diffDays, _ := diffSec.Days()
+	diffHours, _ := diffSec.Hours()
+
+	fmt.Printf("Next Month: %s\n", nextMonth)
+	fmt.Printf("Next Week: %s\n", nextWeek)
+	fmt.Printf("Diff Days: %s, Diff Hours: %s\n", diffDays, diffHours)
+
+	// Output:
+	// Next Month: 20260228
+	// Next Week: 20260207
+	// Diff Days: 2, Diff Hours: 52
+}
+
+

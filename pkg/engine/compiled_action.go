@@ -207,22 +207,7 @@ func (e *Engine) compileValue(val model.Value) ValueEvaluator {
 		}
 	}
 	if val.IsTemporalExpr() {
-		te := val.TemporalExpr()
-		argEval := e.compileValue(te.Arg)
-		switch te.Op {
-		case "utc":
-			return func(ctx *ActionContext) model.Value {
-				return model.ConvertToDateUTCTime(argEval(ctx))
-			}
-		case "datetime":
-			return func(ctx *ActionContext) model.Value {
-				return model.ConvertToDateTime(argEval(ctx))
-			}
-		case "date":
-			return func(ctx *ActionContext) model.Value {
-				return model.ConvertToDate(argEval(ctx))
-			}
-		}
+		return e.compileTemporalExpr(val.TemporalExpr())
 	}
 
 	// Constant value (Integer, Float, Symbol, String, Boolean, etc.)
@@ -297,6 +282,176 @@ func (e *Engine) compileVector(val model.Value) ValueEvaluator {
 			}
 		}
 		return model.NewVector(resolved)
+	}
+}
+
+// compileTemporalExpr precompiles temporal function evaluators (date, datetime, utc, dayadd, datediff, minutes, etc.).
+func (e *Engine) compileTemporalExpr(te *model.TemporalExpr) ValueEvaluator {
+	op := model.NormalizeTemporalOp(te.Op)
+	argEvals := make([]ValueEvaluator, len(te.Args))
+	for i, arg := range te.Args {
+		argEvals[i] = e.compileValue(arg)
+	}
+
+	switch op {
+	case "utc":
+		return func(ctx *ActionContext) model.Value {
+			if len(argEvals) == 0 {
+				return model.NewSymbol("nil")
+			}
+			return model.ConvertToDateUTCTime(argEvals[0](ctx))
+		}
+	case "datetime":
+		return func(ctx *ActionContext) model.Value {
+			if len(argEvals) == 0 {
+				return model.NewSymbol("nil")
+			}
+			return model.ConvertToDateTime(argEvals[0](ctx))
+		}
+	case "date":
+		return func(ctx *ActionContext) model.Value {
+			if len(argEvals) == 0 {
+				return model.NewSymbol("nil")
+			}
+			return model.ConvertToDate(argEvals[0](ctx))
+		}
+	case "dayadd":
+		return func(ctx *ActionContext) model.Value {
+			if len(argEvals) < 2 {
+				return model.NewSymbol("nil")
+			}
+			d, n, err := model.ExtractTemporalAndInt(argEvals[0](ctx), argEvals[1](ctx))
+			if err != nil {
+				return model.NewSymbol("nil")
+			}
+			res, err := model.DayAdd(d, n)
+			if err != nil {
+				return model.NewSymbol("nil")
+			}
+			return res
+		}
+	case "monthadd":
+		return func(ctx *ActionContext) model.Value {
+			if len(argEvals) < 2 {
+				return model.NewSymbol("nil")
+			}
+			d, n, err := model.ExtractTemporalAndInt(argEvals[0](ctx), argEvals[1](ctx))
+			if err != nil {
+				return model.NewSymbol("nil")
+			}
+			res, err := model.MonthAdd(d, n)
+			if err != nil {
+				return model.NewSymbol("nil")
+			}
+			return res
+		}
+	case "yearadd":
+		return func(ctx *ActionContext) model.Value {
+			if len(argEvals) < 2 {
+				return model.NewSymbol("nil")
+			}
+			d, n, err := model.ExtractTemporalAndInt(argEvals[0](ctx), argEvals[1](ctx))
+			if err != nil {
+				return model.NewSymbol("nil")
+			}
+			res, err := model.YearAdd(d, n)
+			if err != nil {
+				return model.NewSymbol("nil")
+			}
+			return res
+		}
+	case "houradd":
+		return func(ctx *ActionContext) model.Value {
+			if len(argEvals) < 2 {
+				return model.NewSymbol("nil")
+			}
+			d, n, err := model.ExtractTemporalAndInt(argEvals[0](ctx), argEvals[1](ctx))
+			if err != nil {
+				return model.NewSymbol("nil")
+			}
+			res, err := model.HourAdd(d, n)
+			if err != nil {
+				return model.NewSymbol("nil")
+			}
+			return res
+		}
+	case "minuteadd":
+		return func(ctx *ActionContext) model.Value {
+			if len(argEvals) < 2 {
+				return model.NewSymbol("nil")
+			}
+			d, n, err := model.ExtractTemporalAndInt(argEvals[0](ctx), argEvals[1](ctx))
+			if err != nil {
+				return model.NewSymbol("nil")
+			}
+			res, err := model.MinuteAdd(d, n)
+			if err != nil {
+				return model.NewSymbol("nil")
+			}
+			return res
+		}
+	case "secondsadd":
+		return func(ctx *ActionContext) model.Value {
+			if len(argEvals) < 2 {
+				return model.NewSymbol("nil")
+			}
+			d, n, err := model.ExtractTemporalAndInt(argEvals[0](ctx), argEvals[1](ctx))
+			if err != nil {
+				return model.NewSymbol("nil")
+			}
+			res, err := model.SecondsAdd(d, n)
+			if err != nil {
+				return model.NewSymbol("nil")
+			}
+			return res
+		}
+	case "datediff":
+		return func(ctx *ActionContext) model.Value {
+			if len(argEvals) < 2 {
+				return model.NewSymbol("nil")
+			}
+			res, err := model.DateDiff(argEvals[0](ctx), argEvals[1](ctx))
+			if err != nil {
+				return model.NewSymbol("nil")
+			}
+			return res
+		}
+	case "minutes":
+		return func(ctx *ActionContext) model.Value {
+			if len(argEvals) == 0 {
+				return model.NewSymbol("nil")
+			}
+			res, err := model.MinutesValue(argEvals[0](ctx))
+			if err != nil {
+				return model.NewSymbol("nil")
+			}
+			return res
+		}
+	case "hours":
+		return func(ctx *ActionContext) model.Value {
+			if len(argEvals) == 0 {
+				return model.NewSymbol("nil")
+			}
+			res, err := model.HoursValue(argEvals[0](ctx))
+			if err != nil {
+				return model.NewSymbol("nil")
+			}
+			return res
+		}
+	case "days":
+		return func(ctx *ActionContext) model.Value {
+			if len(argEvals) == 0 {
+				return model.NewSymbol("nil")
+			}
+			res, err := model.DaysValue(argEvals[0](ctx))
+			if err != nil {
+				return model.NewSymbol("nil")
+			}
+			return res
+		}
+	}
+	return func(ctx *ActionContext) model.Value {
+		return model.NewSymbol("nil")
 	}
 }
 

@@ -2720,3 +2720,96 @@ func TestParseTemporalFunctions(t *testing.T) {
 	}
 }
 
+func TestParseTemporalComputeFunctions(t *testing.T) {
+	input := `(p test-temporal-utilities
+		(order ^order_date <od> ^ship_date <sd>)
+		-->
+		(bind <next_week> (dayadd <od> 7))
+		(bind <next_month> (monthadd <od> 1))
+		(bind <next_year> (yearadd <od> 1))
+		(bind <two_hours> (houradd <sd> 2))
+		(bind <fifteen_mins> (minuteadd <sd> 15))
+		(bind <thirty_secs> (secondsadd <sd> 30))
+		(bind <diff_sec> (datediff <sd> <od>))
+		(bind <diff_min> (minutes <diff_sec>))
+		(bind <diff_hr> (hours <diff_sec>))
+		(bind <diff_day> (days <diff_sec>))
+		(bind <const_add> (dayadd 20260929 5))
+		(bind <const_diff> (datediff 20260930 20260929))
+		(bind <const_days> (days 172800))
+	)`
+
+	p, err := NewParser(input)
+	if err != nil {
+		t.Fatalf("unexpected NewParser error: %v", err)
+	}
+
+	rule, err := p.ParseRule()
+	if err != nil {
+		t.Fatalf("unexpected ParseRule error: %v", err)
+	}
+
+	if len(rule.Actions) != 13 {
+		t.Fatalf("expected 13 actions, got %d", len(rule.Actions))
+	}
+
+	// Verify constant evaluations:
+	// action 10 is const_add: (dayadd 20260929 5) -> 20261004
+	bConstAdd := rule.Actions[10].(model.BindAction)
+	if bConstAdd.Value.Type() != model.TypeDate || bConstAdd.Value.DateInt() != 20261004 {
+		t.Fatalf("expected constant date 20261004, got %v", bConstAdd.Value)
+	}
+
+	// action 11 is const_diff: (datediff 20260930 20260929) -> 86400
+	bConstDiff := rule.Actions[11].(model.BindAction)
+	if bConstDiff.Value.Type() != model.TypeInteger || bConstDiff.Value.Raw().(int64) != 86400 {
+		t.Fatalf("expected constant int 86400, got %v", bConstDiff.Value)
+	}
+
+	// action 12 is const_days: (days 172800) -> 2
+	bConstDays := rule.Actions[12].(model.BindAction)
+	if bConstDays.Value.Type() != model.TypeInteger || bConstDays.Value.Raw().(int64) != 2 {
+		t.Fatalf("expected constant int 2, got %v", bConstDays.Value)
+	}
+
+	// Verify dynamic expressions:
+	bDayAdd := rule.Actions[0].(model.BindAction)
+	if !bDayAdd.Value.IsTemporalExpr() || bDayAdd.Value.TemporalExpr().Op != "dayadd" {
+		t.Fatalf("expected dayadd TemporalExpr, got %v", bDayAdd.Value)
+	}
+
+	bDiffSec := rule.Actions[6].(model.BindAction)
+	if !bDiffSec.Value.IsTemporalExpr() || bDiffSec.Value.TemporalExpr().Op != "datediff" {
+		t.Fatalf("expected datediff TemporalExpr, got %v", bDiffSec.Value)
+	}
+}
+
+func TestParseTemporalInConditionElements(t *testing.T) {
+	input := `(p test-temporal-ce
+		(order ^created_at <ca> ^completed_at <cp>)
+		(test ((datediff <cp> <ca>) > 3600))
+		(test ((days (datediff <cp> <ca>)) >= 2))
+		(test (> (datediff <cp> <ca>) 1800))
+		-->
+		(make delayed-order ^order_id 1)
+	)`
+
+	p, err := NewParser(input)
+	if err != nil {
+		t.Fatalf("unexpected NewParser error: %v", err)
+	}
+
+	rule, err := p.ParseRule()
+	if err != nil {
+		t.Fatalf("unexpected ParseRule error: %v", err)
+	}
+
+	if len(rule.Conditions) != 4 {
+		t.Fatalf("expected 4 conditions, got %d", len(rule.Conditions))
+	}
+	if !rule.Conditions[1].IsTest || !rule.Conditions[2].IsTest || !rule.Conditions[3].IsTest {
+		t.Fatalf("expected conditions 1, 2, and 3 to be test CEs")
+	}
+}
+
+

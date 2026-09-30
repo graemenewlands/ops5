@@ -176,15 +176,34 @@ func analyzeCondition(ce *model.ConditionElement, origIndex, origPosIndex int, p
 }
 
 func collectComputeVariables(v model.Value, varMap map[string]bool) {
-	if !v.IsCompute() {
+	if v.IsCompute() {
+		comp := v.ComputeExpr()
+		for _, op := range comp.Operands {
+			if op.IsVariable() {
+				varMap[op.VariableName()] = true
+			} else if op.IsCompute() {
+				collectComputeVariables(op, varMap)
+			} else if op.IsTemporalExpr() {
+				collectTemporalVariables(op, varMap)
+			}
+		}
+	} else if v.IsTemporalExpr() {
+		collectTemporalVariables(v, varMap)
+	}
+}
+
+func collectTemporalVariables(v model.Value, varMap map[string]bool) {
+	if !v.IsTemporalExpr() {
 		return
 	}
-	comp := v.ComputeExpr()
-	for _, op := range comp.Operands {
-		if op.IsVariable() {
-			varMap[op.VariableName()] = true
-		} else if op.IsCompute() {
-			collectComputeVariables(op, varMap)
+	te := v.TemporalExpr()
+	for _, arg := range te.Args {
+		if arg.IsVariable() {
+			varMap[arg.VariableName()] = true
+		} else if arg.IsCompute() {
+			collectComputeVariables(arg, varMap)
+		} else if arg.IsTemporalExpr() {
+			collectTemporalVariables(arg, varMap)
 		}
 	}
 }
@@ -464,6 +483,14 @@ func remapSubstrInValue(v model.Value, posRemap map[int]int) model.Value {
 			newOps[i] = remapSubstrInValue(op, posRemap)
 		}
 		return model.NewCompute(newOps, comp.Operators)
+	}
+	if v.IsTemporalExpr() {
+		te := v.TemporalExpr()
+		newArgs := make([]model.Value, len(te.Args))
+		for i, a := range te.Args {
+			newArgs[i] = remapSubstrInValue(a, posRemap)
+		}
+		return model.NewTemporalExpr(te.Op, newArgs...)
 	}
 	return v
 }

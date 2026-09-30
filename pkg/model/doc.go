@@ -13,7 +13,9 @@
 //   - Value: Strongly-typed, immutable representation of OPS5 data types, including symbols, integers,
 //     floating-point numbers, strings, booleans, calendar dates (TypeDate), timestamps (TypeDateTime,
 //     TypeDateUTCTime), variables, and vectors, as well as dynamic value functions such as (compute ...),
-//     (accept), (genatom), (litval ...), (substr ...), (utc ...), (datetime ...), and (date ...).
+//     (accept), (genatom), (litval ...), (substr ...), (date ...), (datetime ...), (utc ...), (dayadd ...),
+//     (monthadd ...), (yearadd ...), (houradd ...), (minuteadd ...), (secondsadd ...), (datediff ...),
+//     (minutes ...), (hours ...), and (days ...).
 //
 //   - Rule: Represents a production rule containing a Left-Hand Side (LHS) list of ConditionElements
 //     and a Right-Hand Side (RHS) list of Actions, along with priority Salience and documentation metadata.

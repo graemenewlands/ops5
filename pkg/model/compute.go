@@ -150,5 +150,11 @@ func ResolveValue(val Value, bindings map[string]Value) Value {
 			return res
 		}
 	}
+	if val.IsTemporalExpr() {
+		res, err := EvaluateTemporalExpr(val.TemporalExpr(), bindings)
+		if err == nil {
+			return res
+		}
+	}
 	return val
 }

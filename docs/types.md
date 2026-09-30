@@ -260,3 +260,94 @@ func main() {
 	fmt.Printf("Instant Equal: %v\n", ct.Equal(sct)) // true
 }
 ```
+
+---
+
+## 8. Temporal Arithmetic & Date Math Utility Functions
+
+OPS5 rules and Go applications can perform full date arithmetic, calculate time differences, and convert between units using built-in utility functions.
+
+### Utility Function Reference
+
+| Function / Verb | Arguments | Output Type | Description |
+| :--- | :--- | :--- | :--- |
+| `dayadd` / `day-add` | `<date/datetime> <intN>` | `Date` / `DateTime` | Adds `intN` days (positive or negative). Preserves type. |
+| `monthadd` / `month-add` | `<date/datetime> <intN>` | `Date` / `DateTime` | Adds `intN` months (positive or negative) with **end-of-month clamping**. |
+| `yearadd` / `year-add` | `<date/datetime> <intN>` | `Date` / `DateTime` | Adds `intN` years (positive or negative) with **leap-year clamping**. |
+| `houradd` / `hour-add` | `<date/datetime> <intN>` | `DateTime` | Adds `intN` hours (positive or negative). Promotes `Date` to `DateTime`. |
+| `minuteadd` / `minute-add` | `<date/datetime> <intN>` | `DateTime` | Adds `intN` minutes (positive or negative). Promotes `Date` to `DateTime`. |
+| `secondsadd` / `secondadd` | `<date/datetime> <intN>` | `DateTime` | Adds `intN` seconds (positive or negative). Promotes `Date` to `DateTime`. |
+| `datediff` / `date-diff` | `<d1> <d2>` | `Integer` | Computes chronological difference `d1 - d2` in seconds. |
+| `minutes` | `<seconds>` | `Integer` / `Float` | Converts seconds to minutes (`seconds / 60`). |
+| `hours` | `<seconds>` | `Integer` / `Float` | Converts seconds to hours (`seconds / 3600`). |
+| `days` | `<seconds>` | `Integer` / `Float` | Converts seconds to days (`seconds / 86400`). |
+
+> [!NOTE]
+> **End-of-Month & Leap-Year Clamping**:
+> In accordance with standard enterprise SQL, Java (`java.time`), and Python (`dateutil.relativedelta`) conventions, `monthadd` and `yearadd` apply end-of-month clamping so dates never overflow into the subsequent month:
+> * `2026-01-31` + 1 month $\rightarrow$ `2026-02-28` *(or `2024-02-29` in a leap year)*
+> * `2026-08-31` + 1 month $\rightarrow$ `2026-09-30`
+> * `2026-03-31` - 1 month $\rightarrow$ `2026-02-28`
+> * `2024-02-29` (Leap Day) + 1 year $\rightarrow$ `2025-02-28`
+>
+> **Flexible Argument Order & Constant Folding**:
+> For all addition functions (`dayadd`, `monthadd`, `yearadd`, `houradd`, `minuteadd`, `secondsadd`), arguments can be provided in **either order**: `(dayadd <date> 7)` or `(dayadd 7 <date>)`.
+> If all arguments are constants (e.g. `(dayadd 20260929 5)` or `(days 172800)`), the parser folds them immediately at compile-time with zero runtime overhead.
+
+### Usage in OPS5 Rules
+
+#### 1. RHS Actions (`bind`, `make`, `modify`)
+
+```lisp
+(p process-ticket
+    (ticket ^created <ct> ^resolved <rt>)
+    (test ((datediff <rt> <ct>) > 7200))
+    -->
+    (bind <diff_sec> (datediff <rt> <ct>))
+    (bind <diff_hrs> (hours <diff_sec>))
+    (bind <diff_mins> (minutes <diff_sec>))
+    (bind <due_date> (dayadd <ct> 3))
+    (make ticket-report
+          ^diff_sec <diff_sec>
+          ^hours <diff_hrs>
+          ^mins <diff_mins>
+          ^due <due_date>))
+```
+
+#### 2. Inside `(compute ...)` Expressions
+
+Temporal functions can be seamlessly nested inside `(compute ...)` arithmetic chains:
+
+```lisp
+(bind <overtime_hours> (compute (hours (datediff <end> <start>)) - 8))
+(bind <next_cycle> (compute (days <diff>) + 1))
+```
+
+#### 3. Inside LHS `(test ...)` Condition Elements
+
+```lisp
+(p flag-delayed-shipment
+    (shipment ^order_date <od> ^ship_date <sd>)
+    (test ((days (datediff <sd> <od>)) >= 3))
+    -->
+    (make reminder ^status delayed ^order <od>))
+```
+
+### Programmatic Go API
+
+All temporal operations are also available as strongly-typed methods on `model.Value`:
+
+```go
+d := model.NewDate(20260929)
+dNextWeek, _ := d.DayAdd(7)     // 20261006 (TypeDate)
+dLastMonth, _ := d.MonthAdd(-1)  // 20260829 (TypeDate)
+
+t1 := model.NewDateTime("2026-09-29T10:00:00")
+t2 := model.NewDateTime("2026-10-01T14:30:00")
+
+diffSec, _ := t2.DateDiff(t1)   // 189000 seconds
+diffDays, _ := diffSec.Days()   // 2 days
+diffHours, _ := diffSec.Hours() // 52 hours
+diffMins, _ := diffSec.Minutes()// 3150 minutes
+```
+

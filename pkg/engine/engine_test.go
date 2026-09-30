@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/graemenewlands/ops5/pkg/model"
+	"github.com/graemenewlands/ops5/pkg/parser"
 )
 
 func TestEngineGoalProgression(t *testing.T) {
@@ -1620,6 +1621,169 @@ func TestEngineTemporalRHSExecution(t *testing.T) {
 		t.Fatalf("expected DateInt() 20260929, got %d", dd.DateInt())
 	}
 }
+
+func TestEngineTemporalUtilityExecution(t *testing.T) {
+	eng := New()
+
+	rule := model.NewRule("calculate-shipping-intervals")
+	ce := model.NewPositiveCE("shipment").
+		AddEqualTest("order_date", model.NewVariable("<od>")).
+		AddEqualTest("order_time", model.NewVariable("<ot>")).
+		AddEqualTest("delivery_time", model.NewVariable("<dt>"))
+	rule.AddCondition(ce)
+
+	// Add LHS test condition: delivery_time must be > 3600 seconds after order_time
+	testCE := model.NewTestCE(model.NewEvalTest(model.EvalComparison{
+		Left:     model.NewTemporalExpr("datediff", model.NewVariable("<dt>"), model.NewVariable("<ot>")),
+		Op:       model.OpGreater,
+		Right:    model.NewInt(3600),
+		HasRight: true,
+	}))
+	rule.AddCondition(testCE)
+
+	rule.AddAction(model.BindAction{
+		Variable: "<diff>",
+		Value:    model.NewTemporalExpr("datediff", model.NewVariable("<dt>"), model.NewVariable("<ot>")),
+	})
+	rule.AddAction(model.BindAction{
+		Variable: "<diff_days>",
+		Value:    model.NewTemporalExpr("days", model.NewVariable("<diff>")),
+	})
+	rule.AddAction(model.BindAction{
+		Variable: "<diff_hours>",
+		Value:    model.NewTemporalExpr("hours", model.NewVariable("<diff>")),
+	})
+	rule.AddAction(model.BindAction{
+		Variable: "<diff_mins>",
+		Value:    model.NewTemporalExpr("minutes", model.NewVariable("<diff>")),
+	})
+	rule.AddAction(model.BindAction{
+		Variable: "<next_week>",
+		Value:    model.NewTemporalExpr("dayadd", model.NewVariable("<od>"), model.NewInt(7)),
+	})
+	rule.AddAction(model.MakeAction{
+		Class: "shipping_report",
+		Attributes: map[string]model.Value{
+			"elapsed_days":  model.NewVariable("<diff_days>"),
+			"elapsed_hours": model.NewVariable("<diff_hours>"),
+			"elapsed_mins":  model.NewVariable("<diff_mins>"),
+			"next_week":     model.NewVariable("<next_week>"),
+		},
+	})
+
+	eng.AddRule(rule)
+
+	// Order placed at 2026-09-29T10:00:00, delivered 2 days later at 2026-10-01T14:30:00 (52.5 hours = 189000 seconds)
+	eng.WorkingMemory().Make("shipment", map[string]model.Value{
+		"order_date":    model.NewDate(20260929),
+		"order_time":    model.NewDateTime("2026-09-29T10:00:00"),
+		"delivery_time": model.NewDateTime("2026-10-01T14:30:00"),
+	})
+
+	cycles, err := eng.Run(10)
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	if cycles != 1 {
+		t.Fatalf("expected 1 cycle, got %d", cycles)
+	}
+
+	reports := eng.FindWMEsMatching(model.NewPositiveCE("shipping_report"))
+	if len(reports) != 1 {
+		t.Fatalf("expected 1 shipping_report WME, got %d", len(reports))
+	}
+
+	// 189000 seconds:
+	// days: 189000 / 86400 = 2
+	// hours: 189000 / 3600 = 52
+	// minutes: 189000 / 60 = 3150
+	// next_week: 20260929 + 7 days = 20261006
+	daysVal, _ := reports[0].Get("elapsed_days")
+	if daysVal.Raw().(int64) != 2 {
+		t.Fatalf("expected elapsed_days 2, got %v", daysVal)
+	}
+
+	hoursVal, _ := reports[0].Get("elapsed_hours")
+	if hoursVal.Raw().(int64) != 52 {
+		t.Fatalf("expected elapsed_hours 52, got %v", hoursVal)
+	}
+
+	minsVal, _ := reports[0].Get("elapsed_mins")
+	if minsVal.Raw().(int64) != 3150 {
+		t.Fatalf("expected elapsed_mins 3150, got %v", minsVal)
+	}
+
+	nwVal, _ := reports[0].Get("next_week")
+	if nwVal.DateInt() != 20261006 {
+		t.Fatalf("expected next_week 20261006, got %v", nwVal)
+	}
+}
+
+func TestEngineTemporalOPS5SyntaxExecution(t *testing.T) {
+	ruleSrc := `(p process-ticket
+		(ticket ^created <ct> ^resolved <rt>)
+		(test ((datediff <rt> <ct>) > 7200))
+		-->
+		(bind <diff> (datediff <rt> <ct>))
+		(bind <hours> (hours <diff>))
+		(bind <mins> (minutes <diff>))
+		(bind <due_date> (dayadd <ct> 3))
+		(make ticket-report ^diff_sec <diff> ^hours <hours> ^mins <mins> ^due <due_date>)
+	)`
+
+	p, err := parser.NewParser(ruleSrc)
+	if err != nil {
+		t.Fatalf("parser err: %v", err)
+	}
+	rule, err := p.ParseRule()
+	if err != nil {
+		t.Fatalf("rule parse err: %v", err)
+	}
+
+	eng := New()
+	eng.AddRule(rule)
+
+	// Assert ticket created at 10:00:00, resolved at 14:00:00 (4 hours = 14400 seconds)
+	eng.WorkingMemory().Make("ticket", map[string]model.Value{
+		"created":  model.NewDateTime("2026-09-29T10:00:00"),
+		"resolved": model.NewDateTime("2026-09-29T14:00:00"),
+	})
+
+	cycles, err := eng.Run(10)
+	if err != nil {
+		t.Fatalf("run error: %v", err)
+	}
+	if cycles != 1 {
+		t.Fatalf("expected 1 cycle, got %d", cycles)
+	}
+
+	reports := eng.FindWMEsMatching(model.NewPositiveCE("ticket-report"))
+	if len(reports) != 1 {
+		t.Fatalf("expected 1 ticket-report, got %d", len(reports))
+	}
+
+	diffVal, _ := reports[0].Get("diff_sec")
+	if diffVal.Raw().(int64) != 14400 {
+		t.Fatalf("expected diff_sec 14400, got %v", diffVal)
+	}
+
+	hoursVal, _ := reports[0].Get("hours")
+	if hoursVal.Raw().(int64) != 4 {
+		t.Fatalf("expected hours 4, got %v", hoursVal)
+	}
+
+	minsVal, _ := reports[0].Get("mins")
+	if minsVal.Raw().(int64) != 240 {
+		t.Fatalf("expected mins 240, got %v", minsVal)
+	}
+
+	dueVal, _ := reports[0].Get("due")
+	if dueVal.String() != "2026-10-02T10:00:00" {
+		t.Fatalf("expected due 2026-10-02T10:00:00, got %v", dueVal)
+	}
+}
+
+
 
 
 

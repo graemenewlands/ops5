@@ -1316,6 +1316,9 @@ func (p *Parser) parseTestOperand() (model.Value, error) {
 		if strings.EqualFold(p.peek.Value, "compute") {
 			return p.parseCompute()
 		}
+		if p.isRHSFunction() {
+			return p.parseRHSFunction()
+		}
 		// Sub-expression in parens: could be (<val>) or ((compute ...))
 		if err := p.advance(); err != nil {
 			return model.NewInt(0), err
@@ -1444,12 +1447,12 @@ func (p *Parser) parseCompute() (model.Value, error) {
 }
 
 func (p *Parser) isRHSFunction() bool {
-	if p.current.Type != TokenLParen {
+	if p.current.Type != TokenLParen || p.peek.Type != TokenSymbol {
 		return false
 	}
 	sub := strings.ToLower(p.peek.Value)
 	return sub == "compute" || sub == "accept" || sub == "acceptline" || sub == "genatom" || sub == "litval" || sub == "substr" ||
-		sub == "date" || sub == "datetime" || sub == "utc"
+		model.IsTemporalOp(sub)
 }
 
 func (p *Parser) parseRHSFunction() (model.Value, error) {
@@ -1467,13 +1470,10 @@ func (p *Parser) parseRHSFunction() (model.Value, error) {
 		return p.parseLitval()
 	case "substr":
 		return p.ParseSubstr()
-	case "date":
-		return p.parseTemporalFunction("date")
-	case "datetime":
-		return p.parseTemporalFunction("datetime")
-	case "utc":
-		return p.parseTemporalFunction("utc")
 	default:
+		if model.IsTemporalOp(sub) {
+			return p.parseTemporalFunction(model.NormalizeTemporalOp(sub))
+		}
 		return model.NewSymbol("nil"), fmt.Errorf("unknown RHS function: %s", sub)
 	}
 }
@@ -1487,38 +1487,56 @@ func (p *Parser) parseTemporalFunction(op string) (model.Value, error) {
 		return model.NewSymbol("nil"), err
 	}
 
-	var arg model.Value
-	if p.isRHSFunction() {
-		arg, err = p.parseRHSFunction()
-		if err != nil {
-			return model.NewSymbol("nil"), err
+	var args []model.Value
+	for p.current.Type != TokenRParen && p.current.Type != TokenEOF {
+		if p.isRHSFunction() {
+			subFn, err := p.parseRHSFunction()
+			if err != nil {
+				return model.NewSymbol("nil"), err
+			}
+			args = append(args, subFn)
+		} else if p.current.Type == TokenVariable || p.current.Type == TokenSymbol || p.current.Type == TokenNumber || p.current.Type == TokenString {
+			args = append(args, TokenToValue(p.current))
+			if err := p.advance(); err != nil {
+				return model.NewSymbol("nil"), err
+			}
+		} else {
+			return model.NewSymbol("nil"), fmt.Errorf("unexpected token in %s at line %d: %s (%q)", op, p.current.Line, p.current.Type, p.current.Value)
 		}
-	} else if p.current.Type == TokenVariable || p.current.Type == TokenSymbol || p.current.Type == TokenNumber || p.current.Type == TokenString {
-		arg = TokenToValue(p.current)
-		if err := p.advance(); err != nil {
-			return model.NewSymbol("nil"), err
-		}
-	} else {
-		return model.NewSymbol("nil"), fmt.Errorf("unexpected token in %s at line %d: %s (%q)", op, p.current.Line, p.current.Type, p.current.Value)
 	}
 
 	if _, err := p.expect(TokenRParen); err != nil {
 		return model.NewSymbol("nil"), fmt.Errorf("expected ')' closing %s at line %d: %w", op, verbTok.Line, err)
 	}
 
-	// If argument is a constant literal, evaluate immediately
-	if !arg.IsVariable() && !arg.IsCompute() && !arg.IsAccept() && !arg.IsGenatom() && !arg.IsLitval() && !arg.IsSubstr() && !arg.IsTemporalExpr() {
-		switch op {
-		case "utc":
-			return model.ConvertToDateUTCTime(arg), nil
-		case "datetime":
-			return model.ConvertToDateTime(arg), nil
-		case "date":
-			return model.ConvertToDate(arg), nil
+	// Validate argument counts
+	switch op {
+	case "utc", "datetime", "date", "minutes", "hours", "days":
+		if len(args) != 1 {
+			return model.NewSymbol("nil"), fmt.Errorf("%s expects 1 argument, got %d at line %d", op, len(args), verbTok.Line)
+		}
+	case "dayadd", "monthadd", "yearadd", "houradd", "minuteadd", "secondsadd", "datediff":
+		if len(args) != 2 {
+			return model.NewSymbol("nil"), fmt.Errorf("%s expects 2 arguments, got %d at line %d", op, len(args), verbTok.Line)
 		}
 	}
 
-	return model.NewTemporalExpr(op, arg), nil
+	// If all arguments are constant literals, evaluate immediately at compile-time
+	allConst := true
+	for _, a := range args {
+		if a.IsVariable() || a.IsCompute() || a.IsAccept() || a.IsGenatom() || a.IsLitval() || a.IsSubstr() || a.IsTemporalExpr() {
+			allConst = false
+			break
+		}
+	}
+	if allConst {
+		res, err := model.EvaluateTemporalExpr(&model.TemporalExpr{Op: op, Args: args}, nil)
+		if err == nil {
+			return res, nil
+		}
+	}
+
+	return model.NewTemporalExpr(op, args...), nil
 }
 
 func (p *Parser) parseSubstrArg() (model.Value, error) {

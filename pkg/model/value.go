@@ -324,17 +324,26 @@ func ParseDateString(s string) (Value, error) {
 	return ParseDate(int64(year*10000 + month*100 + day))
 }
 
-// TemporalExpr represents a dynamic (date ...), (datetime ...), or (utc ...) function call.
+// TemporalExpr represents a dynamic temporal function call (date, datetime, utc, dayadd, datediff, minutes, etc.).
 type TemporalExpr struct {
-	Op  string // "date", "datetime", "utc"
-	Arg Value
+	Op   string  // "date", "datetime", "utc", "dayadd", "datediff", "minutes", "hours", "days", etc.
+	Arg  Value   // Primary argument (first argument)
+	Args []Value // All arguments
 }
 
 // NewTemporalExpr creates a new TemporalExpr Value.
-func NewTemporalExpr(op string, arg Value) Value {
+func NewTemporalExpr(op string, args ...Value) Value {
+	var primary Value
+	if len(args) > 0 {
+		primary = args[0]
+	}
 	return Value{
 		typ: TypeTemporalExpr,
-		val: &TemporalExpr{Op: strings.ToLower(op), Arg: arg},
+		val: &TemporalExpr{
+			Op:   strings.ToLower(op),
+			Arg:  primary,
+			Args: args,
+		},
 	}
 }
 
@@ -743,7 +752,18 @@ func (v Value) String() string {
 		return t.UTC().Format("2006-01-02T15:04:05Z")
 	case TypeTemporalExpr:
 		te := v.val.(*TemporalExpr)
-		return fmt.Sprintf("(%s %s)", te.Op, te.Arg.String())
+		if len(te.Args) == 0 {
+			return fmt.Sprintf("(%s)", te.Op)
+		}
+		var b strings.Builder
+		b.WriteString("(")
+		b.WriteString(te.Op)
+		for _, arg := range te.Args {
+			b.WriteString(" ")
+			b.WriteString(arg.String())
+		}
+		b.WriteString(")")
+		return b.String()
 	default:
 		return fmt.Sprintf("%v", v.val)
 	}
@@ -762,7 +782,15 @@ func (v Value) Equal(o Value) bool {
 		if v.typ == TypeTemporalExpr {
 			t1 := v.val.(*TemporalExpr)
 			t2 := o.val.(*TemporalExpr)
-			return t1.Op == t2.Op && t1.Arg.Equal(t2.Arg)
+			if t1.Op != t2.Op || len(t1.Args) != len(t2.Args) {
+				return false
+			}
+			for i := range t1.Args {
+				if !t1.Args[i].Equal(t2.Args[i]) {
+					return false
+				}
+			}
+			return true
 		}
 		if v.typ == TypeGenatom {
 			return true
