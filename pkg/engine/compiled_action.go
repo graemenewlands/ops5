@@ -206,6 +206,24 @@ func (e *Engine) compileValue(val model.Value) ValueEvaluator {
 			return ctx.Engine.evaluateSubstrLocked(se, ctx.AllBindings())
 		}
 	}
+	if val.IsTemporalExpr() {
+		te := val.TemporalExpr()
+		argEval := e.compileValue(te.Arg)
+		switch te.Op {
+		case "utc":
+			return func(ctx *ActionContext) model.Value {
+				return model.ConvertToDateUTCTime(argEval(ctx))
+			}
+		case "datetime":
+			return func(ctx *ActionContext) model.Value {
+				return model.ConvertToDateTime(argEval(ctx))
+			}
+		case "date":
+			return func(ctx *ActionContext) model.Value {
+				return model.ConvertToDate(argEval(ctx))
+			}
+		}
+	}
 
 	// Constant value (Integer, Float, Symbol, String, Boolean, etc.)
 	return func(ctx *ActionContext) model.Value {

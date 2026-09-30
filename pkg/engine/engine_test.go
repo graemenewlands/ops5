@@ -1565,6 +1565,62 @@ func TestEngineSubstrRuleExecution(t *testing.T) {
 	}
 }
 
+func TestEngineTemporalRHSExecution(t *testing.T) {
+	eng := New()
+	var logBuf bytes.Buffer
+	eng.SetOutputWriter(&logBuf)
+
+	// Rule:
+	// (p sync-order
+	//    (order ^current_time <ct>)
+	//    -->
+	//    (make supplier_order ^supplier_current_time (utc <ct>) ^due_date (date 20260929))
+	// )
+	rule := model.NewRule("sync-order")
+	ce := model.NewPositiveCE("order").
+		AddEqualTest("current_time", model.NewVariable("<ct>"))
+	rule.AddCondition(ce)
+	rule.AddAction(model.MakeAction{
+		Class: "supplier_order",
+		Attributes: map[string]model.Value{
+			"supplier_current_time": model.NewTemporalExpr("utc", model.NewVariable("<ct>")),
+			"due_date":              model.NewTemporalExpr("date", model.NewInt(20260929)),
+		},
+	})
+	eng.AddRule(rule)
+
+	// Assert order with local DateTime
+	eng.WorkingMemory().Make("order", map[string]model.Value{
+		"current_time": model.NewDateTime("2026-09-29T19:53:58"),
+	})
+
+	cycles, err := eng.Run(10)
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	if cycles != 1 {
+		t.Fatalf("expected 1 cycle, got %d", cycles)
+	}
+
+	supplierWMEs := eng.FindWMEsMatching(model.NewPositiveCE("supplier_order"))
+	if len(supplierWMEs) != 1 {
+		t.Fatalf("expected 1 supplier_order WME, got %d", len(supplierWMEs))
+	}
+
+	sct, ok := supplierWMEs[0].Get("supplier_current_time")
+	if !ok || sct.Type() != model.TypeDateUTCTime {
+		t.Fatalf("expected supplier_current_time to be TypeDateUTCTime, got %v (exists=%v)", sct.Type(), ok)
+	}
+
+	dd, ok := supplierWMEs[0].Get("due_date")
+	if !ok || dd.Type() != model.TypeDate {
+		t.Fatalf("expected due_date to be TypeDate, got %v (exists=%v)", dd.Type(), ok)
+	}
+	if dd.DateInt() != 20260929 {
+		t.Fatalf("expected DateInt() 20260929, got %d", dd.DateInt())
+	}
+}
+
 
 
 

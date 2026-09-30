@@ -137,6 +137,17 @@ func TokenToValue(tok Token) model.Value {
 		if lower == "false" {
 			return model.NewBoolean(false)
 		}
+		if isDT, isUTC := model.IsDateTimeString(tok.Value); isDT {
+			if isUTC {
+				return model.NewDateUTCDirect(tok.Value)
+			}
+			return model.NewDateTime(tok.Value)
+		}
+		if model.IsDateString(tok.Value) {
+			if d, err := model.ParseDateString(tok.Value); err == nil {
+				return d
+			}
+		}
 		return model.NewSymbol(tok.Value)
 	default:
 		return model.NewSymbol(tok.Value)
@@ -1437,7 +1448,8 @@ func (p *Parser) isRHSFunction() bool {
 		return false
 	}
 	sub := strings.ToLower(p.peek.Value)
-	return sub == "compute" || sub == "accept" || sub == "acceptline" || sub == "genatom" || sub == "litval" || sub == "substr"
+	return sub == "compute" || sub == "accept" || sub == "acceptline" || sub == "genatom" || sub == "litval" || sub == "substr" ||
+		sub == "date" || sub == "datetime" || sub == "utc"
 }
 
 func (p *Parser) parseRHSFunction() (model.Value, error) {
@@ -1455,9 +1467,58 @@ func (p *Parser) parseRHSFunction() (model.Value, error) {
 		return p.parseLitval()
 	case "substr":
 		return p.ParseSubstr()
+	case "date":
+		return p.parseTemporalFunction("date")
+	case "datetime":
+		return p.parseTemporalFunction("datetime")
+	case "utc":
+		return p.parseTemporalFunction("utc")
 	default:
 		return model.NewSymbol("nil"), fmt.Errorf("unknown RHS function: %s", sub)
 	}
+}
+
+func (p *Parser) parseTemporalFunction(op string) (model.Value, error) {
+	if _, err := p.expect(TokenLParen); err != nil {
+		return model.NewSymbol("nil"), err
+	}
+	verbTok, err := p.expect(TokenSymbol)
+	if err != nil {
+		return model.NewSymbol("nil"), err
+	}
+
+	var arg model.Value
+	if p.isRHSFunction() {
+		arg, err = p.parseRHSFunction()
+		if err != nil {
+			return model.NewSymbol("nil"), err
+		}
+	} else if p.current.Type == TokenVariable || p.current.Type == TokenSymbol || p.current.Type == TokenNumber || p.current.Type == TokenString {
+		arg = TokenToValue(p.current)
+		if err := p.advance(); err != nil {
+			return model.NewSymbol("nil"), err
+		}
+	} else {
+		return model.NewSymbol("nil"), fmt.Errorf("unexpected token in %s at line %d: %s (%q)", op, p.current.Line, p.current.Type, p.current.Value)
+	}
+
+	if _, err := p.expect(TokenRParen); err != nil {
+		return model.NewSymbol("nil"), fmt.Errorf("expected ')' closing %s at line %d: %w", op, verbTok.Line, err)
+	}
+
+	// If argument is a constant literal, evaluate immediately
+	if !arg.IsVariable() && !arg.IsCompute() && !arg.IsAccept() && !arg.IsGenatom() && !arg.IsLitval() && !arg.IsSubstr() && !arg.IsTemporalExpr() {
+		switch op {
+		case "utc":
+			return model.ConvertToDateUTCTime(arg), nil
+		case "datetime":
+			return model.ConvertToDateTime(arg), nil
+		case "date":
+			return model.ConvertToDate(arg), nil
+		}
+	}
+
+	return model.NewTemporalExpr(op, arg), nil
 }
 
 func (p *Parser) parseSubstrArg() (model.Value, error) {

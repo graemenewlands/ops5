@@ -53,6 +53,9 @@ These action verbs execute sequentially when a production rule fires.
 | **`genatom`** | `(genatom)` | RHS function generating a unique symbolic atom (`atom1`, `atom2`, ...). See [`genatom` Reference](genatom.md). | `(make node ^id (genatom))` |
 | **`litval`** | `(litval [<class>] <attr>)` | RHS function returning the numeric index (2, 3, ...) of an attribute. See [`litval` Reference](litval.md). | `(make meta ^slot (litval name))` |
 | **`substr`** | `(substr <elem> <start> <end>)` | RHS function extracting a subsequence or single value from a WME. See [`substr` Reference](substr.md). | `(substr <str> sequence sequence)`<br>`(substr <str> 3 inf)` |
+| **`date`** | `(date <val>)` | RHS value function constructing or converting an expression to `TypeDate`. See [Types Reference](types.md). | `(make order ^due_date (date 20260929))` |
+| **`datetime`** | `(datetime <val>)` | RHS value function constructing or converting an expression to local `TypeDateTime`. See [Types Reference](types.md). | `(make order ^current_time (datetime "2026-09-29T19:53:58"))` |
+| **`utc`** | `(utc <val>)` | RHS value function converting a date, local time, or variable into UTC `TypeDateUTCTime`. See [Types Reference](types.md). | `(make order ^supplier_time (utc <local_time>))` |
 | **`build`** | `(build (p <name> ...))` | Dynamically synthesizes and compiles a production rule into Rete at runtime, substituting variables bound in the parent rule. | `(build (p shortcut (traveler ^dest <d>) --> (write "Direct route to" <d>)))` |
 | **`halt`** | `(halt)` | Halts the inference engine execution loop immediately. Current cycle completes, but no further rules fire. | `(halt)` |
 | **`watch`** | `(watch [0 \| 1 \| 2])` | Modifies or displays the engine trace level dynamically during rule execution. | `(watch 2)`<br>`(watch 0)` |

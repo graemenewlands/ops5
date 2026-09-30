@@ -786,5 +786,39 @@ func TestMemorylessTerminalMultipleSharedTerminals(t *testing.T) {
 	}
 }
 
+func TestTimeAttributesMatchInRete(t *testing.T) {
+	net := NewNetwork()
+	mem := wm.New()
+	mem.AddListener(net)
+
+	listener := &recordListener{}
+
+	// Rule 1: joins context and supplier on exact time match
+	// (context ^current_time <t>)
+	// (supplier ^supplier_current_time <t>)
+	ruleEqual := model.NewRule("time-sync")
+	ce1 := model.NewPositiveCE("context").
+		AddEqualTest("current_time", model.NewVariable("<t>"))
+	ce2 := model.NewPositiveCE("supplier").
+		AddEqualTest("supplier_current_time", model.NewVariable("<t>"))
+	ruleEqual.AddCondition(ce1).AddCondition(ce2)
+	net.AddRule(ruleEqual, listener)
+
+	// Assert context with local DateTime
+	mem.Make("context", map[string]model.Value{
+		"current_time": model.NewDateTime("2026-09-29T19:53:58"),
+	})
+
+	// Assert supplier with matching UTC DateUTCTime
+	// (NewDateUTCTime converts local 2026-09-29T19:53:58 to UTC, so it equals the local DateTime)
+	mem.Make("supplier", map[string]model.Value{
+		"supplier_current_time": model.NewDateUTCTime("2026-09-29T19:53:58"),
+	})
+
+	if len(listener.adds) != 1 {
+		t.Fatalf("expected 1 activation for synchronized time join, got %d", len(listener.adds))
+	}
+}
+
 
 

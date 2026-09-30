@@ -35,6 +35,10 @@ func CanonicalValueKey(v model.Value) string {
 		return fmt.Sprintf("b:%t", v.Raw().(bool))
 	case model.TypeString:
 		return "str:" + v.Raw().(string)
+	case model.TypeDate:
+		return "i:" + strconv.FormatInt(v.DateInt(), 10)
+	case model.TypeDateTime, model.TypeDateUTCTime:
+		return "t:" + strconv.FormatInt(v.Time().UTC().UnixNano(), 10)
 	default:
 		return "v:" + v.String()
 	}

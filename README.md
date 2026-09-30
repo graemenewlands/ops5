@@ -18,6 +18,7 @@ This engine provides a complete, modern execution environment for rule-based sys
    - [Unique Atom Generation (`genatom`)](docs/genatom.md)
    - [Attribute Index Resolution (`litval`)](docs/litval.md)
    - [Subsequence & Vector Extraction (`substr`)](docs/substr.md)
+   - [Type System & Temporal Types (`date`, `datetime`, `utc`)](docs/types.md)
    - [LHS Condition Elements & Pattern Matching](docs/lhs_patterns.md)
    - [Design Patterns & Programming Idioms](docs/idioms.md)
    - [Lexical Elements & Data Types](#lexical-elements--data-types)
@@ -157,6 +158,12 @@ The engine supports first-class data types:
 | **Boolean** | Case-insensitive boolean literals | `model.TypeBoolean` (`bool`) | `true`, `false` |
 | **Vector** | Space-separated sequence of values | `model.TypeVector` (`[]model.Value`) | `42.36 -71.05`, `"Beantown" "The Hub"` |
 | **Variable** | Delimited by angle brackets `<...>` | `model.TypeVariable` (`string`) | `<x>`, `<id>`, `<goal-ptr>`, `<val>` |
+| **Date** | `YYYY-MM-DD` or integer `YYYYMMDD` | `model.TypeDate` (`time.Time`) | `2026-09-29`, `(date 20260929)` |
+| **DateTime** | ISO 8601 local `YYYY-MM-DDTHH:MM:SS` | `model.TypeDateTime` (`time.Time`) | `2026-09-29T19:53:58`, `2026-09-29T19:53:58-07:00` |
+| **DateUTCTime** | ISO 8601 UTC `YYYY-MM-DDTHH:MM:SSZ` | `model.TypeDateUTCTime` (`time.Time`) | `2026-09-30T02:53:58Z`, `(utc "2026-09-29T19:53:58")` |
+
+> [!NOTE]
+> For a full breakdown of the temporal type hierarchy, cross-type equality, timezone conversion mechanics, and RHS temporal functions, see the [Type System & Temporal Types Specification](docs/types.md).
 
 ### Schema & Vector Declarations (`literalize`, `vector-attribute`)
 

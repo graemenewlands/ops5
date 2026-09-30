@@ -2642,3 +2642,81 @@ func TestParseNoReorderProperty(t *testing.T) {
 	}
 }
 
+func TestParseDateTimeTokens(t *testing.T) {
+	input := `(make schedule ^current_time 2026-09-29T19:53:58 ^supplier_current_time 2026-09-29T19:53:58Z)`
+	p, err := NewParser(input)
+	if err != nil {
+		t.Fatalf("unexpected NewParser error: %v", err)
+	}
+
+	class, attrs, err := p.ParseMake()
+	if err != nil {
+		t.Fatalf("unexpected ParseMake error: %v", err)
+	}
+
+	if class != "schedule" {
+		t.Fatalf("expected class schedule, got %s", class)
+	}
+
+	ct, ok := attrs["current_time"]
+	if !ok || ct.Type() != model.TypeDateTime {
+		t.Fatalf("expected current_time to be TypeDateTime, got %v (exists=%v)", ct.Type(), ok)
+	}
+
+	sct, ok := attrs["supplier_current_time"]
+	if !ok || sct.Type() != model.TypeDateUTCTime {
+		t.Fatalf("expected supplier_current_time to be TypeDateUTCTime, got %v (exists=%v)", sct.Type(), ok)
+	}
+}
+
+func TestParseTemporalFunctions(t *testing.T) {
+	input := `(p sync-rule
+		(order ^current_time <ct>)
+		-->
+		(make supplier_order
+			^utc_time (utc <ct>)
+			^local_time (datetime "2026-09-29T19:53:58")
+			^due_date (date 20260929))
+	)`
+
+	p, err := NewParser(input)
+	if err != nil {
+		t.Fatalf("unexpected NewParser error: %v", err)
+	}
+
+	rule, err := p.ParseRule()
+	if err != nil {
+		t.Fatalf("unexpected ParseRule error: %v", err)
+	}
+
+	if len(rule.Actions) != 1 {
+		t.Fatalf("expected 1 action, got %d", len(rule.Actions))
+	}
+
+	makeAct, ok := rule.Actions[0].(model.MakeAction)
+	if !ok {
+		t.Fatalf("expected MakeAction, got %T", rule.Actions[0])
+	}
+
+	// utc_time should be a dynamic TemporalExpr since its argument is a variable <ct>
+	utcVal, ok := makeAct.Attributes["utc_time"]
+	if !ok || !utcVal.IsTemporalExpr() {
+		t.Fatalf("expected utc_time to be TemporalExpr, got %v", utcVal)
+	}
+	if utcVal.TemporalExpr().Op != "utc" {
+		t.Fatalf("expected op 'utc', got %s", utcVal.TemporalExpr().Op)
+	}
+
+	// local_time has literal argument, so it evaluates immediately to TypeDateTime
+	locVal, ok := makeAct.Attributes["local_time"]
+	if !ok || locVal.Type() != model.TypeDateTime {
+		t.Fatalf("expected local_time to be TypeDateTime, got %v", locVal.Type())
+	}
+
+	// due_date has literal argument, evaluates immediately to TypeDate
+	dateVal, ok := makeAct.Attributes["due_date"]
+	if !ok || dateVal.Type() != model.TypeDate {
+		t.Fatalf("expected due_date to be TypeDate, got %v", dateVal.Type())
+	}
+}
+
