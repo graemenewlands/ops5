@@ -59,6 +59,7 @@ This engine provides a complete, modern execution environment for rule-based sys
    - [Running Test Suites](#running-test-suites)
 7. [Programmatic Go API Reference](#programmatic-go-api-reference)
    - [Quick Start Example](#quick-start-example)
+   - [Go Struct Mapping & Schema Manifests](#go-struct-mapping--schema-manifests)
    - [Package Breakdown](#package-breakdown)
    - [Partitioned Multi-Core Concurrency (ParaOPS5)](#partitioned-multi-core-concurrency-paraops5)
    - [Extensibility & Custom Actions](#extensibility--custom-actions)
@@ -1060,11 +1061,13 @@ func main() {
 		eng.AddRule(rule)
 	}
 
-	// 3. Assert initial working memory
-	eng.Make("order", map[string]model.Value{
-		"id":     model.NewInt(9001),
-		"status": model.NewSymbol("pending"),
-	})
+	// 3. Register schema and assert initial working memory via Go struct
+	type Order struct {
+		ID     int64  `ops5:"id"`
+		Status string `ops5:"status,symbol"`
+	}
+	eng.RegisterStruct(Order{})
+	eng.MakeFromStruct(Order{ID: 9001, Status: "pending"})
 
 	// 4. Run execution loop
 	cycles, err := eng.Run(100)
@@ -1075,6 +1078,53 @@ func main() {
 	fmt.Printf("Engine completed in %d cycles. Halted: %v\n", cycles, eng.IsHalted())
 }
 ```
+
+### Go Struct Mapping & Schema Manifests
+
+Idiomatic Go structs can be mapped directly to OPS5 `literalize` element classes and Working Memory Elements (WMEs) using `ops5:"..."` tags:
+
+```go
+type CustomerOrder struct {
+    Timetag   int64     `ops5:",timetag"`
+    ID        int64     `ops5:"order_id"`
+    Customer  string    `ops5:"customer"`
+    Status    string    `ops5:"status,symbol"`
+    Total     float64   `ops5:"total"`
+    Tags      []string  `ops5:"tags,vector"`
+    CreatedAt time.Time `ops5:"created_at,utc"`
+    DueDate   time.Time `ops5:"due_date,date"`
+    Notes     string    `ops5:"notes,omitempty"`
+}
+
+func (CustomerOrder) OPS5ClassName() string {
+    return "order"
+}
+
+// 1. Automatic Schema Derivation & Deterministic Structural Fingerprinting
+schema, _ := eng.RegisterStruct(CustomerOrder{})
+// schema.Fingerprint contains a deterministic SHA-256 hash representing complete structural state
+
+// 2. High-Level Struct Assertion
+wme, _ := eng.MakeFromStruct(CustomerOrder{
+    ID:        1001,
+    Customer:  "Acme Corp",
+    Status:    "pending",
+    Total:     250.00,
+    Tags:      []string{"express", "fragile"},
+    CreatedAt: time.Now().UTC(),
+})
+
+// 3. Unmarshaling Back to Go Struct
+var result CustomerOrder
+_ = wme.Unmarshal(&result)
+
+// 4. Schema Manifest Export & Drift Validation
+manifest := eng.SchemaManifest()
+jsonBytes, _ := eng.ExportSchemaManifestJSON()
+_ = eng.ValidateManifest(manifest) // Detects schema drift
+```
+
+See **[Type System & Temporal Types Specification](docs/types.md#4-go-struct-mapping-structural-fingerprinting--schema-manifest)** for tag syntax, reflection caching, and schema manifest details.
 
 ### Package Breakdown
 

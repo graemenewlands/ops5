@@ -77,7 +77,7 @@ func (pe *PartitionedEngine) AddPartition(id string) (*Partition, error) {
 	eng := New()
 	// Copy global schemas
 	for _, schema := range pe.globalSchemas {
-		eng.DeclareClass(schema.Class, schema.Attributes)
+		eng.RegisterSchema(schema.Clone())
 	}
 	// Copy global rules
 	for _, rule := range pe.globalRules {
@@ -127,6 +127,43 @@ func (pe *PartitionedEngine) DeclareClass(name string, attrs []string) {
 	for _, p := range pe.partitions {
 		p.Engine.DeclareClass(name, attrs)
 	}
+}
+
+// RegisterStruct registers an element class schema derived from a Go struct across all partitions.
+// Returns an error if schema drift is detected against a previously registered struct of the same class.
+func (pe *PartitionedEngine) RegisterStruct(v any) (*model.ClassSchema, error) {
+	schema, err := model.ClassSchemaFromStruct(v)
+	if err != nil {
+		return nil, err
+	}
+	pe.mu.Lock()
+	defer pe.mu.Unlock()
+
+	if existing, exists := pe.globalSchemas[schema.Class]; exists {
+		if len(existing.FieldTypes) > 0 && existing.Fingerprint != "" && existing.Fingerprint != schema.Fingerprint {
+			return nil, fmt.Errorf("schema drift detected for class %q: existing fingerprint %s != new fingerprint %s",
+				schema.Class, existing.Fingerprint, schema.Fingerprint)
+		}
+	}
+	pe.globalSchemas[schema.Class] = schema
+	for _, p := range pe.partitions {
+		if _, err := p.Engine.RegisterStruct(v); err != nil {
+			return nil, err
+		}
+	}
+	return schema, nil
+}
+
+// SchemaManifest generates a complete snapshot of all element schemas registered in the partitioned engine.
+func (pe *PartitionedEngine) SchemaManifest() *model.SchemaManifest {
+	pe.mu.RLock()
+	defer pe.mu.RUnlock()
+
+	m := model.NewSchemaManifest()
+	for _, s := range pe.globalSchemas {
+		m.AddSchema(s)
+	}
+	return m
 }
 
 // AddRule registers a global production rule to all current and future partitions.

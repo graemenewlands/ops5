@@ -57,6 +57,15 @@ func (wm *WorkingMemory) Make(class string, attrs map[string]model.Value) *model
 	return wme
 }
 
+// MakeFromStruct converts a Go struct to a WME and asserts it into working memory.
+func (wm *WorkingMemory) MakeFromStruct(v any) (*model.WME, error) {
+	className, attrs, err := model.MarshalWME(v)
+	if err != nil {
+		return nil, err
+	}
+	return wm.Make(className, attrs), nil
+}
+
 // MakeWithoutNotify creates and asserts a new WME without notifying listeners.
 // Useful for batch/parallel assertions where listeners are notified concurrently.
 func (wm *WorkingMemory) MakeWithoutNotify(class string, attrs map[string]model.Value) *model.WME {

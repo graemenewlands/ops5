@@ -351,3 +351,152 @@ diffHours, _ := diffSec.Hours() // 52 hours
 diffMins, _ := diffSec.Minutes()// 3150 minutes
 ```
 
+---
+
+## 4. Go Struct Mapping, Structural Fingerprinting & Schema Manifest
+
+The OPS5 Go runtime provides seamless, bidirectional struct mapping (similar to `json.Marshal` / `yaml.Unmarshal`) for binding idiomatic Go structs directly to OPS5 `(literalize ...)` element classes and Working Memory Elements (WMEs).
+
+```mermaid
+flowchart LR
+    GoStruct["Go Struct Instance"]
+    ClassSchema["model.ClassSchema\n(Fingerprint: SHA-256)"]
+    WME["model.WME\n(Timetag + Attributes)"]
+    Manifest["model.SchemaManifest\n(JSON Export / Drift Check)"]
+
+    GoStruct -->|"ClassSchemaFromStruct()"| ClassSchema
+    GoStruct -->|"MarshalWME()"| WME
+    WME -->|"Unmarshal() / UnmarshalWME()"| GoStruct
+    ClassSchema -->|"SchemaManifest()"| Manifest
+```
+
+### 4.1 Struct Tag Syntax (`ops5:"name,opts"`)
+
+Struct fields can be annotated with `ops5:"..."` tags controlling attribute naming, serialization options, and type hints:
+
+| Tag Option | Description | Example |
+| :--- | :--- | :--- |
+| `name` | Canonical attribute name (strips `^`, defaults to lowercase field name). | `ops5:"order_id"` |
+| `-` | Excludes the field from schema generation, marshaling, and unmarshaling. | `ops5:"-"` |
+| `omitempty` | Omits the attribute from WME if the Go field holds its zero value. | `ops5:"notes,omitempty"` |
+| `vector` | Designates the attribute as a vector attribute. Slices (`[]T`) are automatically recognized as vectors. | `ops5:"tags,vector"` |
+| `date` | Serializes field (`time.Time`, `int64`, or `string`) as `TypeDate` (midnight UTC). | `ops5:"due_date,date"` |
+| `datetime` | Serializes `time.Time` or `string` as `TypeDateTime` (in local timezone). | `ops5:"updated_at,datetime"` |
+| `utc` | Serializes `time.Time` or `string` as `TypeDateUTCTime` (strict UTC ISO 8601). | `ops5:"created_at,utc"` |
+| `symbol` | Maps a Go `string` to an OPS5 bare `TypeSymbol` instead of a quoted `TypeString`. | `ops5:"status,symbol"` |
+| `timetag` | Designates the WME timetag field. Omitted during `MarshalWME` and populated during `Unmarshal`. Also auto-detected if field is named `Timetag`. | `ops5:",timetag"` |
+| `class=name` | Overrides the element class name for this struct. | `ops5:"id,class=order"` |
+
+### 4.2 Class Naming & Interface
+
+By default, element class names are derived from the lowercase struct type name (`Order` -> `"order"`). A custom class name can be specified via:
+1. The `ops5:",class=custom_name"` tag option.
+2. Implementing the `model.ClassNamer` interface:
+   ```go
+   type ClassNamer interface {
+       OPS5ClassName() string
+   }
+   ```
+
+### 4.3 Deterministic Structural Fingerprinting & Schema Drift
+
+To represent the complete structural state of element schemas across services and executions without requiring manual version numbers, `model.ClassSchema` automatically generates a deterministic **SHA-256 structural fingerprint**.
+
+* **Canonical Representation**: Computes a canonical hash across the class name, alphabetically sorted attribute names, attribute field types, and vector flags.
+* **Invariant to Field Order**: Reordering fields within the Go struct does not alter the fingerprint.
+* **Drift Detection**: Any change to attribute names, types, or vector designations alters the fingerprint. Calling `eng.RegisterStruct(v)` returns a `schema drift detected` error if an incompatible struct definition is re-registered.
+
+### 4.4 Schema Manifest Export & Validation
+
+The complete state of all element schemas registered in an engine can be exported to JSON or validated against pre-existing manifests:
+
+```go
+// 1. Generate snapshot manifest of registered schemas
+manifest := eng.SchemaManifest()
+
+// 2. Export manifest as formatted JSON
+jsonBytes, err := eng.ExportSchemaManifestJSON()
+
+// 3. Validate against an external or stored manifest
+err = eng.ValidateManifest(manifest)
+if err != nil {
+    log.Fatalf("Schema drift detected: %v", err)
+}
+```
+
+### 4.5 Dual-Level Programmatic API
+
+#### Core Package (`pkg/model`)
+- `model.ClassSchemaFromStruct(v any) (*ClassSchema, error)`
+- `model.MarshalWME(v any) (className string, attrs map[string]Value, err error)`
+- `model.UnmarshalWME(wme *WME, target any) error`
+- `wme.Unmarshal(target any) error`
+- `model.NewSchemaManifest() *SchemaManifest`
+- `model.ParseSchemaManifestJSON(data []byte) (*SchemaManifest, error)`
+
+#### Engine & Working Memory (`pkg/engine`, `pkg/wm`)
+- `eng.RegisterStruct(v any) (*model.ClassSchema, error)`
+- `eng.MakeFromStruct(v any) (*model.WME, error)`
+- `eng.SchemaManifest() *model.SchemaManifest`
+- `eng.ExportSchemaManifestJSON() ([]byte, error)`
+- `eng.ValidateManifest(manifest *model.SchemaManifest) error`
+- `pe.RegisterStruct(v any) (*model.ClassSchema, error)` (PartitionedEngine)
+- `wm.MakeFromStruct(v any) (*model.WME, error)`
+
+### 4.6 End-to-End Example
+
+```go
+type Order struct {
+    Timetag   int64     `ops5:",timetag"`
+    ID        int64     `ops5:"order_id"`
+    Customer  string    `ops5:"customer"`
+    Status    string    `ops5:"status,symbol"`
+    Total     float64   `ops5:"total"`
+    Tags      []string  `ops5:"tags,vector"`
+    CreatedAt time.Time `ops5:"created_at,utc"`
+}
+
+func (Order) OPS5ClassName() string {
+    return "order"
+}
+
+func main() {
+    eng := engine.New()
+
+    // 1. Register schema derived from struct
+    schema, _ := eng.RegisterStruct(Order{})
+    fmt.Printf("Registered %s (fingerprint: %s)\n", schema.Class, schema.Fingerprint[:8])
+
+    // 2. Add rule
+    rules, _ := parser.ParseRules(`
+        (p ship-order
+           <o> (order ^order_id <id> ^status pending)
+           -->
+           (modify <o> ^status shipped)
+        )
+    `)
+    eng.AddRule(rules[0])
+
+    // 3. Assert fact directly from Go struct
+    wme, _ := eng.MakeFromStruct(Order{
+        ID:        101,
+        Customer:  "Acme Corp",
+        Status:    "pending",
+        Total:     199.99,
+        Tags:      []string{"express"},
+        CreatedAt: time.Now().UTC(),
+    })
+
+    // 4. Run rules
+    eng.Run(10)
+
+    // 5. Unmarshal updated WME back into Go struct
+    var updated Order
+    updatedWME := eng.WorkingMemory().All()[0]
+    _ = updatedWME.Unmarshal(&updated)
+
+    fmt.Printf("Order %d status is now: %s (timetag %d)\n", 
+        updated.ID, updated.Status, updated.Timetag)
+}
+```
+

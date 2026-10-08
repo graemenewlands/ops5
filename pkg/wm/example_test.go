@@ -42,3 +42,29 @@ func Example() {
 	// +Assert timetag=2 class=inventory
 	// -Retract timetag=2 class=inventory
 }
+
+type InventoryItem struct {
+	Item  string `ops5:"item,symbol"`
+	Count int64  `ops5:"count"`
+}
+
+func (InventoryItem) OPS5ClassName() string {
+	return "inventory"
+}
+
+func ExampleWorkingMemory_MakeFromStruct() {
+	memory := wm.New()
+
+	wme, err := memory.MakeFromStruct(InventoryItem{
+		Item:  "gadgets",
+		Count: 50,
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Printf("Asserted WME: %s\n", wme.String())
+
+	// Output:
+	// Asserted WME: (1: inventory ^count 50 ^item gadgets)
+}

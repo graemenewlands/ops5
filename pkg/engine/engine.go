@@ -798,6 +798,107 @@ func (e *Engine) Schemas() []*model.ClassSchema {
 	return res
 }
 
+// RegisterStruct registers an element class schema derived automatically from a Go struct definition,
+// recording field types, vector flags, and its structural fingerprint.
+// Returns an error if schema drift is detected against a previously registered struct of the same class.
+func (e *Engine) RegisterStruct(v any) (*model.ClassSchema, error) {
+	schema, err := model.ClassSchemaFromStruct(v)
+	if err != nil {
+		return nil, err
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if existing, exists := e.schemas[schema.Class]; exists {
+		if len(existing.FieldTypes) > 0 && existing.Fingerprint != "" && existing.Fingerprint != schema.Fingerprint {
+			return nil, fmt.Errorf("schema drift detected for class %q: existing fingerprint %s != new fingerprint %s",
+				schema.Class, existing.Fingerprint, schema.Fingerprint)
+		}
+	}
+
+	for a := range e.vectorAttrs {
+		if schema.HasAttribute(a) {
+			schema.SetVectorAttribute(a, true)
+		}
+	}
+	for a := range schema.VectorAttributes {
+		e.vectorAttrs[a] = true
+	}
+
+	e.schemas[schema.Class] = schema
+	for i, a := range schema.Attributes {
+		e.attrIndices[a] = i + 2
+	}
+	return schema, nil
+}
+
+// RegisterSchema registers an existing ClassSchema directly into the engine.
+func (e *Engine) RegisterSchema(schema *model.ClassSchema) {
+	if schema == nil {
+		return
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	for a := range e.vectorAttrs {
+		if schema.HasAttribute(a) {
+			schema.SetVectorAttribute(a, true)
+		}
+	}
+	for a := range schema.VectorAttributes {
+		e.vectorAttrs[a] = true
+	}
+
+	e.schemas[schema.Class] = schema
+	for i, a := range schema.Attributes {
+		e.attrIndices[a] = i + 2
+	}
+}
+
+// SchemaManifest generates a complete snapshot of all element schemas registered in the engine,
+// including their field types, vector flags, and structural fingerprints.
+func (e *Engine) SchemaManifest() *model.SchemaManifest {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	m := model.NewSchemaManifest()
+	for _, s := range e.schemas {
+		m.AddSchema(s)
+	}
+	return m
+}
+
+// ExportSchemaManifestJSON exports the engine's schema manifest as formatted JSON.
+func (e *Engine) ExportSchemaManifestJSON() ([]byte, error) {
+	return e.SchemaManifest().ToJSON()
+}
+
+// ValidateManifest verifies that the provided manifest matches the schemas registered in the engine.
+// Returns an error if any schema in the manifest is missing from the engine, or has mismatched fingerprints.
+func (e *Engine) ValidateManifest(manifest *model.SchemaManifest) error {
+	if manifest == nil {
+		return fmt.Errorf("manifest is nil")
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	for className, summary := range manifest.Schemas {
+		actual, exists := e.schemas[className]
+		if !exists {
+			return fmt.Errorf("manifest schema %q is not registered in engine", className)
+		}
+		actualFp := actual.Fingerprint
+		if actualFp == "" {
+			actualFp = actual.ComputeFingerprint()
+		}
+		if actualFp != summary.Fingerprint {
+			return fmt.Errorf("schema drift detected for class %q: expected fingerprint %s, got %s",
+				className, summary.Fingerprint, actualFp)
+		}
+	}
+	return nil
+}
+
 // LoadScript parses and executes top-level OPS5 statements from a script string:
 // literalize, vector-attribute, rules, and makes.
 func (e *Engine) LoadScript(script string) error {
@@ -931,6 +1032,15 @@ func (e *Engine) Make(class string, attrs map[string]model.Value) *model.WME {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return e.makeLocked(class, attrs)
+}
+
+// MakeFromStruct converts a Go struct to a WME and asserts it into working memory.
+func (e *Engine) MakeFromStruct(v any) (*model.WME, error) {
+	className, attrs, err := model.MarshalWME(v)
+	if err != nil {
+		return nil, err
+	}
+	return e.Make(className, attrs), nil
 }
 
 func (e *Engine) makeLocked(class string, attrs map[string]model.Value) *model.WME {

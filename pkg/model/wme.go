@@ -74,3 +74,8 @@ func (w *WME) String() string {
 	b.WriteString(")")
 	return b.String()
 }
+
+// Unmarshal maps the WME's attributes and timetag into a target Go struct pointer.
+func (w *WME) Unmarshal(target any) error {
+	return UnmarshalWME(w, target)
+}

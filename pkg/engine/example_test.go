@@ -11,12 +11,23 @@ import (
 	"github.com/graemenewlands/ops5/pkg/parser"
 )
 
-// Example demonstrates standard single-engine rule registration, working memory assertion,
-// and execution until quiescence.
+// Task defines the working memory element structure mapped directly to an OPS5 element class.
+type Task struct {
+	ID     int64  `ops5:"id"`
+	Status string `ops5:"status,symbol"`
+}
+
+// Example demonstrates standard single-engine rule registration, struct-based schema
+// declaration and WME assertion, and execution until quiescence.
 func Example() {
 	eng := engine.New()
 	eng.SetStrategy(conflict.StrategyLEX)
 	eng.SetWatchLevel(0) // quiet output
+
+	// Automatically register schema from Go struct definition
+	if _, err := eng.RegisterStruct(Task{}); err != nil {
+		panic(err)
+	}
 
 	rules, err := parser.ParseRules(`
 		(p complete-task
@@ -34,10 +45,13 @@ func Example() {
 		eng.AddRule(r)
 	}
 
-	eng.Make("task", map[string]model.Value{
-		"id":     model.NewInt(101),
-		"status": model.NewSymbol("pending"),
-	})
+	// Assert WME directly from Go struct
+	if _, err := eng.MakeFromStruct(Task{
+		ID:     101,
+		Status: "pending",
+	}); err != nil {
+		panic(err)
+	}
 
 	cycles, err := eng.Run(100)
 	if err != nil {
@@ -51,8 +65,19 @@ func Example() {
 	// Cycles: 1, Halted: true
 }
 
+// WorkerTask defines a task routed to specific worker partitions.
+type WorkerTask struct {
+	ID           int64  `ops5:"id"`
+	TargetWorker string `ops5:"target_worker,symbol"`
+	Status       string `ops5:"status,symbol"`
+}
+
+func (WorkerTask) OPS5ClassName() string {
+	return "task"
+}
+
 // ExamplePartitionedEngine demonstrates ParaOPS5 partitioned multi-core concurrency
-// where facts are routed dynamically between isolated Rete partitions.
+// where facts are routed dynamically between isolated Rete partitions using Go struct mappings.
 func ExamplePartitionedEngine() {
 	// Router directs tasks with target_worker attribute to specific partition inboxes
 	router := func(origin, class string, attrs map[string]model.Value) []string {
@@ -64,8 +89,10 @@ func ExamplePartitionedEngine() {
 
 	pe := engine.NewPartitionedEngine(router)
 
-	// Declare schema across partitions
-	pe.DeclareClass("task", []string{"id", "target_worker", "status"})
+	// Declare schema across partitions via Go struct
+	if _, err := pe.RegisterStruct(WorkerTask{}); err != nil {
+		panic(err)
+	}
 
 	p1, _ := pe.AddPartition("worker-1")
 	p2, _ := pe.AddPartition("worker-2")
@@ -86,12 +113,14 @@ func ExamplePartitionedEngine() {
 	}
 	pe.AddRuleToPartition("worker-2", rules[0])
 
-	// Assert task on worker-1 intended for worker-2
-	p1.Engine.Make("task", map[string]model.Value{
-		"id":            model.NewInt(99),
-		"target_worker": model.NewSymbol("worker-2"),
-		"status":        model.NewSymbol("pending"),
-	})
+	// Assert task on worker-1 intended for worker-2 from struct
+	if _, err := p1.Engine.MakeFromStruct(WorkerTask{
+		ID:           99,
+		TargetWorker: "worker-2",
+		Status:       "pending",
+	}); err != nil {
+		panic(err)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()

@@ -81,4 +81,89 @@ func ExampleValue_temporalArithmetic() {
 	// Diff Days: 2, Diff Hours: 52
 }
 
+type OrderExample struct {
+	Timetag  int64    `ops5:",timetag"`
+	ID       int64    `ops5:"order_id"`
+	Customer string   `ops5:"customer"`
+	Status   string   `ops5:"status,symbol"`
+	Total    float64  `ops5:"total"`
+	Tags     []string `ops5:"tags,vector"`
+}
+
+func (OrderExample) OPS5ClassName() string {
+	return "order"
+}
+
+func ExampleClassSchemaFromStruct() {
+	schema, err := model.ClassSchemaFromStruct(OrderExample{})
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Printf("Class: %s\n", schema.Class)
+	fmt.Printf("Attributes: %v\n", schema.Attributes)
+	fmt.Printf("Is Vector: %v\n", schema.IsVectorAttribute("tags"))
+	fmt.Printf("Has Fingerprint: %v\n", schema.Fingerprint != "")
+
+	// Output:
+	// Class: order
+	// Attributes: [order_id customer status total tags]
+	// Is Vector: true
+	// Has Fingerprint: true
+}
+
+func ExampleMarshalWME() {
+	order := OrderExample{
+		ID:       101,
+		Customer: "Acme Corp",
+		Status:   "pending",
+		Total:    250.00,
+		Tags:     []string{"priority", "b2b"},
+	}
+
+	className, attrs, err := model.MarshalWME(order)
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Printf("Class: %s\n", className)
+	fmt.Printf("Order ID: %s\n", attrs["order_id"])
+	fmt.Printf("Status: %s (%s)\n", attrs["status"], attrs["status"].Type())
+	fmt.Printf("Tags: %s (%s)\n", attrs["tags"], attrs["tags"].Type())
+
+	// Output:
+	// Class: order
+	// Order ID: 101
+	// Status: pending (symbol)
+	// Tags: "priority" "b2b" (vector)
+}
+
+func ExampleUnmarshalWME() {
+	wme := model.NewWME(42, "order", map[string]model.Value{
+		"order_id": model.NewInt(101),
+		"customer": model.NewString("Acme Corp"),
+		"status":   model.NewSymbol("shipped"),
+		"total":    model.NewFloat(250.00),
+		"tags":     model.NewVector([]model.Value{model.NewString("priority"), model.NewString("b2b")}),
+	})
+
+	var order OrderExample
+	if err := wme.Unmarshal(&order); err != nil {
+		panic(err)
+	}
+
+	fmt.Printf("Timetag: %d\n", order.Timetag)
+	fmt.Printf("Order ID: %d\n", order.ID)
+	fmt.Printf("Customer: %s\n", order.Customer)
+	fmt.Printf("Status: %s\n", order.Status)
+	fmt.Printf("Tags: %v\n", order.Tags)
+
+	// Output:
+	// Timetag: 42
+	// Order ID: 101
+	// Customer: Acme Corp
+	// Status: shipped
+	// Tags: [priority b2b]
+}
+
 
