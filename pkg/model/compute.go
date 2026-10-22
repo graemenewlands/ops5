@@ -156,5 +156,11 @@ func ResolveValue(val Value, bindings map[string]Value) Value {
 			return res
 		}
 	}
+	if val.IsStringExpr() {
+		res, err := EvaluateStringExpr(val.StringExpr(), bindings)
+		if err == nil {
+			return res
+		}
+	}
 	return val
 }

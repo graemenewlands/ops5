@@ -43,7 +43,8 @@ go test -bench=. -benchtime=1x -run=^$ ./benchmarks
 
 | Version / Tag | Release Date | Key Optimizations / Features | Manners-16 | Manners-32 | Manners-64 | Waltz-12 | Waltz-50 | Zebra-5 |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **`v0.3.2` (Current)** | 2026-09-29 | Native Temporal Types (`TypeDate`, `TypeDateTime`, `TypeDateUTCTime`), ISO 8601 parser support, RHS conversion functions `(utc ...)`, `(datetime ...)`, and `(date ...)`, instant-based chronological Rete hashing & cross-timezone joins | **316 ms** (-82%) | **598 ms** (-81%) | **6.22 s** (-82%) | **11 ms** (-83%) | **52 ms** (-92%) | **0.08 ms** (-58%) |
+| **`v0.4.0` (Current)** | 2026-10-22 | Text manipulation functions (`left`, `right`, `contains`, `contains-ignore-case`, `equal-ignore-case`, `regex-replace`), case-insensitive operators (`=~`, `!~`), LHS regex pattern matching & variable capture group binding (`(regex ...)`), struct mapping & schema fingerprinting | **316 ms** (-82%) | **598 ms** (-81%) | **6.22 s** (-82%) | **11 ms** (-83%) | **52 ms** (-92%) | **0.08 ms** (-58%) |
+| **[`v0.3.2`](#v032---2026-09-29-temporal-types-iso-8601--rhs-value-functions)** | 2026-09-29 | Native Temporal Types (`TypeDate`, `TypeDateTime`, `TypeDateUTCTime`), ISO 8601 parser support, RHS conversion functions `(utc ...)`, `(datetime ...)`, and `(date ...)`, instant-based chronological Rete hashing & cross-timezone joins | **316 ms** (-82%) | **598 ms** (-81%) | **6.22 s** (-82%) | **11 ms** (-83%) | **52 ms** (-92%) | **0.08 ms** (-58%) |
 | **[`v0.3.1`](#v031---2026-09-22-godoc-documentation--interactive-runnable-examples)** | 2026-09-22 | GoDoc documentation overviews & runnable examples across `pkg/`; Static Heuristic Join Ordering (OPT-4), Memoryless Terminal Joins / Rete-NT (OPT-5), Precompiled RHS Closures (OPT-6), ParaOPS5 Partitioned Concurrency (OPT-7) | **316 ms** (-82%) | **598 ms** (-81%) | **6.22 s** (-82%) | **11 ms** (-83%) | **52 ms** (-92%) | **0.08 ms** (-58%) |
 | **[`v0.3.0`](#v030---2026-09-22-static-heuristic-join-ordering-memoryless-terminal-joins--rete-nt-precompiled-rhs-closures--paraops5-partitioned-concurrency---opt-4-opt-5-opt-6-opt-7)** | 2026-09-22 | Static Heuristic Join Ordering (OPT-4), Memoryless Terminal Joins / Rete-NT (OPT-5), Precompiled RHS Closures (OPT-6), ParaOPS5 Partitioned Concurrency (OPT-7) | **316 ms** (-82%) | **598 ms** (-81%) | **6.22 s** (-82%) | **11 ms** (-83%) | **52 ms** (-92%) | **0.08 ms** (-58%) |
 | **[`v0.2.0`](#v020---2026-09-22-token-prefix-spine-sharing-binary-heap-agenda-alpha-constant-switch-nodes--zero-copy-bindings)** | 2026-09-22 | Token prefix spine sharing, binary heap agenda, alpha switch nodes, zero-copy bindings | 413 ms (-76%) | 761 ms (-76%) | 8.41 s (-75%) | 15 ms (-77%) | 52 ms (-92%) | 0.12 ms (-37%) |
@@ -52,6 +53,17 @@ go test -bench=. -benchtime=1x -run=^$ ./benchmarks
 ---
 
 ## Version Release Logs
+
+### `v0.4.0` - 2026-10-22 (Text Functions, Case-Insensitive Matching, Regex LHS Capture & Struct Mapping)
+
+* **Text Functions & Case-Insensitive Operations**:
+  - Implemented Unicode rune-safe `left` and `right` text slicing functions with length clamping, `nil` propagation, and symbol/string type preservation.
+  - Implemented `contains`, `contains-ignore-case`, and `equal-ignore-case` predicates with cross-type string $\leftrightarrow$ symbol symmetry.
+  - Implemented RHS `regex-replace` supporting `$1`, `$2`, and `${name}` group expansion with thread-safe pattern caching.
+  - Added case-insensitive relational operators `=~` and `!~` for Alpha condition elements and Beta `(test ...)` evaluations.
+  - Implemented LHS regular expression pattern matching and variable binding (`(regex ...)`) supporting both named `(?P<var>...)` and positional capture groups with join unification and empty string fallback on unmatched optional groups.
+* **Struct Mapping & Schema Fingerprinting**:
+  - Added Go struct reflection mapping, schema validation, and deterministic schema fingerprinting.
 
 ### `v0.3.2` - 2026-09-29 (Temporal Types, ISO 8601 & RHS Value Functions)
 

@@ -1651,6 +1651,20 @@ func (e *Engine) resolveValue(val model.Value, bindings map[string]model.Value) 
 	if val.IsSubstr() {
 		return e.evaluateSubstrLocked(val.SubstrExpr(), bindings)
 	}
+	if val.IsTemporalExpr() {
+		res, err := model.EvaluateTemporalExpr(val.TemporalExpr(), bindings)
+		if err == nil {
+			return res
+		}
+		return model.NewSymbol("nil")
+	}
+	if val.IsStringExpr() {
+		res, err := model.EvaluateStringExpr(val.StringExpr(), bindings)
+		if err == nil {
+			return res
+		}
+		return model.NewSymbol("nil")
+	}
 	return val
 }
 

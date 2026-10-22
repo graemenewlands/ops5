@@ -10,18 +10,18 @@
 // 1. Alpha Network (Intra-Condition Discrimination):
 //   - AlphaRootNode: Broadcast root receiving asserted and retracted WMEs from working memory.
 //   - TypeNode: Partitions WMEs by class symbol (e.g. "goal", "block").
-//   - ConstantTestNode: Evaluates scalar attribute constraints (=, <>, <, <=, >, >=) and disjunctive value sets.
+//   - ConstantTestNode: Evaluates scalar attribute constraints (=, <>, <, <=, >, >=, =~, !~), disjunctive value sets, and regex matches.
 //   - AlphaSwitchNode: Provides O(1) constant-value hash dispatch, indexing matching child branches in an internal map.
 //   - AlphaMemory: Stores WMEs satisfying all intra-condition tests for a single condition element.
 //
 // 2. Beta Network (Inter-Condition Joins & Aggregations):
 //   - BetaMemory: Stores partial match Tokens matching a prefix sequence of condition elements.
-//   - JoinNode: Joins left partial tokens with right WMEs on variable equality/inequality constraints.
+//   - JoinNode: Joins left partial tokens with right WMEs on variable equality/inequality constraints and extracts regex capture groups.
 //   - NegativeJoinNode: Implements negated condition elements (- (pattern ...)), propagating matches only when
 //     no matching right WMEs exist.
 //   - ExistentialJoinNode: Implements existential tests (? (pattern ...)), matching when at least one fact exists.
 //   - AccumulateNode: Computes aggregate statistics (count, sum, min, max, avg) over matched subsets.
-//   - EvalNode: Evaluates procedural (test ...) predicate expressions against bound token variables.
+//   - EvalNode: Evaluates procedural (test ...) predicate expressions against bound token variables (including text functions and =~, !~).
 //   - NccNode & NccPartnerNode: Coordinates Non-Conjunctive Conditions (conjunctively negated multi-condition blocks).
 //   - TerminalNode: Terminal leaf node instantiated for each production rule, notifying the conflict set agenda.
 //

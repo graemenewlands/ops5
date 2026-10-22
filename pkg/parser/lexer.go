@@ -247,12 +247,23 @@ func (l *Lexer) NextToken() (Token, error) {
 	}
 	if r == '=' {
 		l.next()
+		if l.peek() == '~' {
+			l.next()
+			return Token{Type: TokenOperator, Value: "=~", Line: startLine, Col: startCol}, nil
+		}
 		return Token{Type: TokenOperator, Value: "=", Line: startLine, Col: startCol}, nil
 	}
-	if r == '!' && l.cursor+1 < len(l.src) && l.src[l.cursor+1] == '=' {
+	if r == '!' {
 		l.next()
-		l.next()
-		return Token{Type: TokenOperator, Value: "!=", Line: startLine, Col: startCol}, nil
+		if l.peek() == '=' {
+			l.next()
+			return Token{Type: TokenOperator, Value: "!=", Line: startLine, Col: startCol}, nil
+		}
+		if l.peek() == '~' {
+			l.next()
+			return Token{Type: TokenOperator, Value: "!~", Line: startLine, Col: startCol}, nil
+		}
+		return Token{Type: TokenSymbol, Value: "!", Line: startLine, Col: startCol}, nil
 	}
 
 	// Negation '-' standalone (e.g. -(...) or - (...))

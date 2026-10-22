@@ -57,6 +57,17 @@ To enforce standard mathematical precedence or group operations, use nested `(co
 (bind <total> (compute <subtotal> + <tax>))
 ```
 
+### Text Functions in `bind`
+In addition to `compute`, `bind` supports built-in text manipulation and regex functions:
+```ops5
+(bind <prefix> (left <sku> 2))
+(bind <suffix> (right <sku> 4))
+(bind <is-admin> (equal-ignore-case <role> "admin"))
+(bind <has-promo> (contains-ignore-case <sku> "promo"))
+(bind <clean-id> (regex-replace "^(\\d{3})(\\d{4})$" "ORD-$1-$2" <raw-id>))
+```
+See the [Types & Text Functions Reference](types.md#9-text-functions-and-case-insensitive-matching) for complete details.
+
 ---
 
 ## 4. Usage in Other RHS Actions

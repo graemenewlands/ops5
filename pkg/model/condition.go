@@ -15,6 +15,8 @@ const (
 	OpLessEqual
 	OpGreater
 	OpGreaterEqual
+	OpEqualIgnoreCase
+	OpNotEqualIgnoreCase
 )
 
 func (op Operator) String() string {
@@ -31,12 +33,16 @@ func (op Operator) String() string {
 		return ">"
 	case OpGreaterEqual:
 		return ">="
+	case OpEqualIgnoreCase:
+		return "=~"
+	case OpNotEqualIgnoreCase:
+		return "!~"
 	default:
 		return "="
 	}
 }
 
-// ParseOperator parses a string operator like "=", "<>", "!=", "<", "<=", ">", ">=".
+// ParseOperator parses a string operator like "=", "<>", "!=", "<", "<=", ">", ">=", "=~", "!~".
 func ParseOperator(s string) Operator {
 	switch s {
 	case "<>", "!=":
@@ -49,6 +55,10 @@ func ParseOperator(s string) Operator {
 		return OpGreater
 	case ">=":
 		return OpGreaterEqual
+	case "=~":
+		return OpEqualIgnoreCase
+	case "!~":
+		return OpNotEqualIgnoreCase
 	case "=":
 		fallthrough
 	default:
@@ -328,6 +338,10 @@ func (ce *ConditionElement) Variables() []string {
 					}
 				} else if c.Value.IsVariable() {
 					varMap[c.Value.VariableName()] = true
+				} else if c.Value.IsRegex() {
+					for _, v := range c.Value.RegexExpr().Variables {
+						varMap[v] = true
+					}
 				}
 			}
 		}
@@ -341,10 +355,18 @@ func (ce *ConditionElement) Variables() []string {
 					for _, dj := range c.Disjunction {
 						if dj.Value.IsVariable() {
 							varMap[dj.Value.VariableName()] = true
+						} else if dj.Value.IsRegex() {
+							for _, v := range dj.Value.RegexExpr().Variables {
+								varMap[v] = true
+							}
 						}
 					}
 				} else if c.Value.IsVariable() {
 					varMap[c.Value.VariableName()] = true
+				} else if c.Value.IsRegex() {
+					for _, v := range c.Value.RegexExpr().Variables {
+						varMap[v] = true
+					}
 				}
 			}
 		}
@@ -367,6 +389,18 @@ func collectVariables(v Value, varMap map[string]bool) {
 	} else if v.IsVector() {
 		for _, el := range v.VectorElements() {
 			collectVariables(el, varMap)
+		}
+	} else if v.IsStringExpr() {
+		for _, arg := range v.StringExpr().Args {
+			collectVariables(arg, varMap)
+		}
+	} else if v.IsTemporalExpr() {
+		for _, arg := range v.TemporalExpr().Args {
+			collectVariables(arg, varMap)
+		}
+	} else if v.IsRegex() {
+		for _, vName := range v.RegexExpr().Variables {
+			varMap[vName] = true
 		}
 	}
 }
@@ -509,12 +543,50 @@ func evalConstraint(val Value, op Operator, target Value) bool {
 	return evalOp(val, op, target)
 }
 
+// EvalOp evaluates a binary relational operator between two Values.
+func EvalOp(val Value, op Operator, target Value) bool {
+	return evalOp(val, op, target)
+}
+
 func evalOp(val Value, op Operator, target Value) bool {
+	if target.IsRegex() {
+		re, err := GetCompiledRegex(target.RegexExpr().Pattern)
+		if err != nil {
+			return false
+		}
+		text, ok := val.Text()
+		if !ok {
+			return false
+		}
+		matched := re.MatchString(text)
+		if op == OpEqual || op == OpEqualIgnoreCase {
+			return matched
+		}
+		if op == OpNotEqual || op == OpNotEqualIgnoreCase {
+			return !matched
+		}
+		return false
+	}
+
 	switch op {
 	case OpEqual:
 		return val.Equal(target)
 	case OpNotEqual:
 		return !val.Equal(target)
+	case OpEqualIgnoreCase:
+		t1, ok1 := val.Text()
+		t2, ok2 := target.Text()
+		if !ok1 || !ok2 {
+			return false
+		}
+		return strings.EqualFold(t1, t2)
+	case OpNotEqualIgnoreCase:
+		t1, ok1 := val.Text()
+		t2, ok2 := target.Text()
+		if !ok1 || !ok2 {
+			return true
+		}
+		return !strings.EqualFold(t1, t2)
 	case OpLess:
 		cmp, err := val.Compare(target)
 		return err == nil && cmp < 0

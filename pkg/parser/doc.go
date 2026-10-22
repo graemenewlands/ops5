@@ -16,7 +16,8 @@
 //
 // # Supported Condition Elements (LHS)
 //
-//   - Positive Conditions: Standard pattern matching against WME classes and attributes (e.g. (goal ^status active)).
+//   - Positive Conditions: Standard pattern matching against WME classes and attributes (e.g. (goal ^status active)),
+//     supporting relational operators (=, <>, <, <=, >, >=, =~, !~) and regular expression capture patterns ((regex ...)).
 //   - Negative Conditions: Negated condition elements prefixed with '-' asserting the absence of matching facts.
 //   - Existential Conditions: Prefixed with '?' matching when one or more matching facts exist.
 //   - Accumulate Elements: Aggregates subsets of facts using count, sum, min, max, or avg.
@@ -27,7 +28,8 @@
 //
 //   - Actions: make, modify, remove, write (with crlf and tabto formatting), bind, cbind, halt, and build.
 //   - Value Functions: (compute <expr>), (accept [file]), (acceptline [file]), (genatom), (litval class attr),
-//     and (substr elem start count).
+//     (substr elem start count), date/time arithmetic ((date ...), (datetime ...), (utc ...), etc.), and
+//     text functions ((left ...), (right ...), (contains ...), (contains-ignore-case ...), (equal-ignore-case ...), (regex-replace ...)).
 //
 // # Entry Points
 //

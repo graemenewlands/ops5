@@ -387,26 +387,7 @@ func (ct *ConstantTestNode) AddSuccessor(succ AlphaNode) {
 }
 
 func evalOp(val model.Value, op model.Operator, target model.Value) bool {
-	switch op {
-	case model.OpEqual:
-		return val.Equal(target)
-	case model.OpNotEqual:
-		return !val.Equal(target)
-	case model.OpLess:
-		cmp, err := val.Compare(target)
-		return err == nil && cmp < 0
-	case model.OpLessEqual:
-		cmp, err := val.Compare(target)
-		return err == nil && cmp <= 0
-	case model.OpGreater:
-		cmp, err := val.Compare(target)
-		return err == nil && cmp > 0
-	case model.OpGreaterEqual:
-		cmp, err := val.Compare(target)
-		return err == nil && cmp >= 0
-	default:
-		return false
-	}
+	return model.EvalOp(val, op, target)
 }
 
 func matchesDisjunction(val model.Value, disj []model.TestConstraint) bool {

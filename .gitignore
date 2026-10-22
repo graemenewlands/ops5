@@ -15,3 +15,7 @@ cover.out
 coverage.html
 profile.pprof
 
+# Graphviz visualizations
+*.dot
+*.png
+

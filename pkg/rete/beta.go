@@ -1,6 +1,7 @@
 package rete
 
 import (
+	"strings"
 	"sync"
 
 	"github.com/graemenewlands/ops5/pkg/model"
@@ -744,6 +745,62 @@ func (jn *JoinNode) extractBindings(token *Token, wme *model.WME, buf []Binding)
 								}
 							}
 							if !foundIntra && hasVal {
+								newBindings = append(newBindings, Binding{Name: vName, Value: targetVal})
+							}
+						}
+					}
+				} else if c.Value.IsRegex() {
+					reExpr := c.Value.RegexExpr()
+					re, err := model.GetCompiledRegex(reExpr.Pattern)
+					if err != nil {
+						return nil, false
+					}
+					isNil := (wmeVal.Type() == model.TypeSymbol && strings.EqualFold(wmeVal.Raw().(string), "nil"))
+					text, isText := wmeVal.Text()
+					if !isText && !isNil {
+						return nil, false
+					}
+
+					var submatches []string
+					if isText {
+						submatches = re.FindStringSubmatch(text)
+						if submatches == nil {
+							return nil, false
+						}
+					}
+
+					for varIdx, vName := range reExpr.Variables {
+						var targetVal model.Value
+						if isNil {
+							targetVal = model.NewSymbol("nil")
+						} else {
+							valStr := ""
+							if varIdx+1 < len(submatches) {
+								valStr = submatches[varIdx+1]
+							}
+							if wmeVal.Type() == model.TypeSymbol {
+								targetVal = model.NewSymbol(valStr)
+							} else {
+								targetVal = model.NewString(valStr)
+							}
+						}
+
+						if existing, ok := token.GetBinding(vName); ok {
+							if !matchValueOrVector(targetVal, existing) {
+								return nil, false
+							}
+						} else {
+							foundIntra := false
+							for _, b := range newBindings {
+								if b.Name == vName {
+									if !matchValueOrVector(targetVal, b.Value) {
+										return nil, false
+									}
+									foundIntra = true
+									break
+								}
+							}
+							if !foundIntra {
 								newBindings = append(newBindings, Binding{Name: vName, Value: targetVal})
 							}
 						}

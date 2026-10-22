@@ -2,6 +2,9 @@
 
 The `substr` function extracts a subsequence of values (or a single value) from a specified working memory element (WME). It is primarily used for manipulating multi-valued vector attributes, processing sequences, or extracting attribute values by position.
 
+> [!NOTE]
+> **WME Elements vs Character Substrings**: In OPS5, `substr` is exclusively designed for extracting attribute values and subvectors from **working memory elements**. For character-level text slicing and pattern manipulation on strings or symbols, use the text functions [`(left ...)`, `(right ...)`, and `(regex-replace ...)`](types.md#9-text-functions-and-case-insensitive-matching).
+
 ---
 
 ## 1. Syntax

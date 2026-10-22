@@ -13,16 +13,19 @@
 //   - Value: Strongly-typed, immutable representation of OPS5 data types, including symbols, integers,
 //     floating-point numbers, strings, booleans, calendar dates (TypeDate), timestamps (TypeDateTime,
 //     TypeDateUTCTime), variables, and vectors, as well as dynamic value functions such as (compute ...),
-//     (accept), (genatom), (litval ...), (substr ...), (date ...), (datetime ...), (utc ...), (dayadd ...),
-//     (monthadd ...), (yearadd ...), (houradd ...), (minuteadd ...), (secondsadd ...), (datediff ...),
-//     (minutes ...), (hours ...), and (days ...).
+//     (accept), (genatom), (litval ...), (substr ...), date/time arithmetic ((date ...), (datetime ...),
+//     (utc ...), (dayadd ...), (monthadd ...), (yearadd ...), (houradd ...), (minuteadd ...), (secondsadd ...),
+//     (datediff ...), (minutes ...), (hours ...), (days ...)), text manipulation and regex functions ((left ...),
+//     (right ...), (contains ...), (contains-ignore-case ...), (equal-ignore-case ...), (regex-replace ...)),
+//     and regular expression patterns ((regex ...)).
 //
 //   - Rule: Represents a production rule containing a Left-Hand Side (LHS) list of ConditionElements
 //     and a Right-Hand Side (RHS) list of Actions, along with priority Salience and documentation metadata.
 //
 //   - ConditionElement: Condition patterns evaluated against WMEs during Rete pattern matching. Supports
 //     positive patterns, negative patterns (negated presence), existential tests, accumulate aggregations,
-//     non-conjunctive/NCC blocks, and procedural (test ...) predicate evaluations.
+//     non-conjunctive/NCC blocks, procedural (test ...) predicate evaluations, case-insensitive relational
+//     operators (=~, !~), and regex capture group variable binding ((regex ...)).
 //
 //   - Action: Right-hand side actions executed when an instantiated rule fires, including make, modify,
 //     remove, write, bind, cbind, halt, build, and user-defined CustomActions.

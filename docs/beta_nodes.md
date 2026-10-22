@@ -122,7 +122,7 @@ flowchart TD
 ### 3.6 `EvalNode`
 - **Source**: `pkg/rete/eval.go` (`EvalNode`)
 - **Role**: Single-input Beta filter evaluating mathematical, boolean, and relational expressions across bound variables.
-- **Target OPS5 / Rule Construct**: `(test (compute <x> + <y> > 100))` or `(test (<val> <> 0))`
+- **Target OPS5 / Rule Construct**: `(test (compute <x> + <y> > 100))`, `(test (<role> =~ "admin"))`, `(test (contains-ignore-case <sku> "promo"))`, or `(test (<val> <> 0))`
 - **Architecture & Execution**:
   - Implements `LeftActivatable`. Placed downstream of a `BetaMemory` or `JoinNode` where all required variables are already bound in `token.Bindings`.
   - On `LeftActivation(token, tag)`:

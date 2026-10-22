@@ -125,7 +125,7 @@ func extractConstantTests(ce *model.ConditionElement) (eqTests []alphaTestSpec, 
 				}
 			} else if !c.Value.IsVariable() {
 				normAttr := model.NormalizeAttribute(at.Attribute)
-				if c.Op == model.OpEqual {
+				if c.Op == model.OpEqual && !c.Value.IsRegex() {
 					eqTests = append(eqTests, alphaTestSpec{
 						Attribute:   normAttr,
 						VectorIndex: vecIdx,

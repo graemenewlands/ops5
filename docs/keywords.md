@@ -66,6 +66,12 @@ These action verbs execute sequentially when a production rule fires.
 | **`minutes`** | `(minutes <seconds>)` | Converts seconds to whole minutes (`seconds / 60`). See [Types Reference](types.md#8-temporal-arithmetic--date-math-utility-functions). | `(bind <mins> (minutes <diff_sec>))` |
 | **`hours`** | `(hours <seconds>)` | Converts seconds to whole hours (`seconds / 3600`). See [Types Reference](types.md#8-temporal-arithmetic--date-math-utility-functions). | `(bind <hrs> (hours <diff_sec>))` |
 | **`days`** | `(days <seconds>)` | Converts seconds to whole days (`seconds / 86400`). See [Types Reference](types.md#8-temporal-arithmetic--date-math-utility-functions). | `(bind <days> (days <diff_sec>))` |
+| **`left`** | `(left <target> <count>)` | Extracts the first `<count>` Unicode runes. Clamps out-of-bounds count; preserves symbol/string type; returns `nil` for `nil`. See [Types Reference](types.md#9-text-functions-and-case-insensitive-matching). | `(bind <prefix> (left <sku> 2))` |
+| **`right`** | `(right <target> <count>)` | Extracts the last `<count>` Unicode runes. Clamps out-of-bounds count; preserves symbol/string type; returns `nil` for `nil`. See [Types Reference](types.md#9-text-functions-and-case-insensitive-matching). | `(bind <suffix> (right <sku> 4))` |
+| **`contains`** | `(contains <target> <subStr>)` | Case-sensitive substring test returning boolean `true`/`false`. Interoperates symmetrically with symbols and strings. | `(bind <flag> (contains <desc> "VIP"))` |
+| **`contains-ignore-case`** | `(contains-ignore-case <target> <subStr>)` | Case-insensitive substring test returning boolean `true`/`false`. Interoperates symmetrically with symbols and strings. | `(bind <flag> (contains-ignore-case <role> "admin"))` |
+| **`equal-ignore-case`** | `(equal-ignore-case <s1> <s2>)` | Case-insensitive full equality test returning boolean `true`/`false`. | `(bind <ok> (equal-ignore-case <status> "active"))` |
+| **`regex-replace`** | `(regex-replace <pattern> <template> <target>)` | Replaces regex matches in `<target>` with `<template>` using `$1`, `$2`, or `${name}` expansion. | `(bind <id> (regex-replace "^(\\d{3})(\\d{4})$" "ORD-$1-$2" <raw>))` |
 | **`build`** | `(build (p <name> ...))` | Dynamically synthesizes and compiles a production rule into Rete at runtime, substituting variables bound in the parent rule. | `(build (p shortcut (traveler ^dest <d>) --> (write "Direct route to" <d>)))` |
 | **`halt`** | `(halt)` | Halts the inference engine execution loop immediately. Current cycle completes, but no further rules fire. | `(halt)` |
 | **`watch`** | `(watch [0 \| 1 \| 2])` | Modifies or displays the engine trace level dynamically during rule execution. | `(watch 2)`<br>`(watch 0)` |
@@ -89,6 +95,9 @@ These keywords, delimiters, and operators are recognized in rule condition patte
 | **`<=`** | Relational test | Less than or equal to. | `(sensor ^temp <= 100)` |
 | **`>`** | Relational test | Strictly greater than. | `(priority ^level > 1)` |
 | **`>=`** | Relational test | Greater than or equal to. | `(priority ^level >= 1)` |
+| **`=~`** | Relational test | Case-insensitive Unicode equality test (`strings.EqualFold`). Matches symmetrically across symbols and strings. | `(user ^role =~ "admin")` |
+| **`!~`** | Relational test | Case-insensitive Unicode inequality test. | `(user ^status !~ "inactive")` |
+| **`regex`** | Pattern match & bind | Matches an attribute against a regular expression and binds positional or named `(?P<name>...)` capture groups to variables with full join consistency. | `(item ^code (regex "^([A-Z]{2})-([0-9]{4})$" <country> <id>))` |
 | **`<< ... >>`** | Disjunction block | Matches if attribute satisfies ANY of the enclosed values, operators, or bound variables. | `(item ^status << active pending >>)`<br>`(sensor ^temp << < 10 >= 100 >>)` |
 | **`{ ... }`** | Conjunction block | Matches if attribute satisfies ALL enclosed relational constraints and variable bindings. | `(sensor ^reading { >= 50 <= 100 })` |
 | **`true`**, **`false`** | Boolean literals | First-class boolean values (case-insensitive) for scalar and vector attributes. | `(sensor ^active true)` |

@@ -390,6 +390,73 @@ func (p *Parser) isAttributeToken(tok Token, schema *model.ClassSchema) bool {
 	return false
 }
 
+func (p *Parser) parseRegexPattern() (model.Value, error) {
+	lparen, err := p.expect(TokenLParen)
+	if err != nil {
+		return model.NewSymbol("nil"), err
+	}
+	verbTok, err := p.expect(TokenSymbol)
+	if err != nil {
+		return model.NewSymbol("nil"), err
+	}
+	if !strings.EqualFold(verbTok.Value, "regex") {
+		return model.NewSymbol("nil"), fmt.Errorf("expected 'regex' at line %d, got %s", verbTok.Line, verbTok.Value)
+	}
+
+	if p.current.Type != TokenString && p.current.Type != TokenSymbol {
+		return model.NewSymbol("nil"), fmt.Errorf("expected regex pattern string at line %d, got %s", p.current.Line, p.current.Type)
+	}
+	pat := p.current.Value
+	if err := p.advance(); err != nil {
+		return model.NewSymbol("nil"), err
+	}
+
+	// Validate regex pattern at compile-time
+	compiled, err := model.GetCompiledRegex(pat)
+	if err != nil {
+		return model.NewSymbol("nil"), fmt.Errorf("invalid regex pattern at line %d: %w", lparen.Line, err)
+	}
+
+	var vars []string
+	for p.current.Type != TokenRParen && p.current.Type != TokenEOF {
+		if p.current.Type == TokenVariable || p.current.Type == TokenSymbol {
+			vName := strings.TrimPrefix(strings.TrimSuffix(p.current.Value, ">"), "<")
+			vars = append(vars, vName)
+			if err := p.advance(); err != nil {
+				return model.NewSymbol("nil"), err
+			}
+		} else {
+			return model.NewSymbol("nil"), fmt.Errorf("unexpected token in regex pattern at line %d: %s", p.current.Line, p.current.Value)
+		}
+	}
+
+	if _, err := p.expect(TokenRParen); err != nil {
+		return model.NewSymbol("nil"), fmt.Errorf("expected ')' closing regex pattern at line %d: %w", lparen.Line, err)
+	}
+
+	// If no positional variables were provided, automatically bind named capture groups (?P<name>...)
+	if len(vars) == 0 {
+		for _, name := range compiled.SubexpNames() {
+			if name != "" {
+				vars = append(vars, name)
+			}
+		}
+	}
+
+	return model.NewRegex(pat, vars...), nil
+}
+
+func (p *Parser) parseConditionValue() (model.Value, error) {
+	if p.current.Type == TokenLParen && p.peek.Type == TokenSymbol && strings.EqualFold(p.peek.Value, "regex") {
+		return p.parseRegexPattern()
+	}
+	val := TokenToValue(p.current)
+	if err := p.advance(); err != nil {
+		return model.NewSymbol("nil"), err
+	}
+	return val, nil
+}
+
 func (p *Parser) parseConditionElement() (*model.ConditionElement, error) {
 	isBraced := false
 	if p.current.Type == TokenLBrace {
@@ -508,8 +575,8 @@ func (p *Parser) parseConditionElement() (*model.ConditionElement, error) {
 								return nil, err
 							}
 						}
-						val := TokenToValue(p.current)
-						if err := p.advance(); err != nil {
+						val, err := p.parseConditionValue()
+						if err != nil {
 							return nil, err
 						}
 						disj = append(disj, model.TestConstraint{Op: op, Value: val})
@@ -539,8 +606,8 @@ func (p *Parser) parseConditionElement() (*model.ConditionElement, error) {
 										return nil, err
 									}
 								}
-								val := TokenToValue(p.current)
-								if err := p.advance(); err != nil {
+								val, err := p.parseConditionValue()
+								if err != nil {
 									return nil, err
 								}
 								disj = append(disj, model.TestConstraint{Op: op, Value: val})
@@ -560,8 +627,8 @@ func (p *Parser) parseConditionElement() (*model.ConditionElement, error) {
 							}
 						}
 
-						val := TokenToValue(p.current)
-						if err := p.advance(); err != nil {
+						val, err := p.parseConditionValue()
+						if err != nil {
 							return nil, err
 						}
 
@@ -581,8 +648,8 @@ func (p *Parser) parseConditionElement() (*model.ConditionElement, error) {
 					}
 				}
 
-				val := TokenToValue(p.current)
-				if err := p.advance(); err != nil {
+				val, err := p.parseConditionValue()
+				if err != nil {
 					return nil, err
 				}
 
@@ -609,8 +676,8 @@ func (p *Parser) parseConditionElement() (*model.ConditionElement, error) {
 							return nil, err
 						}
 					}
-					val := TokenToValue(p.current)
-					if err := p.advance(); err != nil {
+					val, err := p.parseConditionValue()
+					if err != nil {
 						return nil, err
 					}
 					disj = append(disj, model.TestConstraint{Op: op, Value: val})
@@ -632,8 +699,8 @@ func (p *Parser) parseConditionElement() (*model.ConditionElement, error) {
 						}
 					}
 
-					val := TokenToValue(p.current)
-					if err := p.advance(); err != nil {
+					val, err := p.parseConditionValue()
+					if err != nil {
 						return nil, err
 					}
 
@@ -651,8 +718,8 @@ func (p *Parser) parseConditionElement() (*model.ConditionElement, error) {
 					}
 				}
 
-				val := TokenToValue(p.current)
-				if err := p.advance(); err != nil {
+				val, err := p.parseConditionValue()
+				if err != nil {
 					return nil, err
 				}
 
@@ -763,8 +830,8 @@ func (p *Parser) parseExistentialCondition(isBraced bool) (*model.ConditionEleme
 							}
 						}
 
-						val := TokenToValue(p.current)
-						if err := p.advance(); err != nil {
+						val, err := p.parseConditionValue()
+						if err != nil {
 							return nil, err
 						}
 
@@ -784,8 +851,8 @@ func (p *Parser) parseExistentialCondition(isBraced bool) (*model.ConditionEleme
 					}
 				}
 
-				val := TokenToValue(p.current)
-				if err := p.advance(); err != nil {
+				val, err := p.parseConditionValue()
+				if err != nil {
 					return nil, err
 				}
 
@@ -811,8 +878,8 @@ func (p *Parser) parseExistentialCondition(isBraced bool) (*model.ConditionEleme
 						}
 					}
 
-					val := TokenToValue(p.current)
-					if err := p.advance(); err != nil {
+					val, err := p.parseConditionValue()
+					if err != nil {
 						return nil, err
 					}
 
@@ -830,8 +897,8 @@ func (p *Parser) parseExistentialCondition(isBraced bool) (*model.ConditionEleme
 					}
 				}
 
-				val := TokenToValue(p.current)
-				if err := p.advance(); err != nil {
+				val, err := p.parseConditionValue()
+				if err != nil {
 					return nil, err
 				}
 
@@ -1134,12 +1201,58 @@ func (p *Parser) parseNccCondition(isOuterBraced bool) (*model.ConditionElement,
 }
 
 func (p *Parser) parseTestComparison() (model.EvalComparison, error) {
+	if p.isRHSFunction() && !strings.EqualFold(p.peek.Value, "compute") {
+		fnVal, err := p.parseRHSFunction()
+		if err != nil {
+			return model.EvalComparison{}, err
+		}
+		if relOp, ok := isRelationalOp(p.current); ok {
+			if err := p.advance(); err != nil {
+				return model.EvalComparison{}, err
+			}
+			right, err := p.parseTestOperand()
+			if err != nil {
+				return model.EvalComparison{}, err
+			}
+			return model.EvalComparison{Left: fnVal, Op: relOp, Right: right, HasRight: true}, nil
+		}
+		return model.EvalComparison{Left: fnVal, HasRight: false}, nil
+	}
+
 	hasParen := false
 	if p.current.Type == TokenLParen {
 		hasParen = true
 		if err := p.advance(); err != nil {
 			return model.EvalComparison{}, err
 		}
+	}
+
+	if p.isRHSFunction() && !strings.EqualFold(p.peek.Value, "compute") {
+		fnVal, err := p.parseRHSFunction()
+		if err != nil {
+			return model.EvalComparison{}, err
+		}
+		if relOp, ok := isRelationalOp(p.current); ok {
+			if err := p.advance(); err != nil {
+				return model.EvalComparison{}, err
+			}
+			right, err := p.parseTestOperand()
+			if err != nil {
+				return model.EvalComparison{}, err
+			}
+			if hasParen {
+				if _, err := p.expect(TokenRParen); err != nil {
+					return model.EvalComparison{}, err
+				}
+			}
+			return model.EvalComparison{Left: fnVal, Op: relOp, Right: right, HasRight: true}, nil
+		}
+		if hasParen {
+			if _, err := p.expect(TokenRParen); err != nil {
+				return model.EvalComparison{}, err
+			}
+		}
+		return model.EvalComparison{Left: fnVal, HasRight: false}, nil
 	}
 
 	// Check if this is a prefix operator like (> <x> <y>)
@@ -1452,7 +1565,7 @@ func (p *Parser) isRHSFunction() bool {
 	}
 	sub := strings.ToLower(p.peek.Value)
 	return sub == "compute" || sub == "accept" || sub == "acceptline" || sub == "genatom" || sub == "litval" || sub == "substr" ||
-		model.IsTemporalOp(sub)
+		model.IsTemporalOp(sub) || model.IsStringOp(sub)
 }
 
 func (p *Parser) parseRHSFunction() (model.Value, error) {
@@ -1474,8 +1587,72 @@ func (p *Parser) parseRHSFunction() (model.Value, error) {
 		if model.IsTemporalOp(sub) {
 			return p.parseTemporalFunction(model.NormalizeTemporalOp(sub))
 		}
+		if model.IsStringOp(sub) {
+			return p.parseStringFunction(model.NormalizeStringOp(sub))
+		}
 		return model.NewSymbol("nil"), fmt.Errorf("unknown RHS function: %s", sub)
 	}
+}
+
+func (p *Parser) parseStringFunction(op string) (model.Value, error) {
+	if _, err := p.expect(TokenLParen); err != nil {
+		return model.NewSymbol("nil"), err
+	}
+	verbTok, err := p.expect(TokenSymbol)
+	if err != nil {
+		return model.NewSymbol("nil"), err
+	}
+
+	var args []model.Value
+	for p.current.Type != TokenRParen && p.current.Type != TokenEOF {
+		if p.isRHSFunction() {
+			subFn, err := p.parseRHSFunction()
+			if err != nil {
+				return model.NewSymbol("nil"), err
+			}
+			args = append(args, subFn)
+		} else if p.current.Type == TokenVariable || p.current.Type == TokenSymbol || p.current.Type == TokenNumber || p.current.Type == TokenString {
+			args = append(args, TokenToValue(p.current))
+			if err := p.advance(); err != nil {
+				return model.NewSymbol("nil"), err
+			}
+		} else {
+			return model.NewSymbol("nil"), fmt.Errorf("unexpected token in %s at line %d: %s (%q)", op, p.current.Line, p.current.Type, p.current.Value)
+		}
+	}
+
+	if _, err := p.expect(TokenRParen); err != nil {
+		return model.NewSymbol("nil"), fmt.Errorf("expected ')' closing %s at line %d: %w", op, verbTok.Line, err)
+	}
+
+	// Validate argument counts
+	switch op {
+	case "left", "right", "contains", "containsignorecase", "equalsignorecase":
+		if len(args) != 2 {
+			return model.NewSymbol("nil"), fmt.Errorf("%s expects 2 arguments, got %d at line %d", op, len(args), verbTok.Line)
+		}
+	case "regexreplace":
+		if len(args) != 3 {
+			return model.NewSymbol("nil"), fmt.Errorf("%s expects 3 arguments, got %d at line %d", op, len(args), verbTok.Line)
+		}
+	}
+
+	// If all arguments are constant literals, evaluate immediately at compile-time (constant folding)
+	allConst := true
+	for _, a := range args {
+		if a.IsVariable() || a.IsCompute() || a.IsAccept() || a.IsGenatom() || a.IsLitval() || a.IsSubstr() || a.IsTemporalExpr() || a.IsStringExpr() {
+			allConst = false
+			break
+		}
+	}
+	if allConst {
+		res, err := model.EvaluateStringExpr(&model.StringExpr{Op: op, Args: args}, nil)
+		if err == nil {
+			return res, nil
+		}
+	}
+
+	return model.NewStringExpr(op, args...), nil
 }
 
 func (p *Parser) parseTemporalFunction(op string) (model.Value, error) {

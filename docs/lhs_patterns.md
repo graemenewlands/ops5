@@ -76,6 +76,8 @@ By default, an attribute test without an operator tests for **equality** (`=`). 
 | **`<=`** | Less than or equal | `^balance <= 0.0` | Numeric or lexicographical less-than-or-equal. |
 | **`>`** | Strictly greater than | `^retry-count > 3` | Numeric or lexicographical greater-than. |
 | **`>=`** | Greater than or equal | `^score >= 70` | Numeric or lexicographical greater-than-or-equal. |
+| **`=~`** | Case-insensitive equal | `^role =~ "admin"` | Matches string or symbol ignoring Unicode casing (`strings.EqualFold`). Symmetrical across strings and symbols. |
+| **`!~`** | Case-insensitive not equal | `^status !~ "inactive"` | Matches if attribute is not equal ignoring case. |
 
 ### Multiple Constraints & Conjunction Blocks (`{ ... }`)
 An attribute can have multiple constraints in the same condition element, either by repeating the attribute or using a braced conjunction block `{ ... }`:
@@ -140,6 +142,35 @@ Variables bound in earlier condition elements can be combined with comparison op
     (write "Transaction on account" <aid> "exceeds limit" <limit> (crlf))
 )
 ```
+
+### 4.4 Regex Pattern Matching & Variable Capture (`(regex ...)`)
+
+Attributes can be matched against regular expressions on the LHS while capturing submatches into variables. Both named and positional capture groups are supported:
+
+#### Style 1: Named Capture Groups `(?P<var>...)`
+Variables are defined directly within the regular expression pattern:
+```ops5
+(p parse-sku-named
+    (item ^code (regex "^(?P<country>[A-Z]{2})-(?P<id>[0-9]{4})$"))
+  -->
+    (make inventory ^country <country> ^id <id>)
+)
+```
+
+#### Style 2: Positional Capture Groups with Explicit Variables
+Variables are listed positionally after the pattern (`group 1 -> <v1>`, `group 2 -> <v2>`):
+```ops5
+(p parse-sku-positional
+    (item ^code (regex "^([A-Z]{2})-([0-9]{4})$" <country> <id>))
+  -->
+    (make inventory ^country <country> ^id <id>)
+)
+```
+
+#### Unification & Boundary Rules
+1. **Join Constraints**: If a capture group variable (e.g. `<country>`) was already bound by a preceding condition element, the captured substring **must equal** that existing binding. If not, the join fails.
+2. **Type Preservation**: Slicing or capturing from a symbol produces a symbol; capturing from a string produces a string.
+3. **Optional Groups**: If an optional capture group does not match (e.g. `(regex "^([A-Z]+)(?:-([0-9]+))?$" <cat> <num>)` on `"ABC"`), the variable binds to an empty string `""` (or empty symbol) rather than failing.
 
 ---
 
@@ -304,6 +335,18 @@ A `(test ...)` condition element evaluates mathematical, boolean, or relational 
    Multiple comparisons can be included in a single `(test ...)` element:
    ```ops5
    (test (<x> >= 10) (<x> <= 100))
+   ```
+4. **Text Manipulation & Case-Insensitive Predicates**:
+   Text functions and case-insensitive relational operators (`=~`, `!~`) can be evaluated directly in `(test ...)`:
+   ```ops5
+   (p filter-users
+       (user ^role <role> ^sku <sku>)
+       (test (<role> =~ "admin"))
+       (test (contains-ignore-case <sku> "promo"))
+       (test ((left <sku> 2) = "US"))
+     -->
+       (write "Found authorized promo item for" <role> (crlf))
+   )
    ```
 
 > [!NOTE]

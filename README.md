@@ -489,6 +489,18 @@ Built-in date/time creation and manipulation functions usable in `bind`, `make`,
 - **End-of-Month & Leap-Year Clamping**: `monthadd` and `yearadd` clamp overflow days to the last day of the destination month (e.g. `Jan 31 + 1 month -> Feb 28`, `Feb 29 + 1 year -> Feb 28`).
 - **Interval & Unit Conversion**: `(datediff <d1> <d2>)` (returns `d1 - d2` in seconds), `(minutes <seconds>)`, `(hours <seconds>)`, `(days <seconds>)`.
 
+#### Text Functions, Case-Insensitive Matching & Regex
+> [!NOTE]
+> For complete specifications, see the [Type System & Text Functions Reference](docs/types.md#9-text-functions-and-case-insensitive-matching) and [LHS Pattern Matching Reference](docs/lhs_patterns.md#44-regex-pattern-matching--variable-capture-regex-).
+
+High-performance text manipulation and pattern matching built directly into the engine:
+- **Text Slicing & Clamping**: `(left <target> <count>)` and `(right <target> <count>)` with Unicode rune awareness, length clamping, `nil` propagation, and symbol/string type preservation.
+- **Text Predicates**: `(contains <target> <subStr>)` (case-sensitive), `(contains-ignore-case <target> <subStr>)`, and `(equal-ignore-case <s1> <s2>)` with cross-type string $\leftrightarrow$ symbol symmetry.
+- **RHS Regex Expansion**: `(regex-replace <pattern> <template> <target>)` with `$1`, `$2`, and `${name}` group expansion and thread-safe pattern caching.
+- **LHS Case-Insensitive Relational Operators**: `=~` (case-insensitive equal) and `!~` (case-insensitive not equal) in alpha condition elements and `(test ...)`.
+- **LHS Regex Pattern Matching & Variable Binding**: `(regex "<pattern>" [<v1> <v2>...])` supporting both named groups `(?P<name>...)` and positional groups with full cross-condition join unification.
+
+
 ---
 
 ## Rete Pattern Matching Engine

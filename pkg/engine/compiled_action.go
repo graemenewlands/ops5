@@ -209,6 +209,9 @@ func (e *Engine) compileValue(val model.Value) ValueEvaluator {
 	if val.IsTemporalExpr() {
 		return e.compileTemporalExpr(val.TemporalExpr())
 	}
+	if val.IsStringExpr() {
+		return e.compileStringExpr(val.StringExpr())
+	}
 
 	// Constant value (Integer, Float, Symbol, String, Boolean, etc.)
 	return func(ctx *ActionContext) model.Value {
@@ -452,6 +455,62 @@ func (e *Engine) compileTemporalExpr(te *model.TemporalExpr) ValueEvaluator {
 	}
 	return func(ctx *ActionContext) model.Value {
 		return model.NewSymbol("nil")
+	}
+}
+
+// compileStringExpr precompiles text manipulation function evaluators (left, right, contains, regex-replace, etc.).
+func (e *Engine) compileStringExpr(se *model.StringExpr) ValueEvaluator {
+	op := model.NormalizeStringOp(se.Op)
+	argEvals := make([]ValueEvaluator, len(se.Args))
+	for i, arg := range se.Args {
+		argEvals[i] = e.compileValue(arg)
+	}
+
+	switch op {
+	case "left", "right", "contains", "containsignorecase", "equalsignorecase":
+		if len(argEvals) != 2 {
+			return func(ctx *ActionContext) model.Value {
+				return model.NewSymbol("nil")
+			}
+		}
+		ev0 := argEvals[0]
+		ev1 := argEvals[1]
+		return func(ctx *ActionContext) model.Value {
+			res, err := model.EvaluateStringExpr(&model.StringExpr{Op: op, Args: []model.Value{ev0(ctx), ev1(ctx)}}, nil)
+			if err != nil {
+				return model.NewSymbol("nil")
+			}
+			return res
+		}
+
+	case "regexreplace":
+		if len(argEvals) != 3 {
+			return func(ctx *ActionContext) model.Value {
+				return model.NewSymbol("nil")
+			}
+		}
+		ev0 := argEvals[0]
+		ev1 := argEvals[1]
+		ev2 := argEvals[2]
+		return func(ctx *ActionContext) model.Value {
+			res, err := model.EvaluateStringExpr(&model.StringExpr{Op: op, Args: []model.Value{ev0(ctx), ev1(ctx), ev2(ctx)}}, nil)
+			if err != nil {
+				return model.NewSymbol("nil")
+			}
+			return res
+		}
+	}
+
+	return func(ctx *ActionContext) model.Value {
+		args := make([]model.Value, len(argEvals))
+		for i, ev := range argEvals {
+			args[i] = ev(ctx)
+		}
+		res, err := model.EvaluateStringExpr(&model.StringExpr{Op: op, Args: args}, nil)
+		if err != nil {
+			return model.NewSymbol("nil")
+		}
+		return res
 	}
 }
 

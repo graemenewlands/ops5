@@ -27,6 +27,8 @@ const (
 	TypeDateTime
 	TypeDateUTCTime
 	TypeTemporalExpr
+	TypeStringExpr
+	TypeRegex
 )
 
 func (t ValueType) String() string {
@@ -63,6 +65,10 @@ func (t ValueType) String() string {
 		return "dateutctime"
 	case TypeTemporalExpr:
 		return "temporal"
+	case TypeStringExpr:
+		return "string_expr"
+	case TypeRegex:
+		return "regex"
 	default:
 		return "unknown"
 	}
@@ -358,6 +364,80 @@ func (v Value) TemporalExpr() *TemporalExpr {
 		return v.val.(*TemporalExpr)
 	}
 	return nil
+}
+
+// StringExpr represents a dynamic text function call (left, right, contains, containsIgnoreCase, equalsIgnoreCase, regex-replace).
+type StringExpr struct {
+	Op   string  // "left", "right", "contains", "containsignorecase", "equalsignorecase", "regexreplace"
+	Args []Value // All arguments
+}
+
+// NewStringExpr creates a new StringExpr Value.
+func NewStringExpr(op string, args ...Value) Value {
+	return Value{
+		typ: TypeStringExpr,
+		val: &StringExpr{
+			Op:   NormalizeStringOp(op),
+			Args: args,
+		},
+	}
+}
+
+// IsStringExpr returns true if this value is a StringExpr.
+func (v Value) IsStringExpr() bool {
+	return v.typ == TypeStringExpr
+}
+
+// StringExpr returns the underlying StringExpr pointer if this value is a StringExpr.
+func (v Value) StringExpr() *StringExpr {
+	if v.typ == TypeStringExpr {
+		return v.val.(*StringExpr)
+	}
+	return nil
+}
+
+// RegexExpr represents a (regex pattern [variables...]) pattern in a condition element.
+type RegexExpr struct {
+	Pattern   string
+	Variables []string // Positional or named variable names without '<' and '>'
+}
+
+// NewRegex creates a new RegexExpr Value.
+func NewRegex(pattern string, vars ...string) Value {
+	cleanVars := make([]string, len(vars))
+	for i, v := range vars {
+		cleanVars[i] = strings.TrimPrefix(strings.TrimSuffix(v, ">"), "<")
+	}
+	return Value{
+		typ: TypeRegex,
+		val: &RegexExpr{
+			Pattern:   pattern,
+			Variables: cleanVars,
+		},
+	}
+}
+
+// IsRegex returns true if this value is a RegexExpr.
+func (v Value) IsRegex() bool {
+	return v.typ == TypeRegex
+}
+
+// RegexExpr returns the underlying RegexExpr pointer if this value is a RegexExpr.
+func (v Value) RegexExpr() *RegexExpr {
+	if v.typ == TypeRegex {
+		return v.val.(*RegexExpr)
+	}
+	return nil
+}
+
+// Text returns the underlying unquoted string content if this value is TypeString or TypeSymbol, with ok=true.
+func (v Value) Text() (string, bool) {
+	if v.typ == TypeString || v.typ == TypeSymbol {
+		if s, ok := v.val.(string); ok {
+			return s, true
+		}
+	}
+	return "", false
 }
 
 // ConvertToDate converts any Value to TypeDate.
@@ -764,6 +844,29 @@ func (v Value) String() string {
 		}
 		b.WriteString(")")
 		return b.String()
+	case TypeStringExpr:
+		se := v.val.(*StringExpr)
+		var b strings.Builder
+		b.WriteString("(")
+		b.WriteString(se.Op)
+		for _, arg := range se.Args {
+			b.WriteString(" ")
+			b.WriteString(arg.String())
+		}
+		b.WriteString(")")
+		return b.String()
+	case TypeRegex:
+		re := v.val.(*RegexExpr)
+		var b strings.Builder
+		b.WriteString("(regex ")
+		b.WriteString(strconv.Quote(re.Pattern))
+		for _, vName := range re.Variables {
+			b.WriteString(" <")
+			b.WriteString(vName)
+			b.WriteString(">")
+		}
+		b.WriteString(")")
+		return b.String()
 	default:
 		return fmt.Sprintf("%v", v.val)
 	}
@@ -787,6 +890,32 @@ func (v Value) Equal(o Value) bool {
 			}
 			for i := range t1.Args {
 				if !t1.Args[i].Equal(t2.Args[i]) {
+					return false
+				}
+			}
+			return true
+		}
+		if v.typ == TypeStringExpr {
+			s1 := v.val.(*StringExpr)
+			s2 := o.val.(*StringExpr)
+			if s1.Op != s2.Op || len(s1.Args) != len(s2.Args) {
+				return false
+			}
+			for i := range s1.Args {
+				if !s1.Args[i].Equal(s2.Args[i]) {
+					return false
+				}
+			}
+			return true
+		}
+		if v.typ == TypeRegex {
+			r1 := v.val.(*RegexExpr)
+			r2 := o.val.(*RegexExpr)
+			if r1.Pattern != r2.Pattern || len(r1.Variables) != len(r2.Variables) {
+				return false
+			}
+			for i := range r1.Variables {
+				if r1.Variables[i] != r2.Variables[i] {
 					return false
 				}
 			}

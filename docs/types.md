@@ -2,7 +2,7 @@
 
 > **Package**: `pkg/model`  
 > **Engine Runtime**: `pkg/engine`, `pkg/rete`, `pkg/parser`  
-> **Specification Version**: `v0.3.2`
+> **Specification Version**: `v0.4.0`
 
 ---
 
@@ -499,4 +499,49 @@ func main() {
         updated.ID, updated.Status, updated.Timetag)
 }
 ```
+
+---
+
+## 9. Text Functions, Case-Insensitive Matching & Regex
+
+The engine provides built-in text manipulation, case-insensitive comparison operators, and regular expression pattern matching with variable capture group binding.
+
+### 9.1 S-Expression Text Functions
+
+These functions can be used in `bind`, `make`, `modify`, `write`, and LHS `(test ...)` condition elements. Both camelCase and kebab-case function names are supported.
+
+| Function | Syntax Form | Return Type | Description & Boundary Rules |
+| :--- | :--- | :--- | :--- |
+| **`left`** | `(left <target> <count>)` | Symbol / String / `nil` | Extracts the first `<count>` Unicode runes. Clamps if count > length; returns `""` if count $\le 0$; preserves input type (symbol vs string); returns `nil` if target is `nil`. |
+| **`right`** | `(right <target> <count>)` | Symbol / String / `nil` | Extracts the last `<count>` Unicode runes. Clamps if count > length; returns `""` if count $\le 0$; preserves input type; returns `nil` if target is `nil`. |
+| **`contains`** | `(contains <target> <subStr>)` | `TypeBoolean` | Case-sensitive substring test. Strongly typed (returns `false` if either operand is non-textual). |
+| **`contains-ignore-case`** | `(contains-ignore-case <target> <subStr>)` | `TypeBoolean` | Case-insensitive substring test (`strings.Contains(ToLower(...), ToLower(...))`). Symmetrical across strings and symbols. |
+| **`equal-ignore-case`** | `(equal-ignore-case <s1> <s2>)` | `TypeBoolean` | Case-insensitive full equality check (`strings.EqualFold`). Symmetrical across strings and symbols. |
+| **`regex-replace`** | `(regex-replace <pattern> <template> <target>)` | Symbol / String / `nil` | Replaces matches of `<pattern>` in `<target>` with `<template>` using `$1`, `$2`, or `${name}` expansion. Compiled regexes are cached. Preserves input type. |
+
+### 9.2 Case-Insensitive Relational Operators (`=~`, `!~`)
+
+Available in LHS condition elements (Alpha network) and beta `(test ...)` condition elements:
+* **`=~`**: Case-insensitive equality (`strings.EqualFold`). Operates symmetrically between symbols and strings:
+  ```ops5
+  (user ^role =~ "admin" ^status =~ active)
+  (test <role> =~ "superuser")
+  ```
+* **`!~`**: Case-insensitive inequality.
+* **Strong Typing**: If either operand is non-textual (int, date, float, boolean, nil), `=~` evaluates to `false` and `!~` evaluates to `true`.
+
+### 9.3 LHS Regex Matching & Variable Capture
+
+Enables pattern matching directly on attributes while extracting capture groups into variables:
+```ops5
+; Style 1: Named capture groups (?P<var>...)
+(item ^code (regex "^(?P<country>[A-Z]{2})-(?P<id>[0-9]{4})$"))
+
+; Style 2: Positional capture groups with explicit variables
+(order ^sku (regex "^([A-Z]{3})-([0-9]+)$" <cat> <num>))
+```
+* **Join Constraints**: Variables bound via regex obey standard OPS5 join consistency. If `<country>` was previously bound, the matched substring must equal the existing value.
+* **Optional Groups**: If an optional capture group does not match, the variable binds to an empty string `""` (or empty symbol).
+* **Type Preservation**: Submatches inherit the type of the matched attribute (symbols yield symbols, strings yield strings).
+
 

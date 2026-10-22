@@ -185,10 +185,32 @@ func collectComputeVariables(v model.Value, varMap map[string]bool) {
 				collectComputeVariables(op, varMap)
 			} else if op.IsTemporalExpr() {
 				collectTemporalVariables(op, varMap)
+			} else if op.IsStringExpr() {
+				collectStringVariables(op, varMap)
 			}
 		}
 	} else if v.IsTemporalExpr() {
 		collectTemporalVariables(v, varMap)
+	} else if v.IsStringExpr() {
+		collectStringVariables(v, varMap)
+	}
+}
+
+func collectStringVariables(v model.Value, varMap map[string]bool) {
+	if !v.IsStringExpr() {
+		return
+	}
+	se := v.StringExpr()
+	for _, arg := range se.Args {
+		if arg.IsVariable() {
+			varMap[arg.VariableName()] = true
+		} else if arg.IsCompute() {
+			collectComputeVariables(arg, varMap)
+		} else if arg.IsTemporalExpr() {
+			collectTemporalVariables(arg, varMap)
+		} else if arg.IsStringExpr() {
+			collectStringVariables(arg, varMap)
+		}
 	}
 }
 
@@ -491,6 +513,14 @@ func remapSubstrInValue(v model.Value, posRemap map[int]int) model.Value {
 			newArgs[i] = remapSubstrInValue(a, posRemap)
 		}
 		return model.NewTemporalExpr(te.Op, newArgs...)
+	}
+	if v.IsStringExpr() {
+		se := v.StringExpr()
+		newArgs := make([]model.Value, len(se.Args))
+		for i, a := range se.Args {
+			newArgs[i] = remapSubstrInValue(a, posRemap)
+		}
+		return model.NewStringExpr(se.Op, newArgs...)
 	}
 	return v
 }
