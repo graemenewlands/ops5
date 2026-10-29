@@ -41,6 +41,16 @@
 //   - RunParallel executes all partition worker loops concurrently and uses atomic in-flight counters and inbox
 //     inspection to detect true global quiescence safely without premature termination.
 //
+// # TimeAwareEngine: Temporal Awareness & Scheduled Events
+//
+// TimeAwareEngine embeds Engine and introduces first-class temporal awareness:
+//   - Implicit Working Memory Elements: (now ^val <epoch_ms>), (cycle ^val <c>), and calendar (datetime ...).
+//   - Automatic TTL Expiration: Ingests human-readable durations ("10ms", "10 minutes", "24h") and wall-clock times ("10:10am").
+//   - Production-Driven Two-Stage Expiration: Expired facts are marked for removal at cycle C+1, allowing user rules
+//     to intercept and log expiring facts before the auto-generated cleanup rule retracts them.
+//   - Scheduled Recurring Events: Declarative scheduling (start, duration/end) materializes facts during their window
+//     and automatically reoccurs on subsequent calendar days.
+//
 // # Example Usage
 //
 //	// 1. Initialize engine with LEX conflict resolution

@@ -1195,6 +1195,34 @@ eng.MakeBatch([]engine.MakeRequest{
 })
 ```
 
+### TimeAwareEngine (Scheduled Events & TTL Expiration)
+
+For applications with temporal lifecycles or scheduled workflows, `engine.TimeAwareEngine` embeds `*Engine` to provide:
+- **Automatic Fact Expiration (TTL)**: Relative durations (`"10ms"`, `"30mins"`, `24h`) and wall-clock times (`"10:10am"`).
+- **Two-Stage Production-Driven Cleanup**: Expired facts are marked for removal on the subsequent cycle, allowing user rules with normal salience to intercept and log them before the auto-generated cleanup rule retracts the fact.
+- **Scheduled & Recurring Events**: Declarative schedules (`make breakfast start 06:00am duration 30m`) that materialize facts during their time window and automatically reoccur on subsequent calendar days.
+- **Calendar Datetime WME**: `(datetime ^dow ...)` exposing today's weekday (`monday` through `sunday`), month, and day.
+
+```go
+tae := engine.NewTimeAwareEngine()
+
+// Register a daily breakfast window
+tae.Schedule("breakfast", "06:00am", "30m", true)
+
+// User rule matching calendar and active breakfast
+rules, _ := parser.ParseRules(`
+    (p serve-breakfast
+       (datetime ^dow << monday tuesday wednesday thursday friday >>)
+       (breakfast)
+       -->
+       (write "Serving weekday breakfast!" (crlf))
+    )
+`)
+tae.AddRule(rules[0])
+
+tae.Run(10)
+```
+
 ### Extensibility & Custom Actions
 
 In addition to standard OPS5 actions (`make`, `modify`, `remove`, `write`, `halt`), Go applications can register `CustomAction` handlers directly on rules:

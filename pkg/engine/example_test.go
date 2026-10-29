@@ -166,3 +166,42 @@ func ExampleEngine_MakeBatch() {
 	// Output:
 	// Asserted 2 items in batch
 }
+
+// ExampleTimeAwareEngine demonstrates scheduled recurring events, temporal state,
+// and automatic fact expiration with TimeAwareEngine.
+func ExampleTimeAwareEngine() {
+	tae := engine.NewTimeAwareEngine()
+	tae.SetWatchLevel(0)
+
+	// Set clock to Wednesday 06:15am UTC
+	refTime := time.Date(2026, 10, 28, 6, 15, 0, 0, time.UTC)
+	tae.SetClock(func() time.Time {
+		return refTime
+	})
+
+	// Schedule breakfast daily between 06:00am and 06:30am
+	if err := tae.Schedule("breakfast", "06:00am", "30m", true); err != nil {
+		panic(err)
+	}
+
+	// Register a rule that fires when breakfast is active on a weekday
+	rules, err := parser.ParseRules(`
+		(p serve-breakfast
+		   (datetime ^dow << monday tuesday wednesday thursday friday >>)
+		   (breakfast)
+		   -->
+		   (write "Serving fresh breakfast!" (crlf))
+		)
+	`)
+	if err != nil {
+		panic(err)
+	}
+	tae.AddRule(rules[0])
+
+	// Run time-aware execution
+	_, _ = tae.Run(10)
+
+	// Output:
+	// Serving fresh breakfast!
+}
+

@@ -544,4 +544,47 @@ Enables pattern matching directly on attributes while extracting capture groups 
 * **Optional Groups**: If an optional capture group does not match, the variable binds to an empty string `""` (or empty symbol).
 * **Type Preservation**: Submatches inherit the type of the matched attribute (symbols yield symbols, strings yield strings).
 
+---
+
+## 10. `TimeAwareEngine`: Scheduled Events, TTL Expiration & Calendar Datetime
+
+The `TimeAwareEngine` extension ([`pkg/engine/time_aware.go`](file:///home/graeme/git/ops5/pkg/engine/time_aware.go)) embeds the core `Engine` and delivers temporal lifecycle management.
+
+### 10.1 System WMEs
+
+| WME Pattern | Attributes | Update Lifecycle | Description |
+| :--- | :--- | :--- | :--- |
+| `(now ...)` | `^val <epoch_ms>` | Start of each `Run()` | Current local timestamp in Unix epoch milliseconds. |
+| `(cycle ...)` | `^val <cycle_num>` | Every Match-Resolve-Act step | Global execution cycle counter for step-accurate sequencing. |
+| `(datetime ...)` | `^year <y> ^month <m> ^day <d> ^dow <symbol> ^hour <h> ^minute <min> ^second <s>` | Start of each `Run()` | Calendar breakdown with `^dow` holding lowercase weekday (`monday` .. `sunday`). |
+
+#### Calendar Pattern Matching Example
+```ops5
+(p weekend-service
+    (datetime ^dow << saturday sunday >> ^hour >= 9 ^hour <= 17)
+    (service-ticket ^status pending ^customer <cust>)
+  -->
+    (write "Weekend premium dispatch for customer: " <cust> (crlf))
+)
+```
+
+### 10.2 TTL Durations & Wall-Clock Formats
+
+WMEs asserted in `TimeAwareEngine` gain implicit `^ttl` and `^marked-for-remove-on-cycle` attributes. The `^ttl` attribute can be specified using human-readable durations or wall-clock strings:
+- **Durations**: `10ms`, `"10 ms"`, `5s`, `30mins`, `2h`, `1day`
+- **Wall-Clock Times**: `"06:00am"`, `14:30`, `"10:10pm"` (resolves to today if upcoming, tomorrow if already passed).
+- **Default / Immortal**: `^ttl 0` denotes a fact that never expires.
+
+### 10.3 Scheduled & Daily Recurring Events
+
+Events can be registered with a start time and either a duration or explicit end time:
+```ops5
+make breakfast start 06:00am duration 30m
+(make breakfast ^start 06:00am ^end 06:30am)
+```
+- **Window Materialization**: The engine evaluates schedules at the start of `Run()`. When current time enters `[start, end]`, the event fact is asserted with `^ttl` set to `end`.
+- **Two-Stage Production Cleanup**: At `end`, the fact is marked with `marked-for-remove-on-cycle = cycle + 1`. User rules (salience $\ge 0$) intercept and log on cycle $C$, followed by `sys-ttl-cleanup-<class>` (salience $-1000$) which retracts the fact on cycle $C + 1$.
+- **Next-Day Recurrence**: Schedules persist across calendar days and automatically reoccur each day when the clock reaches `start`.
+
+
 
