@@ -311,13 +311,15 @@ func TestTimeAwareEngine_DatetimeMatching(t *testing.T) {
 	}
 }
 
+type Counter struct {
+	Val int
+}
+
 func TestTimeAwareEngine_Daemon_CounterQuiescence(t *testing.T) {
 	tae := NewTimeAwareEngine()
-	tae.DeclareClass("counter", []string{"val"})
-
-	tae.Make("counter", map[string]model.Value{
-		"val": model.NewInt(0),
-	})
+	if _, err := tae.MakeFromStruct(Counter{Val: 0}); err != nil {
+		t.Fatalf("MakeFromStruct error: %v", err)
+	}
 
 	rules, err := parser.ParseRules(`
 		(p count-up
@@ -368,11 +370,9 @@ func TestTimeAwareEngine_Daemon_CounterQuiescence(t *testing.T) {
 
 func TestTimeAwareEngine_Daemon_StopInterruption(t *testing.T) {
 	tae := NewTimeAwareEngine()
-	tae.DeclareClass("counter", []string{"val"})
-
-	tae.Make("counter", map[string]model.Value{
-		"val": model.NewInt(0),
-	})
+	if _, err := tae.MakeFromStruct(Counter{Val: 0}); err != nil {
+		t.Fatalf("MakeFromStruct error: %v", err)
+	}
 
 	rules, err := parser.ParseRules(`
 		(p count-up-large
@@ -422,10 +422,9 @@ func TestTimeAwareEngine_RunSimulated(t *testing.T) {
 	baseTime := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	tae.SetCurrentTime(baseTime.UnixMilli())
 
-	tae.DeclareClass("counter", []string{"val"})
-	tae.Make("counter", map[string]model.Value{
-		"val": model.NewInt(0),
-	})
+	if _, err := tae.MakeFromStruct(Counter{Val: 0}); err != nil {
+		t.Fatalf("MakeFromStruct error: %v", err)
+	}
 
 	rules, err := parser.ParseRules(`
 		(p count-up

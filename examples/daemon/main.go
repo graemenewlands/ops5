@@ -13,6 +13,11 @@ import (
 	"github.com/graemenewlands/ops5/pkg/parser"
 )
 
+// Counter models an OPS5 working memory element for counting.
+type Counter struct {
+	Val int
+}
+
 type counterListener struct {
 	mu          sync.Mutex
 	startTime   time.Time
@@ -77,8 +82,8 @@ func main() {
 		tae.SetCurrentTime(baseTime.UnixMilli())
 	}
 
-	// Assert initial fact (counter ^val 0)
-	if _, err := tae.MakeString("(counter ^val 0)"); err != nil {
+	// Assert initial fact using a typed Go struct: (counter ^val 0)
+	if _, err := tae.MakeFromStruct(Counter{Val: 0}); err != nil {
 		fmt.Fprintf(os.Stderr, "Error asserting counter fact: %v\n", err)
 		os.Exit(1)
 	}

@@ -205,16 +205,21 @@ func ExampleTimeAwareEngine() {
 	// Serving fresh breakfast!
 }
 
+// Counter models an OPS5 working memory element for counting tasks.
+type Counter struct {
+	Val int
+}
+
 // ExampleTimeAwareEngine_StartDaemon demonstrates pacing time-disassociated rules
 // using a background ticker daemon that halts on quiescence.
 func ExampleTimeAwareEngine_StartDaemon() {
 	tae := engine.NewTimeAwareEngine()
 	tae.SetWatchLevel(0)
 
-	tae.DeclareClass("counter", []string{"val"})
-	tae.Make("counter", map[string]model.Value{
-		"val": model.NewInt(0),
-	})
+	// Assert initial fact using a typed Go struct
+	if _, err := tae.MakeFromStruct(Counter{Val: 0}); err != nil {
+		panic(err)
+	}
 
 	rules, err := parser.ParseRules(`
 		(p count-up
@@ -252,10 +257,10 @@ func ExampleTimeAwareEngine_RunSimulated() {
 	baseTime := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	tae.SetCurrentTime(baseTime.UnixMilli())
 
-	tae.DeclareClass("counter", []string{"val"})
-	tae.Make("counter", map[string]model.Value{
-		"val": model.NewInt(0),
-	})
+	// Assert initial fact using a typed Go struct
+	if _, err := tae.MakeFromStruct(Counter{Val: 0}); err != nil {
+		panic(err)
+	}
 
 	rules, err := parser.ParseRules(`
 		(p count-up
