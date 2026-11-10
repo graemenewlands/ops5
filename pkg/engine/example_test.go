@@ -243,3 +243,42 @@ func ExampleTimeAwareEngine_StartDaemon() {
 	// Counter: 3
 }
 
+// ExampleTimeAwareEngine_RunSimulated demonstrates running time-disassociated rules
+// with simulated monotonic virtual time at maximum CPU speed without real-time delay.
+func ExampleTimeAwareEngine_RunSimulated() {
+	tae := engine.NewTimeAwareEngine()
+	tae.SetWatchLevel(0)
+
+	baseTime := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	tae.SetCurrentTime(baseTime.UnixMilli())
+
+	tae.DeclareClass("counter", []string{"val"})
+	tae.Make("counter", map[string]model.Value{
+		"val": model.NewInt(0),
+	})
+
+	rules, err := parser.ParseRules(`
+		(p count-up
+		   <c> (counter ^val <v> { < 3 })
+		   -->
+		   (modify <c> ^val (compute <v> + 1))
+		   (write "Counter:" (compute <v> + 1) (crlf))
+		)
+	`)
+	if err != nil {
+		panic(err)
+	}
+	tae.AddRule(rules[0])
+
+	// Advance virtual time by 1s per step until quiescence (runs in < 1ms of CPU time)
+	_, _, err = tae.RunSimulated(1*time.Second, 1, 0)
+	if err != nil {
+		panic(err)
+	}
+
+	// Output:
+	// Counter: 1
+	// Counter: 2
+	// Counter: 3
+}
+

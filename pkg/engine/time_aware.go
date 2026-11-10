@@ -43,6 +43,8 @@ type TimeAwareEngine struct {
 	*Engine
 	mu                     sync.RWMutex
 	clock                  func() time.Time
+	simulatedTime          time.Time
+	isSimulated            bool
 	schedules              map[string]*ScheduleDefinition
 	registeredCleanupRules map[string]bool
 }
@@ -71,17 +73,100 @@ func (tae *TimeAwareEngine) SetClock(fn func() time.Time) {
 	defer tae.mu.Unlock()
 	if fn == nil {
 		tae.clock = time.Now
+		tae.isSimulated = false
 	} else {
 		tae.clock = fn
+		tae.isSimulated = false
 	}
 }
 
-// SetCurrentTime sets a fixed clock returning the specified Unix epoch milliseconds.
+// SetCurrentTime sets a fixed clock returning the specified Unix epoch milliseconds in UTC.
 func (tae *TimeAwareEngine) SetCurrentTime(epochMs int64) {
-	t := time.UnixMilli(epochMs)
-	tae.SetClock(func() time.Time {
-		return t
-	})
+	t := time.UnixMilli(epochMs).UTC()
+	tae.mu.Lock()
+	defer tae.mu.Unlock()
+	tae.simulatedTime = t
+	tae.isSimulated = true
+	tae.clock = func() time.Time {
+		return tae.simulatedTime
+	}
+}
+
+// CurrentTime returns the engine's current reference time (real or simulated).
+func (tae *TimeAwareEngine) CurrentTime() time.Time {
+	tae.mu.RLock()
+	defer tae.mu.RUnlock()
+	return tae.clock()
+}
+
+// AdvanceTime advances the current simulated time monotonically by delta and returns the new time.
+func (tae *TimeAwareEngine) AdvanceTime(delta time.Duration) time.Time {
+	tae.mu.Lock()
+	defer tae.mu.Unlock()
+
+	if !tae.isSimulated {
+		tae.simulatedTime = tae.clock()
+		tae.isSimulated = true
+		tae.clock = func() time.Time {
+			return tae.simulatedTime
+		}
+	}
+	tae.simulatedTime = tae.simulatedTime.Add(delta)
+	return tae.simulatedTime
+}
+
+// RunSimulated executes a simulated discrete-time loop without sleeping:
+// on each step, it advances simulated time by timeStep, synchronizes (now) and (datetime),
+// and invokes Run(cyclesPerStep).
+// It halts when quiescence is reached (0 rules fired on a step) or maxSteps is reached.
+func (tae *TimeAwareEngine) RunSimulated(timeStep time.Duration, cyclesPerStep int, maxSteps int) (int, time.Duration, error) {
+	if timeStep <= 0 {
+		return 0, 0, fmt.Errorf("timeStep must be positive, got %v", timeStep)
+	}
+	if cyclesPerStep <= 0 {
+		cyclesPerStep = 1
+	}
+
+	tae.mu.Lock()
+	if !tae.isSimulated {
+		tae.simulatedTime = tae.clock()
+		tae.isSimulated = true
+		tae.clock = func() time.Time {
+			return tae.simulatedTime
+		}
+	}
+	startSimTime := tae.simulatedTime
+	tae.mu.Unlock()
+
+	totalCycles := 0
+	steps := 0
+
+	for {
+		if maxSteps > 0 && steps >= maxSteps {
+			break
+		}
+		steps++
+
+		tae.AdvanceTime(timeStep)
+		cycles, err := tae.Run(cyclesPerStep)
+		if err != nil {
+			tae.mu.RLock()
+			elapsed := tae.simulatedTime.Sub(startSimTime)
+			tae.mu.RUnlock()
+			return totalCycles, elapsed, err
+		}
+		totalCycles += cycles
+
+		if cycles == 0 {
+			break
+		}
+	}
+
+	tae.mu.RLock()
+	simElapsed := tae.simulatedTime.Sub(startSimTime)
+	tae.mu.RUnlock()
+
+	return totalCycles, simElapsed, nil
 }
 
 // Schedule registers a recurring scheduled event.

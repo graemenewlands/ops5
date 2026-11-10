@@ -417,3 +417,55 @@ func TestTimeAwareEngine_Daemon_InvalidInterval(t *testing.T) {
 	}
 }
 
+func TestTimeAwareEngine_RunSimulated(t *testing.T) {
+	tae := NewTimeAwareEngine()
+	baseTime := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	tae.SetCurrentTime(baseTime.UnixMilli())
+
+	tae.DeclareClass("counter", []string{"val"})
+	tae.Make("counter", map[string]model.Value{
+		"val": model.NewInt(0),
+	})
+
+	rules, err := parser.ParseRules(`
+		(p count-up
+		   <c> (counter ^val <v> { < 10 })
+		   -->
+		   (modify <c> ^val (compute <v> + 1))
+		)
+	`)
+	if err != nil {
+		t.Fatalf("failed to parse rule: %v", err)
+	}
+	tae.AddRule(rules[0])
+
+	startReal := time.Now()
+	cycles, simElapsed, err := tae.RunSimulated(1*time.Second, 1, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	realElapsed := time.Since(startReal)
+
+	if cycles != 10 {
+		t.Errorf("expected 10 cycles, got %d", cycles)
+	}
+	// 10 cycles + 1 quiescence check step = 11s of simulated time
+	if simElapsed != 11*time.Second {
+		t.Errorf("expected 11s simulated time, got %v", simElapsed)
+	}
+	// Entire run should execute in < 50ms of real CPU time
+	if realElapsed > 100*time.Millisecond {
+		t.Errorf("simulated run took too long in real time: %v", realElapsed)
+	}
+
+	// Verify counter WME final value
+	wmes := tae.FindWMEsMatching(model.NewPositiveCE("counter"))
+	if len(wmes) != 1 {
+		t.Fatalf("expected 1 counter WME, got %d", len(wmes))
+	}
+	val, _ := wmes[0].Get("val")
+	if val.Raw().(int64) != 10 {
+		t.Errorf("expected final counter 10, got %v", val)
+	}
+}
+

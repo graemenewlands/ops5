@@ -14,9 +14,11 @@ import (
 )
 
 type counterListener struct {
-	mu        sync.Mutex
-	startTime time.Time
-	lastTime  time.Time
+	mu          sync.Mutex
+	startTime   time.Time
+	lastTime    time.Time
+	isSimulated bool
+	engine      *engine.TimeAwareEngine
 }
 
 func (l *counterListener) OnAssert(wme *model.WME) {
@@ -28,12 +30,18 @@ func (l *counterListener) OnAssert(wme *model.WME) {
 		return
 	}
 	l.mu.Lock()
-	now := time.Now()
-	delta := now.Sub(l.lastTime)
-	l.lastTime = now
-	l.mu.Unlock()
+	defer l.mu.Unlock()
 
-	fmt.Printf("[+%.3fs] [%s] Counter: %v\n", delta.Seconds(), now.Format("15:04:05.000"), val)
+	if l.isSimulated {
+		currTime := l.engine.CurrentTime().UTC()
+		simElapsed := currTime.Sub(l.startTime)
+		fmt.Printf("[Virtual T+%.3fs] [%s] Counter: %v\n", simElapsed.Seconds(), currTime.Format("2006-01-02 15:04:05.000 UTC"), val)
+	} else {
+		now := time.Now()
+		delta := now.Sub(l.lastTime)
+		l.lastTime = now
+		fmt.Printf("[+%.3fs] [%s] Counter: %v\n", delta.Seconds(), now.Format("15:04:05.000"), val)
+	}
 }
 
 func (l *counterListener) OnRetract(wme *model.WME) {
@@ -41,8 +49,9 @@ func (l *counterListener) OnRetract(wme *model.WME) {
 }
 
 func main() {
-	rateFlag := flag.String("rate", "1s", "Ticker interval / execution rate (e.g. 1s, 500ms, 2s)")
+	rateFlag := flag.String("rate", "1s", "Ticker interval / virtual time step (e.g. 1s, 500ms, 2s)")
 	targetFlag := flag.Int("target", 10, "Target count before reaching quiescence")
+	simulatedFlag := flag.Bool("simulated", false, "Run in simulated virtual time at maximum CPU speed without physical delay")
 	flag.Parse()
 
 	interval, err := time.ParseDuration(*rateFlag)
@@ -61,6 +70,12 @@ func main() {
 
 	tae := engine.NewTimeAwareEngine()
 	tae.SetWatchLevel(0) // Disable raw engine trace to keep output formatted cleanly
+
+	var baseTime time.Time
+	if *simulatedFlag {
+		baseTime = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+		tae.SetCurrentTime(baseTime.UnixMilli())
+	}
 
 	// Declare counter schema and assert initial fact (counter ^val 0)
 	tae.DeclareClass("counter", []string{"val"})
@@ -87,11 +102,36 @@ func main() {
 
 	startTime := time.Now()
 	listener := &counterListener{
-		startTime: startTime,
-		lastTime:  startTime,
+		startTime:   startTime,
+		lastTime:    startTime,
+		isSimulated: *simulatedFlag,
+		engine:      tae,
+	}
+	if *simulatedFlag {
+		listener.startTime = baseTime
+		listener.lastTime = baseTime
 	}
 	tae.WorkingMemory().AddListener(listener)
 
+	if *simulatedFlag {
+		fmt.Printf("[SIMULATED] Starting virtual time run (step: %v, target: %d, base: %s)...\n",
+			interval, *targetFlag, baseTime.Format("2006-01-02 15:04:05 UTC"))
+
+		realStart := time.Now()
+		cycles, simElapsed, err := tae.RunSimulated(interval, 1, 0)
+		realElapsed := time.Since(realStart)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Simulation error: %v\n", err)
+			os.Exit(1)
+		}
+
+		fmt.Printf("[SIMULATED] Quiescence reached (agenda empty).\n")
+		fmt.Printf("Completed %d cycles. Simulated time: %v. Real CPU time: %v.\n",
+			cycles, simElapsed, realElapsed.Round(time.Microsecond))
+		return
+	}
+
+	// Physical ticker daemon mode:
 	fmt.Printf("[%s] Starting TimeAwareEngine Daemon (rate: %v, target: %d)...\n",
 		startTime.Format("15:04:05.000"), interval, *targetFlag)
 
