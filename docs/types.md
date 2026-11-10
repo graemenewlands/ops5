@@ -586,5 +586,25 @@ make breakfast start 06:00am duration 30m
 - **Two-Stage Production Cleanup**: At `end`, the fact is marked with `marked-for-remove-on-cycle = cycle + 1`. User rules (salience $\ge 0$) intercept and log on cycle $C$, followed by `sys-ttl-cleanup-<class>` (salience $-1000$) which retracts the fact on cycle $C + 1$.
 - **Next-Day Recurrence**: Schedules persist across calendar days and automatically reoccur each day when the clock reaches `start`.
 
+### 10.4 Background Ticker Daemon & Time Disassociation
+
+Rules in `TimeAwareEngine` are pure relational patterns disassociated from physical time. A background **`Daemon`** paces rule executions at any configurable interval ($\Delta t$) using a Go ticker:
+
+```go
+// Start daemon ticking every 1s, running 1 cycle per tick, stopping on quiescence
+daemon, err := tae.StartDaemon(1*time.Second, 1, true)
+if err != nil {
+    log.Fatal(err)
+}
+
+// Block until engine quiesces (conflict set empty) or Stop() is called
+<-daemon.Done()
+```
+
+- **Pacing**: On each tick, the daemon triggers `Run(cyclesPerTick)`.
+- **Quiescence**: When `stopOnQuiescence` is true, the daemon automatically terminates when `Run()` fires 0 rules.
+- **Runnable CLI Demo**: See `examples/daemon/main.go` for live terminal demonstrations with `-rate 1s`, `-rate 500ms`, and `-rate 2s`.
+
+
 
 

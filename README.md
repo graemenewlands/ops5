@@ -1223,6 +1223,23 @@ tae.AddRule(rules[0])
 tae.Run(10)
 ```
 
+#### Background Ticker Daemon & Free-Variable Time Pacing
+
+To execute rules at fixed physical time intervals while keeping production rules completely decoupled from time:
+
+```go
+// Ticks every second, executes 1 cycle per tick, halts automatically on quiescence
+daemon, _ := tae.StartDaemon(1*time.Second, 1, true)
+<-daemon.Done()
+```
+
+Run the live CLI demo at different clock rates:
+```bash
+go run ./examples/daemon -rate 1s -target 10    # Default: 1 tick per second
+go run ./examples/daemon -rate 500ms -target 10 # 2x speed: 1 tick every 0.5s
+go run ./examples/daemon -rate 2s -target 10    # Half speed: 1 tick every 2s
+```
+
 ### Extensibility & Custom Actions
 
 In addition to standard OPS5 actions (`make`, `modify`, `remove`, `write`, `halt`), Go applications can register `CustomAction` handlers directly on rules:

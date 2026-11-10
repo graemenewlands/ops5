@@ -205,3 +205,41 @@ func ExampleTimeAwareEngine() {
 	// Serving fresh breakfast!
 }
 
+// ExampleTimeAwareEngine_StartDaemon demonstrates pacing time-disassociated rules
+// using a background ticker daemon that halts on quiescence.
+func ExampleTimeAwareEngine_StartDaemon() {
+	tae := engine.NewTimeAwareEngine()
+	tae.SetWatchLevel(0)
+
+	tae.DeclareClass("counter", []string{"val"})
+	tae.Make("counter", map[string]model.Value{
+		"val": model.NewInt(0),
+	})
+
+	rules, err := parser.ParseRules(`
+		(p count-up
+		   <c> (counter ^val <v> { < 3 })
+		   -->
+		   (modify <c> ^val (compute <v> + 1))
+		   (write "Counter:" (compute <v> + 1) (crlf))
+		)
+	`)
+	if err != nil {
+		panic(err)
+	}
+	tae.AddRule(rules[0])
+
+	// Start daemon with 5ms interval, 1 cycle per tick, stopOnQuiescence = true
+	daemon, err := tae.StartDaemon(5*time.Millisecond, 1, true)
+	if err != nil {
+		panic(err)
+	}
+
+	<-daemon.Done()
+
+	// Output:
+	// Counter: 1
+	// Counter: 2
+	// Counter: 3
+}
+

@@ -9,6 +9,25 @@ import (
 	"github.com/graemenewlands/ops5/pkg/model"
 )
 
+// Daemon controls a background ticking goroutine driving TimeAwareEngine execution cycles.
+type Daemon struct {
+	tae              *TimeAwareEngine
+	interval         time.Duration
+	cyclesPerTick    int
+	stopOnQuiescence bool
+	onTick           func(cycles int)
+
+	done     chan struct{}
+	stop     chan struct{}
+	stopOnce sync.Once
+	wg       sync.WaitGroup
+
+	mu          sync.Mutex
+	running     bool
+	totalCycles int
+	err         error
+}
+
 // ScheduleDefinition holds configuration and runtime state for a recurring scheduled event.
 type ScheduleDefinition struct {
 	Class         string
@@ -396,4 +415,113 @@ func (tae *TimeAwareEngine) syncCycleLocked() {
 			tae.Engine.Modify(cycleWMEs[0].Timetag, map[string]model.Value{"val": model.NewInt(currCycle)})
 		}
 	}
+}
+
+// StartDaemon starts a background ticker daemon that invokes Run(cyclesPerTick) on each tick.
+// If stopOnQuiescence is true, the daemon automatically halts when Run() returns 0 fired rules.
+func (tae *TimeAwareEngine) StartDaemon(interval time.Duration, cyclesPerTick int, stopOnQuiescence bool) (*Daemon, error) {
+	if interval <= 0 {
+		return nil, fmt.Errorf("daemon interval must be positive, got %v", interval)
+	}
+	if cyclesPerTick <= 0 {
+		cyclesPerTick = 1
+	}
+
+	d := &Daemon{
+		tae:              tae,
+		interval:         interval,
+		cyclesPerTick:    cyclesPerTick,
+		stopOnQuiescence: stopOnQuiescence,
+		done:             make(chan struct{}),
+		stop:             make(chan struct{}),
+		running:          true,
+	}
+
+	d.wg.Add(1)
+	go d.loop()
+
+	return d, nil
+}
+
+func (d *Daemon) loop() {
+	defer d.wg.Done()
+	defer func() {
+		d.mu.Lock()
+		d.running = false
+		d.mu.Unlock()
+		close(d.done)
+	}()
+
+	ticker := time.NewTicker(d.interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-d.stop:
+			return
+		case <-ticker.C:
+			cycles, err := d.tae.Run(d.cyclesPerTick)
+			d.mu.Lock()
+			if err != nil {
+				d.err = err
+				d.mu.Unlock()
+				return
+			}
+			d.totalCycles += cycles
+			hook := d.onTick
+			d.mu.Unlock()
+
+			if hook != nil {
+				hook(cycles)
+			}
+
+			if d.stopOnQuiescence && cycles == 0 {
+				return
+			}
+		}
+	}
+}
+
+// Stop signals the daemon to halt and waits for any active tick cycle to conclude.
+func (d *Daemon) Stop() {
+	d.stopOnce.Do(func() {
+		close(d.stop)
+	})
+	d.wg.Wait()
+}
+
+// Done returns a receive-only channel that closes when the daemon terminates (by Stop, error, or quiescence).
+func (d *Daemon) Done() <-chan struct{} {
+	return d.done
+}
+
+// TotalCycles returns the accumulated number of production cycles executed by the daemon.
+func (d *Daemon) TotalCycles() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.totalCycles
+}
+
+// Error returns any runtime error encountered during execution ticks.
+func (d *Daemon) Error() error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.err
+}
+
+// Running reports whether the daemon is actively ticking.
+func (d *Daemon) Running() bool {
+	select {
+	case <-d.done:
+		return false
+	default:
+		return true
+	}
+}
+
+// SetOnTick registers an optional callback invoked after each tick execution.
+func (d *Daemon) SetOnTick(fn func(cycles int)) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.onTick = fn
 }

@@ -6,6 +6,7 @@ import (
 
 	"github.com/graemenewlands/ops5/pkg/conflict"
 	"github.com/graemenewlands/ops5/pkg/model"
+	"github.com/graemenewlands/ops5/pkg/parser"
 )
 
 func TestTimeAwareEngine_SystemWMEs(t *testing.T) {
@@ -307,6 +308,112 @@ func TestTimeAwareEngine_DatetimeMatching(t *testing.T) {
 	tae2.Run(5)
 	if firedWednesday2 {
 		t.Errorf("did not expect wednesday rule to fire on monday")
+	}
+}
+
+func TestTimeAwareEngine_Daemon_CounterQuiescence(t *testing.T) {
+	tae := NewTimeAwareEngine()
+	tae.DeclareClass("counter", []string{"val"})
+
+	tae.Make("counter", map[string]model.Value{
+		"val": model.NewInt(0),
+	})
+
+	rules, err := parser.ParseRules(`
+		(p count-up
+		   <c> (counter ^val <v> { < 5 })
+		   -->
+		   (modify <c> ^val (compute <v> + 1))
+		)
+	`)
+	if err != nil {
+		t.Fatalf("failed to parse rule: %v", err)
+	}
+	tae.AddRule(rules[0])
+
+	// Interval of 5ms with quiescence stop
+	daemon, err := tae.StartDaemon(5*time.Millisecond, 1, true)
+	if err != nil {
+		t.Fatalf("failed to start daemon: %v", err)
+	}
+
+	select {
+	case <-daemon.Done():
+		// Clean exit on quiescence
+	case <-time.After(2 * time.Second):
+		daemon.Stop()
+		t.Fatalf("daemon timed out waiting for quiescence")
+	}
+
+	if daemon.Running() {
+		t.Errorf("expected daemon to not be running")
+	}
+	if daemon.TotalCycles() != 5 {
+		t.Errorf("expected 5 cycles, got %d", daemon.TotalCycles())
+	}
+	if daemon.Error() != nil {
+		t.Errorf("unexpected daemon error: %v", daemon.Error())
+	}
+
+	// Verify counter WME final value
+	wmes := tae.FindWMEsMatching(model.NewPositiveCE("counter"))
+	if len(wmes) != 1 {
+		t.Fatalf("expected 1 counter WME, got %d", len(wmes))
+	}
+	val, _ := wmes[0].Get("val")
+	if val.Raw().(int64) != 5 {
+		t.Errorf("expected final counter 5, got %v", val)
+	}
+}
+
+func TestTimeAwareEngine_Daemon_StopInterruption(t *testing.T) {
+	tae := NewTimeAwareEngine()
+	tae.DeclareClass("counter", []string{"val"})
+
+	tae.Make("counter", map[string]model.Value{
+		"val": model.NewInt(0),
+	})
+
+	rules, err := parser.ParseRules(`
+		(p count-up-large
+		   <c> (counter ^val <v> { < 1000 })
+		   -->
+		   (modify <c> ^val (compute <v> + 1))
+		)
+	`)
+	if err != nil {
+		t.Fatalf("failed to parse rule: %v", err)
+	}
+	tae.AddRule(rules[0])
+
+	daemon, err := tae.StartDaemon(5*time.Millisecond, 1, true)
+	if err != nil {
+		t.Fatalf("failed to start daemon: %v", err)
+	}
+
+	// Let it run a few ticks then manually stop
+	time.Sleep(30 * time.Millisecond)
+	daemon.Stop()
+
+	select {
+	case <-daemon.Done():
+	case <-time.After(500 * time.Millisecond):
+		t.Fatalf("daemon Done channel was not closed after Stop()")
+	}
+
+	if daemon.Running() {
+		t.Errorf("expected daemon to report not running")
+	}
+	if daemon.TotalCycles() == 0 || daemon.TotalCycles() >= 1000 {
+		t.Errorf("expected partial cycles (0 < cycles < 1000), got %d", daemon.TotalCycles())
+	}
+}
+
+func TestTimeAwareEngine_Daemon_InvalidInterval(t *testing.T) {
+	tae := NewTimeAwareEngine()
+	_, err := tae.StartDaemon(0, 1, true)
+	if err == nil {
+		t.Errorf("expected error for non-positive interval")
 	}
 }
 
