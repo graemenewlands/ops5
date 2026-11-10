@@ -422,6 +422,15 @@ func toScalarOPS5Value(fv reflect.Value, f fieldDescriptor) (Value, error) {
 	}
 }
 
+// ToValue converts any standard Go primitive (int, float, string, bool, time.Time, or Value)
+// into an immutable OPS5 Value.
+func ToValue(v any) (Value, error) {
+	if v == nil {
+		return NewSymbol("nil"), nil
+	}
+	return toScalarOPS5Value(reflect.ValueOf(v), fieldDescriptor{})
+}
+
 func isZeroValue(v reflect.Value) bool {
 	if !v.IsValid() {
 		return true

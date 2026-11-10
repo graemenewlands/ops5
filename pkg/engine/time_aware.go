@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/graemenewlands/ops5/pkg/model"
+	"github.com/graemenewlands/ops5/pkg/parser"
 )
 
 // Daemon controls a background ticking goroutine driving TimeAwareEngine execution cycles.
@@ -278,6 +279,62 @@ func (tae *TimeAwareEngine) Make(class string, attrs map[string]model.Value) *mo
 	}
 
 	return tae.Engine.Make(class, resolvedAttrs)
+}
+
+// MakeFromStruct converts a Go struct to a WME and asserts it into TimeAwareEngine.
+func (tae *TimeAwareEngine) MakeFromStruct(v any) (*model.WME, error) {
+	className, attrs, err := model.MarshalWME(v)
+	if err != nil {
+		return nil, err
+	}
+	return tae.Make(className, attrs), nil
+}
+
+// MakeString parses a standalone (make class [^attr val ...]) or bare (class [^attr val ...])
+// OPS5 statement and asserts it into TimeAwareEngine.
+func (tae *TimeAwareEngine) MakeString(factExpr string) (*model.WME, error) {
+	p, err := parser.NewParser(factExpr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid make expression: %w", err)
+	}
+	class, attrs, err := p.ParseMake()
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse make statement: %w", err)
+	}
+	return tae.Make(class, attrs), nil
+}
+
+// MakeMap asserts a WME from a standard Go map[string]any through TimeAwareEngine.
+func (tae *TimeAwareEngine) MakeMap(class string, attrs map[string]any) (*model.WME, error) {
+	converted := make(map[string]model.Value, len(attrs))
+	for k, v := range attrs {
+		val, err := model.ToValue(v)
+		if err != nil {
+			return nil, fmt.Errorf("attribute %q: %w", k, err)
+		}
+		converted[k] = val
+	}
+	return tae.Make(class, converted), nil
+}
+
+// MakeKV asserts a WME using alternating key-value pairs through TimeAwareEngine.
+func (tae *TimeAwareEngine) MakeKV(class string, keyValues ...any) (*model.WME, error) {
+	if len(keyValues)%2 != 0 {
+		return nil, fmt.Errorf("MakeKV expects an even number of key-value arguments, got %d", len(keyValues))
+	}
+	attrs := make(map[string]model.Value, len(keyValues)/2)
+	for i := 0; i < len(keyValues); i += 2 {
+		key, ok := keyValues[i].(string)
+		if !ok {
+			return nil, fmt.Errorf("MakeKV key at index %d must be string, got %T", i, keyValues[i])
+		}
+		val, err := model.ToValue(keyValues[i+1])
+		if err != nil {
+			return nil, fmt.Errorf("MakeKV value for %q: %w", key, err)
+		}
+		attrs[key] = val
+	}
+	return tae.Make(class, attrs), nil
 }
 
 func (tae *TimeAwareEngine) scheduleLocked(className string, start string, durationOrEnd string, isDuration bool) error {

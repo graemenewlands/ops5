@@ -469,3 +469,40 @@ func TestTimeAwareEngine_RunSimulated(t *testing.T) {
 	}
 }
 
+func TestTimeAwareEngine_ErgonomicMakeHelpers(t *testing.T) {
+	tae := NewTimeAwareEngine()
+
+	// 1. MakeString with (counter ^val 0)
+	wme1, err := tae.MakeString("(counter ^val 0)")
+	if err != nil {
+		t.Fatalf("MakeString error: %v", err)
+	}
+	if wme1.Class != "counter" {
+		t.Errorf("expected class counter, got %s", wme1.Class)
+	}
+	val1, _ := wme1.Get("val")
+	if val1.Raw().(int64) != 0 {
+		t.Errorf("expected val 0, got %v", val1)
+	}
+
+	// 2. MakeKV with variadic args
+	wme2, err := tae.MakeKV("score", "points", 100, "player", "alice")
+	if err != nil {
+		t.Fatalf("MakeKV error: %v", err)
+	}
+	pts, _ := wme2.Get("points")
+	if pts.Raw().(int64) != 100 {
+		t.Errorf("expected points 100, got %v", pts)
+	}
+
+	// 3. MakeMap with native Go map
+	wme3, err := tae.MakeMap("status", map[string]any{"active": true, "code": 200})
+	if err != nil {
+		t.Fatalf("MakeMap error: %v", err)
+	}
+	act, _ := wme3.Get("active")
+	if act.Raw().(bool) != true {
+		t.Errorf("expected active true, got %v", act)
+	}
+}
+

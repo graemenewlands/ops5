@@ -1043,6 +1043,54 @@ func (e *Engine) MakeFromStruct(v any) (*model.WME, error) {
 	return e.Make(className, attrs), nil
 }
 
+// MakeString parses a standalone (make class [^attr val ...]) or bare (class [^attr val ...])
+// OPS5 statement and asserts it into working memory.
+func (e *Engine) MakeString(factExpr string) (*model.WME, error) {
+	p, err := parser.NewParser(factExpr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid make expression: %w", err)
+	}
+	class, attrs, err := p.ParseMake()
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse make statement: %w", err)
+	}
+	return e.Make(class, attrs), nil
+}
+
+// MakeMap asserts a WME from a standard Go map[string]any, automatically converting
+// native Go types (int, float, string, bool, time.Time) into immutable OPS5 Values.
+func (e *Engine) MakeMap(class string, attrs map[string]any) (*model.WME, error) {
+	converted := make(map[string]model.Value, len(attrs))
+	for k, v := range attrs {
+		val, err := model.ToValue(v)
+		if err != nil {
+			return nil, fmt.Errorf("attribute %q: %w", k, err)
+		}
+		converted[k] = val
+	}
+	return e.Make(class, converted), nil
+}
+
+// MakeKV asserts a WME using alternating key-value pairs (e.g. e.MakeKV("counter", "val", 0)).
+func (e *Engine) MakeKV(class string, keyValues ...any) (*model.WME, error) {
+	if len(keyValues)%2 != 0 {
+		return nil, fmt.Errorf("MakeKV expects an even number of key-value arguments, got %d", len(keyValues))
+	}
+	attrs := make(map[string]model.Value, len(keyValues)/2)
+	for i := 0; i < len(keyValues); i += 2 {
+		key, ok := keyValues[i].(string)
+		if !ok {
+			return nil, fmt.Errorf("MakeKV key at index %d must be string, got %T", i, keyValues[i])
+		}
+		val, err := model.ToValue(keyValues[i+1])
+		if err != nil {
+			return nil, fmt.Errorf("MakeKV value for %q: %w", key, err)
+		}
+		attrs[key] = val
+	}
+	return e.Make(class, attrs), nil
+}
+
 func (e *Engine) makeLocked(class string, attrs map[string]model.Value) *model.WME {
 	normClass := strings.ToLower(class)
 	if schema, ok := e.schemas[normClass]; ok {

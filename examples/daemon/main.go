@@ -77,11 +77,11 @@ func main() {
 		tae.SetCurrentTime(baseTime.UnixMilli())
 	}
 
-	// Declare counter schema and assert initial fact (counter ^val 0)
-	tae.DeclareClass("counter", []string{"val"})
-	tae.Make("counter", map[string]model.Value{
-		"val": model.NewInt(0),
-	})
+	// Assert initial fact (counter ^val 0)
+	if _, err := tae.MakeString("(counter ^val 0)"); err != nil {
+		fmt.Fprintf(os.Stderr, "Error asserting counter fact: %v\n", err)
+		os.Exit(1)
+	}
 
 	// Pure OPS5 rule: completely disassociated from physical time.
 	// Matches whenever counter is below target, increments by 1.
