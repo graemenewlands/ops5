@@ -505,3 +505,213 @@ func TestTimeAwareEngine_ErgonomicMakeHelpers(t *testing.T) {
 	}
 }
 
+// TrafficLight models a traffic signal state machine fact
+type TrafficLight struct {
+	Color string `ops5:",symbol"`
+	TTL   string
+}
+
+// Order models a workflow order fact
+type Order struct {
+	ID     int
+	Status string `ops5:",symbol"`
+}
+
+func TestTimeAwareEngine_SimRun_Way1_TTL(t *testing.T) {
+	tae := NewTimeAwareEngine()
+	tae.SetWatchLevel(0)
+
+	baseTime := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	tae.SetCurrentTime(baseTime.UnixMilli())
+
+	// Initial State: Green light lasting 45 seconds
+	if _, err := tae.MakeFromStruct(TrafficLight{Color: "green", TTL: "45s"}); err != nil {
+		t.Fatalf("MakeFromStruct error: %v", err)
+	}
+
+	rules, err := parser.ParseRules(`
+		(p green-to-yellow
+		   <light> (trafficlight ^color green ^marked-for-remove-on-cycle { > 0 })
+		   -->
+		   (make trafficlight ^color yellow ^ttl "5s")
+		)
+
+		(p yellow-to-red
+		   <light> (trafficlight ^color yellow ^marked-for-remove-on-cycle { > 0 })
+		   -->
+		   (make trafficlight ^color red ^ttl "30s")
+		)
+
+		(p red-to-green
+		   <light> (trafficlight ^color red ^marked-for-remove-on-cycle { > 0 })
+		   -->
+		   (make trafficlight ^color green ^ttl "45s")
+		)
+	`)
+	if err != nil {
+		t.Fatalf("ParseRules error: %v", err)
+	}
+	for _, r := range rules {
+		tae.AddRule(r)
+	}
+
+	var jumps []time.Duration
+	tae.SetOnTimeJump(func(from time.Time, to time.Time, reason string) {
+		jumps = append(jumps, to.Sub(baseTime))
+	})
+
+	// Leap through states across 2 minutes (120 seconds) of simulated time
+	res, err := tae.SimRunUntil(120 * time.Second)
+	if err != nil {
+		t.Fatalf("SimRunUntil error: %v", err)
+	}
+
+	if res.EventsJumped != 3 {
+		t.Errorf("expected 3 jumps (45s, 50s, 80s), got %d (jumps: %v)", res.EventsJumped, jumps)
+	}
+	if res.Duration != 120*time.Second {
+		t.Errorf("expected duration 120s, got %v", res.Duration)
+	}
+	if res.WallTime > 500*time.Millisecond {
+		t.Errorf("expected simulation to finish in < 500ms wall time, got %v", res.WallTime)
+	}
+}
+
+func TestTimeAwareEngine_SimRun_Way2_ScheduleFactAfter(t *testing.T) {
+	tae := NewTimeAwareEngine()
+	tae.SetWatchLevel(0)
+
+	baseTime := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	tae.SetCurrentTime(baseTime.UnixMilli())
+
+	if _, err := tae.MakeFromStruct(Order{ID: 101, Status: "placed"}); err != nil {
+		t.Fatalf("MakeFromStruct error: %v", err)
+	}
+
+	rules, err := parser.ParseRules(`
+		(p process-order
+		   <o> (order ^id <id> ^status placed)
+		   -->
+		   (modify <o> ^status preparing)
+		)
+
+		(p fulfill-delivery
+		   <d> (delivery ^order-id <id>)
+		   <o> (order ^id <id> ^status preparing)
+		   -->
+		   (modify <o> ^status completed)
+		)
+	`)
+	if err != nil {
+		t.Fatalf("ParseRules error: %v", err)
+	}
+	for _, r := range rules {
+		tae.AddRule(r)
+	}
+
+	// Schedule delivery fact for 30 minutes in the future
+	if err := tae.ScheduleFactAfter("delivery", map[string]any{"order-id": 101}, 30*time.Minute); err != nil {
+		t.Fatalf("ScheduleFactAfter error: %v", err)
+	}
+
+	var jumpTarget time.Time
+	tae.SetOnTimeJump(func(from time.Time, to time.Time, reason string) {
+		jumpTarget = to
+	})
+
+	// Run to natural event exhaustion
+	res, err := tae.SimRun(time.Time{})
+	if err != nil {
+		t.Fatalf("SimRun error: %v", err)
+	}
+
+	if !res.Quiesced {
+		t.Errorf("expected natural quiescence")
+	}
+	if res.EventsJumped != 1 {
+		t.Errorf("expected 1 jump, got %d", res.EventsJumped)
+	}
+	if res.Duration != 30*time.Minute {
+		t.Errorf("expected duration 30m, got %v", res.Duration)
+	}
+	if jumpTarget != baseTime.Add(30*time.Minute) {
+		t.Errorf("expected jump target %v, got %v", baseTime.Add(30*time.Minute), jumpTarget)
+	}
+
+	// Verify order status is completed
+	orders := tae.FindWMEsMatching(model.NewPositiveCE("order"))
+	if len(orders) != 1 {
+		t.Fatalf("expected 1 order fact, got %d", len(orders))
+	}
+	status, _ := orders[0].Get("status")
+	if status.Raw().(string) != "completed" {
+		t.Errorf("expected status 'completed', got %v", status)
+	}
+}
+
+func TestTimeAwareEngine_SimRun_Way3_Schedule(t *testing.T) {
+	tae := NewTimeAwareEngine()
+	tae.SetWatchLevel(0)
+
+	// Wednesday 09:00am UTC
+	start := time.Date(2026, 10, 28, 9, 0, 0, 0, time.UTC)
+	tae.SetCurrentTime(start.UnixMilli())
+
+	// Daily maintenance window: 02:00am - 03:00am (1 hour duration)
+	if err := tae.Schedule("maintenance-window", "02:00am", "1h", true); err != nil {
+		t.Fatalf("Schedule error: %v", err)
+	}
+
+	maintenanceRuns := 0
+	rule := model.NewRule("run-maintenance")
+	rule.AddCondition(model.NewPositiveCE("maintenance-window").AddEqualTest("marked-for-remove-on-cycle", model.NewInt(0)))
+	rule.AddAction(model.CustomAction{
+		Name: "count-maintenance",
+		Execute: func(ctx any) error {
+			maintenanceRuns++
+			return nil
+		},
+	})
+	tae.AddRule(rule)
+
+	res, err := tae.SimRunUntil(48 * time.Hour)
+	if err != nil {
+		t.Fatalf("SimRunUntil error: %v", err)
+	}
+
+	if res.Duration != 48*time.Hour {
+		t.Errorf("expected 48 hours simulated duration, got %v", res.Duration)
+	}
+	if maintenanceRuns != 2 {
+		t.Errorf("expected 2 nightly maintenance runs across 48h, got %d", maintenanceRuns)
+	}
+	if res.WallTime > 500*time.Millisecond {
+		t.Errorf("expected 48h simulation to complete in < 500ms wall time, got %v", res.WallTime)
+	}
+}
+
+func TestTimeAwareEngine_SimRun_UntilBoundary(t *testing.T) {
+	tae := NewTimeAwareEngine()
+	baseTime := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	tae.SetCurrentTime(baseTime.UnixMilli())
+
+	// Schedule fact 10 minutes in future, but set until to 5 minutes
+	_ = tae.ScheduleFactAfter("ping", map[string]any{"seq": 1}, 10*time.Minute)
+
+	until := baseTime.Add(5 * time.Minute)
+	res, err := tae.SimRun(until)
+	if err != nil {
+		t.Fatalf("SimRun error: %v", err)
+	}
+
+	if res.EndTime != until {
+		t.Errorf("expected end time %v, got %v", until, res.EndTime)
+	}
+	if res.Duration != 5*time.Minute {
+		t.Errorf("expected duration 5m, got %v", res.Duration)
+	}
+	if res.Quiesced {
+		t.Errorf("expected Quiesced=false since future event at 10m is still pending")
+	}
+}
+

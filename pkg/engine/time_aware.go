@@ -38,6 +38,25 @@ type ScheduleDefinition struct {
 	LastFiredDate string // "YYYY-MM-DD"
 }
 
+// PendingFact represents a fact queued for future assertion in discrete-event simulation.
+type PendingFact struct {
+	Class    string
+	Attrs    map[string]model.Value
+	FireTime time.Time
+}
+
+// SimResult captures the metrics and outcomes of a discrete-event simulation run.
+type SimResult struct {
+	TotalCycles  int           // Total production rule firings executed
+	EventsJumped int           // Number of discrete time leaps performed
+	StartTime    time.Time     // Initial simulation clock timestamp
+	EndTime      time.Time     // Final simulation clock timestamp
+	Duration     time.Duration // Simulated elapsed duration (EndTime - StartTime)
+	WallTime     time.Duration // Physical CPU execution wall-clock time
+	Quiesced     bool          // True if event calendar was fully exhausted
+	Error        error         // Execution error if terminated prematurely
+}
+
 // TimeAwareEngine extends the core OPS5 Engine with temporal awareness,
 // system now/cycle/datetime WMEs, TTL fact expiration, and recurring event schedules.
 type TimeAwareEngine struct {
@@ -48,6 +67,8 @@ type TimeAwareEngine struct {
 	isSimulated            bool
 	schedules              map[string]*ScheduleDefinition
 	registeredCleanupRules map[string]bool
+	pendingFacts           []*PendingFact
+	onTimeJump             func(from time.Time, to time.Time, reason string)
 }
 
 // NewTimeAwareEngine instantiates a new TimeAwareEngine wrapping a freshly initialized Engine.
@@ -58,6 +79,7 @@ func NewTimeAwareEngine() *TimeAwareEngine {
 		clock:                  time.Now,
 		schedules:              make(map[string]*ScheduleDefinition),
 		registeredCleanupRules: make(map[string]bool),
+		pendingFacts:           make([]*PendingFact, 0),
 	}
 
 	// Register schemas for implicit system WMEs
@@ -470,8 +492,13 @@ func (tae *TimeAwareEngine) Run(maxCycles int) (int, error) {
 		markedVal, _ := wme.Get("marked-for-remove-on-cycle")
 
 		var ttl int64
-		if hasTTL && ttlVal.Type() == model.TypeInteger {
-			ttl = ttlVal.Raw().(int64)
+		if hasTTL {
+			if ttlVal.Type() == model.TypeInteger {
+				ttl = ttlVal.Raw().(int64)
+			} else if parsedTTL, err := model.ParseTTL(ttlVal, nowMs, loc); err == nil {
+				ttl = parsedTTL
+				wme.Attributes["ttl"] = model.NewInt(parsedTTL)
+			}
 		}
 		var marked int64
 		if markedVal.Type() == model.TypeInteger {
@@ -666,4 +693,240 @@ func (d *Daemon) SetOnTick(fn func(cycles int)) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.onTick = fn
+}
+
+// SetOnTimeJump registers an optional observer callback invoked whenever discrete-event simulation leaps in time.
+func (tae *TimeAwareEngine) SetOnTimeJump(fn func(from time.Time, to time.Time, reason string)) {
+	tae.mu.Lock()
+	defer tae.mu.Unlock()
+	tae.onTimeJump = fn
+}
+
+// ScheduleFactAt schedules a fact to be asserted into Working Memory at a future timestamp.
+func (tae *TimeAwareEngine) ScheduleFactAt(class string, attrs map[string]any, at time.Time) error {
+	tae.mu.Lock()
+	defer tae.mu.Unlock()
+
+	normClass := strings.ToLower(class)
+	if normClass == "" {
+		return fmt.Errorf("empty class name for scheduled fact")
+	}
+
+	converted := make(map[string]model.Value, len(attrs))
+	for k, v := range attrs {
+		val, err := model.ToValue(v)
+		if err != nil {
+			return fmt.Errorf("attribute %q: %w", k, err)
+		}
+		converted[strings.ToLower(k)] = val
+	}
+
+	tae.pendingFacts = append(tae.pendingFacts, &PendingFact{
+		Class:    normClass,
+		Attrs:    converted,
+		FireTime: at,
+	})
+	return nil
+}
+
+// ScheduleFactAfter schedules a fact to be asserted after a relative duration from the current simulated time.
+func (tae *TimeAwareEngine) ScheduleFactAfter(class string, attrs map[string]any, delay time.Duration) error {
+	if delay < 0 {
+		return fmt.Errorf("delay must be non-negative, got %v", delay)
+	}
+	currentTime := tae.CurrentTime()
+	return tae.ScheduleFactAt(class, attrs, currentTime.Add(delay))
+}
+
+// SimRun executes SimPy-style discrete-event simulation until time reaches 'until'.
+// If until is time.Time{} (zero), it runs until all future events are completely exhausted.
+func (tae *TimeAwareEngine) SimRun(until time.Time) (*SimResult, error) {
+	tae.mu.Lock()
+	if !tae.isSimulated {
+		tae.simulatedTime = tae.clock()
+		tae.isSimulated = true
+		tae.clock = func() time.Time {
+			return tae.simulatedTime
+		}
+	}
+	startTime := tae.simulatedTime
+	realStart := time.Now()
+	tae.mu.Unlock()
+
+	result := &SimResult{
+		StartTime: startTime,
+	}
+
+	for {
+		// 1. Quiesce at current time: run all active rules at this timestamp
+		cycles, err := tae.Run(0)
+		if err != nil {
+			result.Error = err
+			result.EndTime = tae.CurrentTime()
+			result.Duration = result.EndTime.Sub(startTime)
+			result.WallTime = time.Since(realStart)
+			return result, err
+		}
+		result.TotalCycles += cycles
+
+		// 2. Find next discrete event timestamp
+		tae.mu.Lock()
+		currTime := tae.simulatedTime
+		nextTime, reason, hasNext := tae.findNextEventLocked(currTime)
+
+		if !hasNext {
+			// No future events: simulation natural quiescence!
+			tae.mu.Unlock()
+			result.Quiesced = true
+			break
+		}
+
+		// 3. Check 'until' boundary
+		if !until.IsZero() && nextTime.After(until) {
+			// Next event is after until. Jump to until, do final sync, and stop.
+			tae.simulatedTime = until
+			tae.syncNowAndDatetimeLocked(until)
+			tae.mu.Unlock()
+			break
+		}
+
+		// 4. Perform the discrete time leap!
+		jumpFrom := currTime
+		tae.simulatedTime = nextTime
+		hook := tae.onTimeJump
+		tae.mu.Unlock()
+
+		if hook != nil {
+			hook(jumpFrom, nextTime, reason)
+		}
+		result.EventsJumped++
+
+		// 5. Materialize any pending facts scheduled for <= nextTime
+		tae.mu.Lock()
+		var remainingPending []*PendingFact
+		for _, pf := range tae.pendingFacts {
+			if !pf.FireTime.After(nextTime) {
+				tae.Engine.Make(pf.Class, pf.Attrs)
+			} else {
+				remainingPending = append(remainingPending, pf)
+			}
+		}
+		tae.pendingFacts = remainingPending
+		tae.mu.Unlock()
+	}
+
+	result.EndTime = tae.CurrentTime()
+	result.Duration = result.EndTime.Sub(startTime)
+	result.WallTime = time.Since(realStart)
+	return result, nil
+}
+
+// SimRunUntil is a convenience wrapper that runs SimRun until now + duration.
+func (tae *TimeAwareEngine) SimRunUntil(duration time.Duration) (*SimResult, error) {
+	if duration <= 0 {
+		return nil, fmt.Errorf("duration must be positive, got %v", duration)
+	}
+	targetTime := tae.CurrentTime().Add(duration)
+	return tae.SimRun(targetTime)
+}
+
+func (tae *TimeAwareEngine) findNextEventLocked(currTime time.Time) (time.Time, string, bool) {
+	currMs := currTime.UnixMilli()
+	loc := currTime.Location()
+
+	var earliest time.Time
+	var reason string
+	found := false
+
+	updateEarliest := func(t time.Time, r string) {
+		if !found || t.Before(earliest) {
+			earliest = t
+			reason = r
+			found = true
+		}
+	}
+
+	// 1. Scan active WMEs for earliest future TTL
+	for _, wme := range tae.WorkingMemory().All() {
+		c := strings.ToLower(wme.Class)
+		if c == "now" || c == "cycle" || c == "datetime" {
+			continue
+		}
+		ttlVal, hasTTL := wme.Get("ttl")
+		markedVal, hasMarked := wme.Get("marked-for-remove-on-cycle")
+
+		var ttl int64
+		if hasTTL {
+			if ttlVal.Type() == model.TypeInteger {
+				ttl = ttlVal.Raw().(int64)
+			} else if parsedTTL, err := model.ParseTTL(ttlVal, currMs, loc); err == nil {
+				ttl = parsedTTL
+				wme.Attributes["ttl"] = model.NewInt(parsedTTL)
+			}
+		}
+		var marked int64
+		if hasMarked && markedVal.Type() == model.TypeInteger {
+			marked = markedVal.Raw().(int64)
+		}
+
+		if ttl > currMs && marked == 0 {
+			updateEarliest(time.UnixMilli(ttl).In(loc), fmt.Sprintf("WME #%d (%s) TTL expiration", wme.Timetag, wme.Class))
+		}
+	}
+
+	// 2. Scan pending scheduled facts
+	for _, pf := range tae.pendingFacts {
+		if pf.FireTime.After(currTime) {
+			updateEarliest(pf.FireTime, fmt.Sprintf("Pending fact (%s) assertion", pf.Class))
+		}
+	}
+
+	// 3. Scan recurring schedules
+	for _, sched := range tae.schedules {
+		nextStart, nextEnd, err := tae.nextScheduleTimesLocked(sched, currTime)
+		if err == nil {
+			if nextStart.After(currTime) {
+				updateEarliest(nextStart, fmt.Sprintf("Schedule (%s) window start", sched.Class))
+			}
+			if nextEnd.After(currTime) && !nextEnd.Before(nextStart) {
+				if currTime.Equal(nextStart) || currTime.After(nextStart) {
+					updateEarliest(nextEnd, fmt.Sprintf("Schedule (%s) window end", sched.Class))
+				}
+			}
+		}
+	}
+
+	return earliest, reason, found
+}
+
+func (tae *TimeAwareEngine) nextScheduleTimesLocked(sched *ScheduleDefinition, currTime time.Time) (time.Time, time.Time, error) {
+	loc := currTime.Location()
+	todayBase := time.Date(currTime.Year(), currTime.Month(), currTime.Day(), 0, 0, 0, 0, loc)
+
+	startTimeToday, err := model.ParseWallClock(sched.StartTime, todayBase, loc)
+	if err != nil {
+		return time.Time{}, time.Time{}, err
+	}
+
+	var endTimeToday time.Time
+	if sched.IsDuration {
+		dur, err := model.ParseDuration(sched.DurationOrEnd)
+		if err != nil {
+			return time.Time{}, time.Time{}, err
+		}
+		endTimeToday = startTimeToday.Add(dur)
+	} else {
+		endTimeToday, err = model.ParseWallClock(sched.DurationOrEnd, startTimeToday, loc)
+		if err != nil {
+			return time.Time{}, time.Time{}, err
+		}
+	}
+
+	if currTime.Before(endTimeToday) {
+		return startTimeToday, endTimeToday, nil
+	}
+
+	startTimeTomorrow := startTimeToday.AddDate(0, 0, 1)
+	endTimeTomorrow := endTimeToday.AddDate(0, 0, 1)
+	return startTimeTomorrow, endTimeTomorrow, nil
 }

@@ -287,3 +287,158 @@ func ExampleTimeAwareEngine_RunSimulated() {
 	// Counter: 3
 }
 
+// TrafficSignal models a traffic light state machine fact
+type TrafficSignal struct {
+	Color string `ops5:",symbol"`
+	TTL   string
+}
+
+// WorkflowOrder models a workflow order fact
+type WorkflowOrder struct {
+	ID     int
+	Status string `ops5:",symbol"`
+}
+
+// ExampleTimeAwareEngine_SimRun_Way1_TTL demonstrates SimPy-style discrete-event time leaps
+// driven by WME TTL expirations in a traffic light state machine.
+func ExampleTimeAwareEngine_SimRun_Way1_TTL() {
+	tae := engine.NewTimeAwareEngine()
+	tae.SetWatchLevel(0)
+
+	baseTime := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	tae.SetCurrentTime(baseTime.UnixMilli())
+
+	if _, err := tae.MakeFromStruct(TrafficSignal{Color: "green", TTL: "45s"}); err != nil {
+		panic(err)
+	}
+
+	rules, err := parser.ParseRules(`
+		(p green-to-yellow
+		   <light> (trafficsignal ^color green ^marked-for-remove-on-cycle { > 0 })
+		   -->
+		   (make trafficsignal ^color yellow ^ttl "5s")
+		   (write "Signal transitioned to YELLOW" (crlf))
+		)
+
+		(p yellow-to-red
+		   <light> (trafficsignal ^color yellow ^marked-for-remove-on-cycle { > 0 })
+		   -->
+		   (make trafficsignal ^color red ^ttl "30s")
+		   (write "Signal transitioned to RED" (crlf))
+		)
+	`)
+	if err != nil {
+		panic(err)
+	}
+	for _, r := range rules {
+		tae.AddRule(r)
+	}
+
+	// Run discrete-event simulation across 60 seconds
+	res, err := tae.SimRunUntil(60 * time.Second)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("Events jumped: %d. Simulated duration: %v\n", res.EventsJumped, res.Duration)
+
+	// Output:
+	// Signal transitioned to YELLOW
+	// Signal transitioned to RED
+	// Events jumped: 2. Simulated duration: 1m0s
+}
+
+// ExampleTimeAwareEngine_SimRun_Way2_ScheduleFactAfter demonstrates scheduling future fact
+// arrivals in discrete-event simulation (e.g. order delivery workflow).
+func ExampleTimeAwareEngine_SimRun_Way2_ScheduleFactAfter() {
+	tae := engine.NewTimeAwareEngine()
+	tae.SetWatchLevel(0)
+
+	baseTime := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	tae.SetCurrentTime(baseTime.UnixMilli())
+
+	if _, err := tae.MakeFromStruct(WorkflowOrder{ID: 101, Status: "placed"}); err != nil {
+		panic(err)
+	}
+
+	rules, err := parser.ParseRules(`
+		(p process-order
+		   <o> (workfloworder ^id <id> ^status placed)
+		   -->
+		   (modify <o> ^status preparing)
+		   (write "Order " <id> " preparing." (crlf))
+		)
+
+		(p fulfill-delivery
+		   <d> (delivery ^order-id <id>)
+		   <o> (workfloworder ^id <id> ^status preparing)
+		   -->
+		   (modify <o> ^status completed)
+		   (write "Delivery arrived for order " <id> "! Order completed." (crlf))
+		)
+	`)
+	if err != nil {
+		panic(err)
+	}
+	for _, r := range rules {
+		tae.AddRule(r)
+	}
+
+	// Schedule delivery fact for 30 minutes in the future
+	if err := tae.ScheduleFactAfter("delivery", map[string]any{"order-id": 101}, 30*time.Minute); err != nil {
+		panic(err)
+	}
+
+	// Run until event queue is exhausted
+	res, err := tae.SimRun(time.Time{})
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("Events jumped: %d. Simulated duration: %v\n", res.EventsJumped, res.Duration)
+
+	// Output:
+	// Order  101  preparing.
+	// Delivery arrived for order  101 ! Order completed.
+	// Events jumped: 1. Simulated duration: 30m0s
+}
+
+// ExampleTimeAwareEngine_SimRun_Way3_Schedule demonstrates multi-hour calendar leaps
+// across daily recurring schedules.
+func ExampleTimeAwareEngine_SimRun_Way3_Schedule() {
+	tae := engine.NewTimeAwareEngine()
+	tae.SetWatchLevel(0)
+
+	// Wednesday 09:00am UTC
+	start := time.Date(2026, 10, 28, 9, 0, 0, 0, time.UTC)
+	tae.SetCurrentTime(start.UnixMilli())
+
+	// Daily maintenance window: 02:00am - 03:00am
+	if err := tae.Schedule("maintenance-window", "02:00am", "1h", true); err != nil {
+		panic(err)
+	}
+
+	rules, err := parser.ParseRules(`
+		(p run-nightly-maintenance
+		   (datetime ^dow <day>)
+		   (maintenance-window ^marked-for-remove-on-cycle 0)
+		   -->
+		   (write "Running maintenance on " <day> (crlf))
+		)
+	`)
+	if err != nil {
+		panic(err)
+	}
+	tae.AddRule(rules[0])
+
+	// Leap across 48 hours of calendar time (jumping 17h, 1h, 23h, 1h in microseconds)
+	res, err := tae.SimRunUntil(48 * time.Hour)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("Events jumped: %d. Simulated duration: %v\n", res.EventsJumped, res.Duration)
+
+	// Output:
+	// Running maintenance on  thursday
+	// Running maintenance on  friday
+	// Events jumped: 4. Simulated duration: 48h0m0s
+}
+
